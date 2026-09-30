@@ -1,0 +1,28 @@
+@import '@fontsource-variable/manrope';
+@import '@fontsource-variable/sora';
+
+:root {
+  font-family: 'Manrope Variable', sans-serif;
+  color: #101948;
+  background: #ffffff;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  --navy: #081446;
+  --blue: #07529a;
+  --blue-dark: #073b72;
+  --sky: #eaf6ff;
+  --muted: #68728c;
+  --line: #dce8f5;
+  --gold: #f4b523;
+  --green: #14bc78;
+  --violet: #7859e8;
+}
+
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+body { margin: 0; min-width: 320px; min-height: 100vh; }
+button, input { font: inherit; }
+button, a { -webkit-tap-highlight-color: transparent; }
+a { color: inherit; }
+#root { min-height: 100vh; }

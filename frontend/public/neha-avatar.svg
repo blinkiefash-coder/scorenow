@@ -1,0 +1,35 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 160" role="img" aria-labelledby="title desc">
+  <title id="title">Neha, Score Now credit assistant</title>
+  <desc id="desc">Friendly cartoon support agent wearing a blue headset</desc>
+  <defs>
+    <linearGradient id="background" x1="22" y1="12" x2="138" y2="150" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#e6f5ff"/>
+      <stop offset="1" stop-color="#fff0c9"/>
+    </linearGradient>
+    <linearGradient id="shirt" x1="80" y1="105" x2="80" y2="160" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#1487f6"/>
+      <stop offset="1" stop-color="#0755c7"/>
+    </linearGradient>
+  </defs>
+  <circle cx="80" cy="80" r="78" fill="url(#background)"/>
+  <circle cx="80" cy="80" r="75" fill="none" stroke="#fff" stroke-width="4"/>
+  <path fill="url(#shirt)" d="M31 160c2-29 19-45 49-45s47 16 49 45z"/>
+  <path fill="#08295f" d="M43 69c0-31 15-49 39-49 26 0 41 18 39 51l-8 24H49z"/>
+  <path fill="#f2b88e" d="M64 105h32v25c-9 8-23 8-32 0z"/>
+  <path fill="#ffd3ad" d="M52 61c0-22 12-34 29-34 19 0 30 13 30 36v18c0 23-14 39-30 39-17 0-29-16-29-39z"/>
+  <path fill="#08295f" d="M50 65c2-27 13-40 34-40 17 0 27 9 30 27-12-1-23-7-31-16-7 14-18 23-33 29z"/>
+  <path fill="#fff" d="M60 76c4-4 11-4 15 0-4 6-11 6-15 0zm27 0c4-4 11-4 15 0-4 6-11 6-15 0z"/>
+  <circle cx="69" cy="76" r="2.7" fill="#102653"/>
+  <circle cx="96" cy="76" r="2.7" fill="#102653"/>
+  <path d="M73 95c6 5 13 5 19 0" fill="none" stroke="#b85d57" stroke-width="3.2" stroke-linecap="round"/>
+  <path d="M82 79l-3 9h7" fill="none" stroke="#d58c6f" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M48 80V69c0-20 14-37 33-37s34 17 34 37v11" fill="none" stroke="#087af5" stroke-width="7" stroke-linecap="round"/>
+  <rect x="43" y="72" width="12" height="23" rx="6" fill="#0755c7"/>
+  <rect x="108" y="72" width="12" height="23" rx="6" fill="#0755c7"/>
+  <path d="M114 92c0 11-7 17-19 17" fill="none" stroke="#0755c7" stroke-width="4" stroke-linecap="round"/>
+  <rect x="88" y="105" width="11" height="6" rx="3" fill="#f4b523"/>
+  <path fill="#fff" d="M73 124l7 8 7-8 7 36H66z" opacity=".95"/>
+  <path d="M59 130c10 7 32 7 42 0" fill="none" stroke="#f4b523" stroke-width="3" stroke-linecap="round"/>
+  <circle cx="129" cy="31" r="16" fill="#fff"/>
+  <path d="M121 31l5 5 10-12" fill="none" stroke="#14bc78" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

@@ -1,0 +1,13 @@
+{
+  "name": "scorenow",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "concurrently --names frontend,backend --prefix-colors cyan,yellow \"npm --prefix frontend run dev\" \"npm --prefix backend run dev\"",
+    "build": "npm --prefix frontend run build && npm --prefix backend run build",
+    "lint": "npm --prefix frontend run lint && npm --prefix backend run typecheck"
+  },
+  "devDependencies": {
+    "concurrently": "^9.2.1"
+  }
+}
