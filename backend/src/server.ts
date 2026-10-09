@@ -4,6 +4,7 @@ import express from "express";
 import multer from "multer";
 import nodemailer from "nodemailer";
 import path from "node:path";
+import { initializeDatabase, saveAssessment, saveWebsiteInquiry } from "./database.js";
 
 const app = express();
 const port = Number(process.env.PORT) || 3000;
@@ -64,6 +65,34 @@ app.get("/api/health", (_request, response) => {
   response.json({ status: "ok", service: "Score Now API" });
 });
 
+app.post("/api/inquiries", async (request, response) => {
+  const fullName = String(request.body.fullName || "").trim();
+  const mobile = String(request.body.mobile || "").replace(/\D/g, "");
+  const concern = String(request.body.concern || "").trim();
+  const scoreRange = String(request.body.scoreRange || "").trim();
+
+  if (fullName.length < 2 || fullName.length > 120) {
+    response.status(400).json({ message: "Enter your name to request a callback." });
+    return;
+  }
+  if (mobile.length !== 10) {
+    response.status(400).json({ message: "Enter a valid 10-digit mobile number." });
+    return;
+  }
+  if (!concern || concern.length > 300 || !scoreRange || scoreRange.length > 100) {
+    response.status(400).json({ message: "Please complete the inquiry before requesting a callback." });
+    return;
+  }
+
+  try {
+    await saveWebsiteInquiry({ fullName, mobile, concern, scoreRange });
+    response.status(201).json({ message: "Your callback request was saved." });
+  } catch (error) {
+    console.error("Website inquiry database save failed", error);
+    response.status(503).json({ message: "We could not save your callback request. Please contact us on WhatsApp instead." });
+  }
+});
+
 app.post("/api/assessments", upload.single("report"), async (request, response) => {
   const assessmentType = request.body.assessmentType === "business" ? "business" : "individual";
   const requiredFields = assessmentType === "business"
@@ -83,23 +112,42 @@ app.post("/api/assessments", upload.single("report"), async (request, response) 
     return;
   }
 
-  const transport = createMailTransport();
-  if (!transport) {
-    response.status(503).json({ message: "Email delivery is not configured yet. Please contact us by WhatsApp or phone." });
-    return;
-  }
-
   const fields = assessmentType === "business"
     ? ["businessName", "fullName", "mobile", "email", "businessType", "cmr", "funding"]
     : ["fullName", "mobile", "email", "city", "score", "goal"];
+  const formData = Object.fromEntries(fields.map((field) => [
+    field,
+    String(request.body[field] || "").trim(),
+  ]));
   const rows = fields.map((field) => ({
     label: fieldLabels[field],
-    value: String(request.body[field] || "Not provided").trim(),
+    value: formData[field] || "Not provided",
   }));
   const title = assessmentType === "business" ? "Business CMR Assessment" : "Personal Credit Assessment";
-  const subjectName = assessmentType === "business" ? request.body.businessName : request.body.fullName;
+  const subjectName = assessmentType === "business" ? formData.businessName : formData.fullName;
   const text = [`New ${title}`, "", ...rows.map(({ label, value }) => `${label}: ${value}`), "", `Report attached: ${request.file ? "Yes" : "No"}`].join("\n");
   const htmlRows = rows.map(({ label, value }) => `<tr><td style="padding:10px 12px;color:#65708a;border-bottom:1px solid #e5edf6">${escapeHtml(label)}</td><td style="padding:10px 12px;color:#081446;font-weight:700;border-bottom:1px solid #e5edf6">${escapeHtml(value)}</td></tr>`).join("");
+
+  try {
+    await saveAssessment({
+      assessmentType,
+      fields: formData,
+      report: request.file,
+    });
+  } catch (error) {
+    console.error("Assessment database save failed", error);
+    response.status(503).json({ message: "We could not save your assessment. Please try again or contact us on WhatsApp." });
+    return;
+  }
+
+  const transport = createMailTransport();
+  if (!transport) {
+    response.status(201).json({
+      message: "Your assessment was saved securely. Our team will contact you shortly.",
+      emailSent: false,
+    });
+    return;
+  }
 
   try {
     const result = await transport.sendMail({
@@ -115,10 +163,17 @@ app.post("/api/assessments", upload.single("report"), async (request, response) 
         contentType: request.file.mimetype,
       }] : [],
     });
-    response.status(201).json({ message: "Assessment sent successfully.", messageId: result.messageId });
+    response.status(201).json({
+      message: "Your assessment was saved and sent to our team. We will contact you shortly.",
+      emailSent: true,
+      messageId: result.messageId,
+    });
   } catch (error) {
     console.error("Assessment email failed", error);
-    response.status(502).json({ message: "We could not send your assessment. Please try again or contact us on WhatsApp." });
+    response.status(201).json({
+      message: "Your assessment was saved successfully. Our team will contact you shortly.",
+      emailSent: false,
+    });
   }
 });
 
@@ -130,6 +185,16 @@ app.use((error: Error, _request: express.Request, response: express.Response, _n
   response.status(400).json({ message: error.message || "Invalid assessment submission." });
 });
 
-app.listen(port, () => {
-  console.log(`Score Now API is running at http://localhost:${port}`);
-});
+const startServer = async () => {
+  try {
+    await initializeDatabase();
+    app.listen(port, () => {
+      console.log(`Score Now API is running at http://localhost:${port}`);
+    });
+  } catch (error) {
+    console.error("Database initialization failed", error);
+    process.exitCode = 1;
+  }
+};
+
+void startServer();

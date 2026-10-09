@@ -14,7 +14,8 @@
     "dotenv": "^17.2.3",
     "express": "^5.1.0",
     "multer": "^2.4.0",
-    "nodemailer": "^10.0.12"
+    "nodemailer": "^10.0.12",
+    "pg": "^8.23.1"
   },
   "devDependencies": {
     "@types/cors": "^2.8.19",
@@ -22,6 +23,7 @@
     "@types/multer": "^2.2.0",
     "@types/node": "^24.10.1",
     "@types/nodemailer": "^8.0.2",
+    "@types/pg": "^8.23.1",
     "tsx": "^4.20.6",
     "typescript": "~5.9.3"
   }

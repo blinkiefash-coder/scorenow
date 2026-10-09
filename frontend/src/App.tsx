@@ -3,8 +3,8 @@ import {
   ArrowLeft, ArrowRight, BadgeIndianRupee, BarChart3, Building2, CalendarDays,
   Check, ChevronDown, CircleHelp, Clock3, CreditCard, FileCheck2,
   FileSearch, Handshake, Headphones, House, Lightbulb, LockKeyhole,
-  Mail, Menu, MessageCircle, Pause, Phone, Play, RotateCcw, Search,
-  ShieldCheck, Sparkles, Star, TrendingUp, Users, Volume2, VolumeX,
+  Mail, MapPin, Menu, MessageCircle, Pause, Phone, Play, RotateCcw, Search,
+  ShieldCheck, Smartphone, Sparkles, Star, TrendingUp, Users, Volume2, VolumeX,
   UserRound, WalletCards, X, Zap,
 } from 'lucide-react'
 import './App.css'
@@ -85,6 +85,18 @@ const planCapabilities = [
   { icon: Headphones, title: 'Expert Consultation', text: 'One-to-one explanations and guidance from a credit support specialist.' },
   { icon: BarChart3, title: 'Progress Tracking', text: 'Review important credit factors and monitor changes during the engagement.' },
   { icon: ShieldCheck, title: 'Dedicated Support', text: 'Responsive help through the support channels included in your selected plan.' },
+]
+
+const subscriptionSteps = [
+  { icon: FileSearch, title: 'Choose a plan', text: 'Compare the plan options and select the support level that fits your needs.' },
+  { icon: CircleHelp, title: 'Confirm your scope', text: 'Our team reviews your profile and confirms the final service scope and pricing.' },
+  { icon: Headphones, title: 'Start your subscription', text: 'Once confirmed, your support period begins with the agreed plan and guidance.' },
+]
+
+const subscriptionPlans = [
+  { name: 'Monthly', duration: '1 month', price: '₹99', note: 'Flexible monthly access' },
+  { name: '6 Months', duration: '6 months', price: '₹499', note: 'Best for steady progress', featured: true },
+  { name: '12 Months', duration: '12 months', price: '₹999', note: 'Best long-term value' },
 ]
 
 const explainerScenes = [
@@ -226,8 +238,21 @@ function ImpactStats() {
 function Brand({ href = '#home' }: { href?: string }) {
   return (
     <a className="brand" href={href} aria-label="Score Now home">
-      <img src="/scorenow-logo.png" alt="Score Now - Improve Your Credit Score" />
+      <img src="/scorenow-logo-hd.png" alt="Score Now - Improve Your Credit Score" />
     </a>
+  )
+}
+
+function AppDownload() {
+  return (
+    <div className="app-download">
+      <strong>Score Now on mobile</strong>
+      <small>Apps coming soon</small>
+      <div className="store-badges" aria-label="Score Now mobile apps coming soon">
+        <span className="store-badge"><Smartphone /><span><small>Coming soon on the</small><b>App Store</b></span></span>
+        <span className="store-badge"><Play /><span><small>Coming soon on</small><b>Google Play</b></span></span>
+      </div>
+    </div>
   )
 }
 
@@ -273,7 +298,7 @@ function AssessmentForm({ business = false }: { business?: boolean }) {
       const result = await response.json() as { message?: string }
       if (!response.ok) throw new Error(result.message || 'Unable to send the assessment.')
       setSubmitStatus('success')
-      setSubmitMessage('Your assessment has been emailed to our team. We will contact you shortly.')
+      setSubmitMessage(result.message || 'Your assessment was saved successfully. We will contact you shortly.')
       form.reset()
       setFileName('')
     } catch (error) {
@@ -308,7 +333,7 @@ function AssessmentForm({ business = false }: { business?: boolean }) {
           </>}
           <label className="file-field field-wide"><span>Upload credit report (optional)</span><input name="report" type="file" accept=".pdf,.jpg,.jpeg,.png" onChange={(event) => { const file = event.target.files?.[0]; if (file && file.size > 10 * 1024 * 1024) { event.target.value = ''; setFileName(''); setFileError('The selected file exceeds 10 MB.'); return } setFileError(''); setFileName(file?.name || '') }} /><span className="file-control"><FileCheck2 />{fileName || 'Choose PDF, JPG, or PNG (max 10 MB)'}</span></label>
           {fileError && <p className="file-error field-wide">{fileError}</p>}
-          <p className="attachment-note field-wide"><Mail /> Your details and optional report will be securely emailed to info@scorenow.in.</p>
+          <p className="attachment-note field-wide"><Mail /> Your details and optional report are saved securely for our team to review.</p>
           {submitMessage && <p className={`submit-message ${submitStatus} field-wide`} role="status">{submitMessage}</p>}
           <button className="button button-primary field-wide" type="submit" disabled={submitStatus === 'sending'}>{submitStatus === 'sending' ? 'Sending Assessment…' : 'Send Assessment Securely'} <ArrowRight /></button>
         </form>
@@ -362,6 +387,16 @@ function PlansSection() {
           const message = encodeURIComponent(`Hello Score Now, I am interested in the ${plan.name} plan. Please share the recommended scope and pricing for my credit profile.`)
           return <article className={plan.featured ? 'featured' : ''} key={plan.name}>{plan.featured && <span className="popular-label"><Star /> Most Popular</span>}<span className="discount-badge">35% OFF</span><p>Best for</p><h3>{plan.name}</h3><span className="plan-audience">{plan.audience}</span><ul>{plan.features.map((feature) => <li key={feature}><Check />{feature}</li>)}</ul><div className="plan-footer"><small>{plan.duration}</small><span className="original-price">{plan.originalPrice} + GST</span><strong>{plan.offerPrice} <small>+ GST</small></strong><a className="button button-primary" href={`https://wa.me/919114141011?text=${message}`} target="_blank" rel="noreferrer">Choose {plan.name}<ArrowRight /></a></div></article>
         })}
+      </div>
+      <div className="container subscription-panel" id="subscription">
+        <div className="subscription-heading"><p className="section-kicker">Subscription</p><h3>A plan is an option. A subscription is your <span>active support engagement.</span></h3><p>Selecting a plan does not start a subscription. We confirm your scope, pricing, and start date with you first.</p></div>
+        <div className="subscription-pricing" aria-label="Score Now subscription plans">
+          {subscriptionPlans.map((plan) => <article className={plan.featured ? 'featured' : ''} key={plan.name}>{plan.featured && <span className="subscription-popular">Most Popular</span>}<small>{plan.duration}</small><h4>{plan.name}</h4><strong>{plan.price}</strong><span>{plan.note}</span><a className="button button-primary" href={`https://wa.me/919114141011?text=${encodeURIComponent(`Hello Score Now, I would like to subscribe to the ${plan.name} plan for ${plan.price}. Please share the next steps.`)}`} target="_blank" rel="noreferrer"><MessageCircle /> Subscribe</a></article>)}
+        </div>
+        <div className="subscription-steps">
+          {subscriptionSteps.map((step, index) => { const Icon = step.icon; return <article key={step.title}><span><Icon /></span><small>Step {index + 1}</small><strong>{step.title}</strong><p>{step.text}</p></article> })}
+        </div>
+        <a className="button button-primary subscription-cta" href={`https://wa.me/919114141011?text=${encodeURIComponent('Hello Score Now, I would like to start a subscription. Please help me choose a plan and confirm the scope, pricing, and start date.')}`} target="_blank" rel="noreferrer"><MessageCircle /> Start a subscription <ArrowRight /></a>
       </div>
       <p className="plans-note container"><ShieldCheck /> No score outcome is guaranteed. Recommendations depend on your report, repayment behaviour, and bureau updates.</p>
       <div className="container inclusions-heading"><p className="section-kicker">Included Support</p><h3>What Our Plans Can Include</h3><p>Service tenure and included support vary by selected plan.</p></div>
@@ -663,6 +698,7 @@ function ChatAssistant() {
   const [scoreRange, setScoreRange] = useState('')
   const [phone, setPhone] = useState('')
   const [phoneError, setPhoneError] = useState('')
+  const [isSavingInquiry, setIsSavingInquiry] = useState(false)
   const chatBodyRef = useRef<HTMLDivElement>(null)
 
   const suggestion = getChatSuggestion(concern, scoreRange)
@@ -679,14 +715,28 @@ function ChatAssistant() {
     setStep(2)
   }
 
-  const submitPhone = (event: FormEvent) => {
+  const submitPhone = async (event: FormEvent) => {
     event.preventDefault()
     if (phoneDigits.length !== 10) {
       setPhoneError('Enter a valid 10-digit mobile number.')
       return
     }
     setPhoneError('')
-    setStep(4)
+    setIsSavingInquiry(true)
+    try {
+      const response = await fetch(`${apiUrl}/api/inquiries`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ fullName: name, mobile: phoneDigits, concern, scoreRange }),
+      })
+      const result = await response.json() as { message?: string }
+      if (!response.ok) throw new Error(result.message || 'Unable to save your callback request.')
+      setStep(4)
+    } catch (error) {
+      setPhoneError(error instanceof Error ? error.message : 'Unable to save your callback request. Please try again.')
+    } finally {
+      setIsSavingInquiry(false)
+    }
   }
 
   const resetChat = () => {
@@ -748,9 +798,9 @@ function ChatAssistant() {
                 <div className="chat-bubble bot-message">Would you like an expert to follow up? Share your mobile number, or continue directly on WhatsApp.</div>
                 <label><span>Mobile number</span><div className="phone-input"><b>+91</b><input inputMode="numeric" value={phone} onChange={(event) => setPhone(event.target.value.replace(/\D/g, '').slice(0, 10))} placeholder="10-digit number" autoComplete="tel-national" /></div></label>
                 {phoneError && <p className="chat-error">{phoneError}</p>}
-                <button type="submit">Continue with number <ArrowRight /></button>
+                <button type="submit" disabled={isSavingInquiry}>{isSavingInquiry ? 'Saving request…' : 'Request a callback'} <ArrowRight /></button>
                 <a className="chat-whatsapp" href={`https://wa.me/919114141011?text=${whatsappMessage}`} target="_blank" rel="noreferrer"><MessageCircle /> Continue on WhatsApp</a>
-                <small className="chat-privacy"><ShieldCheck /> Your details stay in this chat unless you choose to contact us.</small>
+                <small className="chat-privacy"><ShieldCheck /> Requesting a callback saves your name, number, and credit concern so our team can follow up.</small>
               </form>
             )}
 
@@ -812,6 +862,7 @@ function HomePage() {
             <a href="#insights" onClick={closeMenu}>Credit Score</a>
             <a href="#services" onClick={closeMenu}>Services <ChevronDown /></a>
             <a href="#plans" onClick={closeMenu}>Plans</a>
+            <a href="#subscription" onClick={closeMenu}>Subscription</a>
             <a href="/business" onClick={closeMenu}>For Businesses</a>
             <a href="#about" onClick={closeMenu}>About Us</a>
             <a href="#contact" onClick={closeMenu}>Contact</a>
@@ -935,6 +986,24 @@ function HomePage() {
           </div>
         </section>
 
+        <section className="partner-opportunity section reveal-section" id="partner-opportunity" data-reveal>
+          <div className="container">
+            <div className="partner-opportunity-heading">
+              <p className="section-kicker">Grow with Score Now</p>
+              <h2>Want to become our <span>partner?</span></h2>
+              <p>Bring credit guidance closer to people in your city. Talk with us about a franchise-style partnership and how we could work together in your area.</p>
+            </div>
+            <div className="partner-opportunity-grid">
+              <article><span><MapPin /></span><h3>Make it local</h3><p>Build relationships and connect with customers in your community.</p></article>
+              <article><span><Users /></span><h3>Help more people</h3><p>Introduce individuals and businesses to practical credit support.</p></article>
+              <article><span><Handshake /></span><h3>Explore partnership</h3><p>Discuss the opportunity, local fit, and possible next steps with our team.</p></article>
+            </div>
+            <a className="button button-primary partner-opportunity-cta" href={`https://wa.me/919114141011?text=${encodeURIComponent('Hello Score Now, I am interested in becoming a partner in my city. Please share more about the franchise-style partnership opportunity.')}`} target="_blank" rel="noreferrer">
+              <MessageCircle /> Discuss a Partnership <ArrowRight />
+            </a>
+          </div>
+        </section>
+
         <section className="cta-section reveal-section" id="contact" data-reveal>
           <div className="container cta-inner">
             <div className="contact-copy"><p className="section-kicker">Contact Us</p><h2>Talk to a Score Now expert</h2><p>Choose the contact method that works best for you. Our team will help you understand the next steps.</p></div>
@@ -948,7 +1017,7 @@ function HomePage() {
       </main>
 
       <footer>
-        <div className="container footer-grid"><div><Brand /><p>Clear guidance for a stronger financial future.</p></div><div><strong>Company</strong><a href="#about">About Us</a><a href="#contact">Contact</a></div><div><strong>Services</strong><a href="#insights">Credit Report</a><a href="#services">Score Improvement</a></div><div><strong>Reach Us</strong><a href="tel:+919114141011">+91 91141 41011</a><a href="mailto:info@scorenow.in">info@scorenow.in</a></div></div>
+        <div className="container footer-grid"><div><Brand /><p>Clear guidance for a stronger financial future.</p></div><div><strong>Company</strong><a href="#about">About Us</a><a href="#partner-opportunity">Partner with us</a><a href="#contact">Contact</a></div><div><strong>Services</strong><a href="#insights">Credit Report</a><a href="#services">Score Improvement</a></div><div><strong>Reach Us</strong><a href="tel:+919114141011">+91 91141 41011</a><a href="mailto:info@scorenow.in">info@scorenow.in</a></div><AppDownload /></div>
         <div className="container footer-bottom"><span>© 2026 Score Now. All rights reserved.</span><span>Privacy Policy · Terms of Use</span></div>
       </footer>
       <ChatAssistant />
@@ -994,7 +1063,7 @@ function BusinessPage() {
           <div className="container"><p className="section-kicker">Why Score Now</p><h2>Practical Support for <span>Commercial Credit</span></h2><div className="confidence-grid"><div><ShieldCheck /><strong>Privacy first</strong><span>Business and report details are handled carefully.</span></div><div><FileSearch /><strong>Thorough review</strong><span>We examine payment behaviour, exposure, and trade lines.</span></div><div><Users /><strong>Human guidance</strong><span>Understand each issue with clear expert support.</span></div><div><TrendingUp /><strong>Actionable roadmap</strong><span>Prioritised next steps aligned to funding readiness.</span></div></div></div>
         </section>
       </main>
-      <footer><div className="container footer-grid"><div><Brand href="/" /><p>Clear guidance for a stronger financial future.</p></div><div><strong>Explore</strong><a href="/">Individuals</a><a href="/business">Businesses</a></div><div><strong>Business</strong><a href="#business-assessment">Assessment</a><a href="#business-plans">Plans</a></div><div><strong>Reach Us</strong><a href="tel:+919114141011">+91 91141 41011</a><a href="mailto:info@scorenow.in">info@scorenow.in</a></div></div><div className="container footer-bottom"><span>© 2026 Score Now. All rights reserved.</span><span>Privacy Policy · Terms of Use</span></div></footer>
+      <footer><div className="container footer-grid"><div><Brand href="/" /><p>Clear guidance for a stronger financial future.</p></div><div><strong>Explore</strong><a href="/">Individuals</a><a href="/business">Businesses</a></div><div><strong>Business</strong><a href="#business-assessment">Assessment</a><a href="#business-plans">Plans</a></div><div><strong>Reach Us</strong><a href="tel:+919114141011">+91 91141 41011</a><a href="mailto:info@scorenow.in">info@scorenow.in</a></div><AppDownload /></div><div className="container footer-bottom"><span>© 2026 Score Now. All rights reserved.</span><span>Privacy Policy · Terms of Use</span></div></footer>
       <ChatAssistant />
     </div>
   )
