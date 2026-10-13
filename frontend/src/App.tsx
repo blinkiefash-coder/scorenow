@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type CSSProperties, type FormEvent } from 'react'
 import {
   ArrowLeft, ArrowRight, BadgeIndianRupee, BarChart3, Building2, CalendarDays,
-  Check, ChevronDown, CircleHelp, Clock3, CreditCard, FileCheck2,
+  Check, ChevronDown, CircleHelp, Clock3, CreditCard, Eye, EyeOff, FileCheck2,
   FileSearch, Handshake, Headphones, House, Lightbulb, LockKeyhole,
   Mail, MapPin, Menu, MessageCircle, Pause, Phone, Play, RotateCcw, Search,
   ShieldCheck, Smartphone, Sparkles, Star, TrendingUp, Users, Volume2, VolumeX,
@@ -240,6 +240,232 @@ function Brand({ href = '#home' }: { href?: string }) {
     <a className="brand" href={href} aria-label="Score Now home">
       <img src="/scorenow-logo-2026.jpg" alt="Score Now - Improve Your Credit Score" />
     </a>
+  )
+}
+
+// Opens the auth popup once per browser session, shortly after the visitor starts scrolling.
+function useScrollAuthPrompt() {
+  const [open, setOpen] = useState(false)
+
+  useEffect(() => {
+    if (sessionStorage.getItem('scorenow-auth-prompted')) return
+
+    const onScroll = () => {
+      if (window.scrollY < 220) return
+      sessionStorage.setItem('scorenow-auth-prompted', '1')
+      window.removeEventListener('scroll', onScroll)
+      setOpen(true)
+    }
+
+    window.addEventListener('scroll', onScroll, { passive: true })
+    return () => window.removeEventListener('scroll', onScroll)
+  }, [])
+
+  return [open, setOpen] as const
+}
+
+function AuthAvatarButton({ onClick }: { onClick: () => void }) {
+  return (
+    <button className="auth-avatar-button" type="button" onClick={onClick} aria-label="Log in or sign up">
+      <span className="avatar-icon"><UserRound /></span>
+      <span className="avatar-label">Log In</span>
+    </button>
+  )
+}
+
+function GoogleIcon() {
+  return (
+    <svg viewBox="0 0 48 48" aria-hidden="true">
+      <path fill="#FFC107" d="M43.6 20.5H42V20H24v8h11.3C33.7 32.9 29.3 36 24 36c-6.6 0-12-5.4-12-12s5.4-12 12-12c3.1 0 5.9 1.2 8 3.1l5.7-5.7C34.5 6.1 29.5 4 24 4 12.9 4 4 12.9 4 24s8.9 20 20 20 20-8.9 20-20c0-1.3-.1-2.7-.4-3.5z" />
+      <path fill="#FF3D00" d="M6.3 14.7l6.6 4.8C14.6 15.9 18.9 13 24 13c3.1 0 5.9 1.2 8 3.1l5.7-5.7C34.5 6.1 29.5 4 24 4 16.3 4 9.7 8.3 6.3 14.7z" />
+      <path fill="#4CAF50" d="M24 44c5.2 0 10-2 13.6-5.2l-6.3-5.3C29.4 35.1 26.8 36 24 36c-5.3 0-9.7-3.1-11.3-7.6l-6.5 5C9.6 39.6 16.2 44 24 44z" />
+      <path fill="#1976D2" d="M43.6 20.5H42V20H24v8h11.3c-.8 2.3-2.3 4.3-4.1 5.7l6.3 5.3C40.9 36.3 44 30.7 44 24c0-1.3-.1-2.7-.4-3.5z" />
+    </svg>
+  )
+}
+
+function OtpInputs({ digits, onChange }: { digits: string[]; onChange: (digits: string[]) => void }) {
+  const inputRefs = useRef<Array<HTMLInputElement | null>>([])
+
+  const handleChange = (index: number, value: string) => {
+    const digit = value.replace(/\D/g, '').slice(-1)
+    const next = [...digits]
+    next[index] = digit
+    onChange(next)
+    if (digit && index < digits.length - 1) inputRefs.current[index + 1]?.focus()
+  }
+
+  const handleKeyDown = (index: number, event: React.KeyboardEvent<HTMLInputElement>) => {
+    if (event.key === 'Backspace' && !digits[index] && index > 0) inputRefs.current[index - 1]?.focus()
+  }
+
+  return (
+    <div className="otp-boxes">
+      {digits.map((digit, index) => (
+        <input
+          key={index}
+          ref={(element) => { inputRefs.current[index] = element }}
+          value={digit}
+          onChange={(event) => handleChange(index, event.target.value)}
+          onKeyDown={(event) => handleKeyDown(index, event)}
+          inputMode="numeric"
+          maxLength={1}
+          aria-label={`Digit ${index + 1} of 6`}
+        />
+      ))}
+    </div>
+  )
+}
+
+function maskEmail(email: string) {
+  const [name, domain] = email.split('@')
+  if (!domain) return email
+  const visible = name.slice(0, 2)
+  return `${visible}${'•'.repeat(Math.max(name.length - visible.length, 3))}@${domain}`
+}
+
+function AuthModal({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const [view, setView] = useState<'login' | 'signup' | 'otp'>('login')
+  const [loginMethod, setLoginMethod] = useState<'mobile' | 'email'>('mobile')
+  const [showPassword, setShowPassword] = useState(false)
+  const [otpDigits, setOtpDigits] = useState(['', '', '', '', '', ''])
+  const [resendSeconds, setResendSeconds] = useState(28)
+  const [otpOrigin, setOtpOrigin] = useState<'login' | 'signup'>('signup')
+  const [otpContact, setOtpContact] = useState<{ type: 'mobile' | 'email'; value: string }>({ type: 'mobile', value: '' })
+
+  useEffect(() => {
+    if (!open) return
+    setView('login')
+    setLoginMethod('mobile')
+    setShowPassword(false)
+    setOtpDigits(['', '', '', '', '', ''])
+  }, [open])
+
+  useEffect(() => {
+    if (!open) return
+    const onKeyDown = (event: KeyboardEvent) => { if (event.key === 'Escape') onClose() }
+    document.addEventListener('keydown', onKeyDown)
+    document.body.style.overflow = 'hidden'
+    return () => {
+      document.removeEventListener('keydown', onKeyDown)
+      document.body.style.overflow = ''
+    }
+  }, [open, onClose])
+
+  useEffect(() => {
+    if (view !== 'otp') return
+    setResendSeconds(28)
+    const intervalId = window.setInterval(() => setResendSeconds((seconds) => (seconds > 0 ? seconds - 1 : 0)), 1000)
+    return () => window.clearInterval(intervalId)
+  }, [view])
+
+  if (!open) return null
+
+  const submitLogin = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    const data = new FormData(event.currentTarget)
+    const value = loginMethod === 'mobile' ? String(data.get('mobile') || '') : String(data.get('email') || '')
+    setOtpContact({ type: loginMethod, value })
+    setOtpOrigin('login')
+    setOtpDigits(['', '', '', '', '', ''])
+    setView('otp')
+  }
+
+  const submitSignup = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    const data = new FormData(event.currentTarget)
+    setOtpContact({ type: 'mobile', value: String(data.get('mobile') || '') })
+    setOtpOrigin('signup')
+    setOtpDigits(['', '', '', '', '', ''])
+    setView('otp')
+  }
+
+  const submitOtp = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    onClose()
+  }
+
+  const maskedContact = otpContact.type === 'mobile'
+    ? `+91 •••••${otpContact.value.slice(-4) || '4321'}`
+    : (otpContact.value ? maskEmail(otpContact.value) : 'your email address')
+
+  return (
+    <div className="auth-overlay" role="presentation" onClick={onClose}>
+      <div
+        className="auth-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-label={view === 'login' ? 'Sign in to Score Now' : view === 'signup' ? 'Create a Score Now account' : 'Verify your mobile number'}
+        onClick={(event) => event.stopPropagation()}
+      >
+        {view === 'otp'
+          ? <button className="auth-back" type="button" onClick={() => setView(otpOrigin)} aria-label="Go back"><ArrowLeft /></button>
+          : <button className="auth-close" type="button" onClick={onClose} aria-label="Close"><X /></button>}
+
+        <img className="auth-brand" src="/scorenow-logo-hd.png" alt="Score Now" />
+
+        {view === 'otp' ? (
+          <>
+            <span className="auth-shield"><ShieldCheck /></span>
+            <h3>Verify Your {otpContact.type === 'mobile' ? 'Mobile Number' : 'Email Address'}</h3>
+            <p>Enter the 6-digit code sent to<br /><strong>{maskedContact}</strong></p>
+            <form className="auth-form otp-form" onSubmit={submitOtp}>
+              <OtpInputs digits={otpDigits} onChange={setOtpDigits} />
+              <button className="auth-resend" type="button" disabled={resendSeconds > 0} onClick={() => setResendSeconds(28)}>
+                {resendSeconds > 0 ? `Resend OTP in 00:${String(resendSeconds).padStart(2, '0')}` : 'Resend OTP'}
+              </button>
+              <button className="button button-primary" type="submit" disabled={otpDigits.some((digit) => !digit)}>Verify &amp; Continue <ArrowRight /></button>
+              <p className="auth-security"><LockKeyhole /> Your information is protected with bank-level security.</p>
+            </form>
+          </>
+        ) : (
+          <>
+            <span className="auth-avatar"><UserRound /></span>
+            <h3>{view === 'login' ? 'Welcome Back' : 'Create Your Account'}</h3>
+            <p>{view === 'login' ? 'Sign in to continue to Score Now.' : 'Start improving your credit profile in just a few steps.'}</p>
+
+            {view === 'login' && (
+              <div className="auth-tabs" role="tablist">
+                <button type="button" role="tab" aria-selected={loginMethod === 'mobile'} className={loginMethod === 'mobile' ? 'active' : ''} onClick={() => setLoginMethod('mobile')}><Smartphone /> Mobile Number</button>
+                <button type="button" role="tab" aria-selected={loginMethod === 'email'} className={loginMethod === 'email' ? 'active' : ''} onClick={() => setLoginMethod('email')}><Mail /> Email</button>
+              </div>
+            )}
+
+            {view === 'login' ? (
+              <form className="auth-form" onSubmit={submitLogin}>
+                {loginMethod === 'mobile' ? (
+                  <label><span>Mobile Number</span>
+                    <div className="auth-phone-input"><span className="country-code">🇮🇳 +91<ChevronDown /></span><input name="mobile" type="tel" inputMode="numeric" pattern="[0-9]{10}" placeholder="Enter your mobile number" required /></div>
+                  </label>
+                ) : (
+                  <label><span>Email Address</span><div className="auth-input-icon"><Mail /><input name="email" type="email" placeholder="Enter your email" required autoComplete="email" /></div></label>
+                )}
+                <p className="auth-otp-note"><ShieldCheck /> We'll send a one-time code to verify it's you.</p>
+                <button className="button button-primary" type="submit">Send OTP <ArrowRight /></button>
+              </form>
+            ) : (
+              <form className="auth-form" onSubmit={submitSignup}>
+                <label><span>Full Name</span><div className="auth-input-icon"><UserRound /><input name="name" required placeholder="Enter your full name" autoComplete="name" /></div></label>
+                <label><span>Mobile Number</span><div className="auth-phone-input"><span className="country-code">🇮🇳 +91<ChevronDown /></span><input name="mobile" type="tel" inputMode="numeric" pattern="[0-9]{10}" placeholder="Enter your mobile number" required /></div></label>
+                <label><span>Email Address (optional)</span><div className="auth-input-icon"><Mail /><input name="email" type="email" placeholder="Enter your email address" autoComplete="email" /></div></label>
+                <label><span>Create Password</span><div className="auth-password-input"><LockKeyhole /><input name="password" type={showPassword ? 'text' : 'password'} minLength={8} required placeholder="Minimum 8 characters" autoComplete="new-password" /><button type="button" onClick={() => setShowPassword((value) => !value)} aria-label={showPassword ? 'Hide password' : 'Show password'}>{showPassword ? <EyeOff /> : <Eye />}</button></div></label>
+                <label className="auth-terms"><input type="checkbox" required /><span>I agree to the <a href="#terms">Terms &amp; Conditions</a> and <a href="#privacy">Privacy Policy</a></span></label>
+                <button className="button button-primary" type="submit">Create Account <ArrowRight /></button>
+              </form>
+            )}
+
+            <div className="auth-divider"><span>or continue with</span></div>
+            <button className="auth-google" type="button"><GoogleIcon /> Continue with Google</button>
+
+            <p className="auth-switch">
+              {view === 'login'
+                ? <>New to Score Now? <button type="button" onClick={() => setView('signup')}>Create Account</button></>
+                : <>Already registered? <button type="button" onClick={() => setView('login')}>Sign In</button></>}
+            </p>
+          </>
+        )}
+      </div>
+    </div>
   )
 }
 
@@ -829,6 +1055,7 @@ function ChatAssistant() {
 function HomePage() {
   const [menuOpen, setMenuOpen] = useState(false)
   const closeMenu = () => setMenuOpen(false)
+  const [authOpen, setAuthOpen] = useScrollAuthPrompt()
 
   useEffect(() => {
     const elements = Array.from(document.querySelectorAll<HTMLElement>('[data-reveal]'))
@@ -854,20 +1081,23 @@ function HomePage() {
       <header className="site-header">
         <div className="nav-wrap">
           <Brand href="/" />
-          <button className="menu-button" type="button" aria-label={menuOpen ? 'Close navigation' : 'Open navigation'} aria-expanded={menuOpen} onClick={() => setMenuOpen((open) => !open)}>
-            {menuOpen ? <X /> : <Menu />}
-          </button>
-          <nav className={menuOpen ? 'nav-links open' : 'nav-links'} aria-label="Main navigation">
-            <a className="active" href="#home" onClick={closeMenu}>Home</a>
-            <a href="#insights" onClick={closeMenu}>Credit Score</a>
-            <a href="#services" onClick={closeMenu}>Services <ChevronDown /></a>
-            <a href="#plans" onClick={closeMenu}>Plans</a>
-            <a href="#subscription" onClick={closeMenu}>Subscription</a>
-            <a href="/business" onClick={closeMenu}>For Businesses</a>
-            <a href="#about" onClick={closeMenu}>About Us</a>
-            <a href="#contact" onClick={closeMenu}>Contact</a>
-            <a className="button button-primary nav-cta" href="#personal-assessment" onClick={closeMenu}>Free Assessment <ArrowRight /></a>
-          </nav>
+          <div className="nav-right">
+            <nav className={menuOpen ? 'nav-links open' : 'nav-links'} aria-label="Main navigation">
+              <a className="active" href="#home" onClick={closeMenu}>Home</a>
+              <a href="#insights" onClick={closeMenu}>Credit Score</a>
+              <a href="#services" onClick={closeMenu}>Services <ChevronDown /></a>
+              <a href="#plans" onClick={closeMenu}>Plans</a>
+              <a href="#subscription" onClick={closeMenu}>Subscription</a>
+              <a href="/business" onClick={closeMenu}>For Businesses</a>
+              <a href="#about" onClick={closeMenu}>About Us</a>
+              <a href="#contact" onClick={closeMenu}>Contact</a>
+              <a className="button button-primary nav-cta" href="#personal-assessment" onClick={closeMenu}>Free Assessment <ArrowRight /></a>
+            </nav>
+            <AuthAvatarButton onClick={() => setAuthOpen(true)} />
+            <button className="menu-button" type="button" aria-label={menuOpen ? 'Close navigation' : 'Open navigation'} aria-expanded={menuOpen} onClick={() => setMenuOpen((open) => !open)}>
+              {menuOpen ? <X /> : <Menu />}
+            </button>
+          </div>
         </div>
       </header>
 
@@ -1021,12 +1251,14 @@ function HomePage() {
         <div className="container footer-bottom"><span>© 2026 Score Now. All rights reserved.</span><span>Privacy Policy · Terms of Use</span></div>
       </footer>
       <ChatAssistant />
+      <AuthModal open={authOpen} onClose={() => setAuthOpen(false)} />
     </div>
   )
 }
 
 function BusinessPage() {
   const [menuOpen, setMenuOpen] = useState(false)
+  const [authOpen, setAuthOpen] = useScrollAuthPrompt()
   const businessMessage = encodeURIComponent('Hello Score Now, I would like to discuss the Business CMR Improvement Programme.')
   const shieldMessage = encodeURIComponent('Hello Score Now, I would like to discuss the Credit Shield 360 annual business membership.')
 
@@ -1035,10 +1267,13 @@ function BusinessPage() {
       <header className="site-header">
         <div className="nav-wrap">
           <Brand href="/" />
-          <button className="menu-button" type="button" aria-label={menuOpen ? 'Close navigation' : 'Open navigation'} aria-expanded={menuOpen} onClick={() => setMenuOpen((open) => !open)}>{menuOpen ? <X /> : <Menu />}</button>
-          <nav className={menuOpen ? 'nav-links open' : 'nav-links'} aria-label="Business navigation">
-            <a href="/">Home</a><a href="/#personal-assessment">For Individuals</a><a className="active" href="/business">For Businesses</a><a href="#business-plans">Business Plans</a><a href="/#about">About Us</a><a href="/#contact">Contact</a><a className="button button-primary nav-cta" href="#business-assessment">Free Assessment <ArrowRight /></a>
-          </nav>
+          <div className="nav-right">
+            <nav className={menuOpen ? 'nav-links open' : 'nav-links'} aria-label="Business navigation">
+              <a href="/">Home</a><a href="/#personal-assessment">For Individuals</a><a className="active" href="/business">For Businesses</a><a href="#business-plans">Business Plans</a><a href="/#about">About Us</a><a href="/#contact">Contact</a><a className="button button-primary nav-cta" href="#business-assessment">Free Assessment <ArrowRight /></a>
+            </nav>
+            <AuthAvatarButton onClick={() => setAuthOpen(true)} />
+            <button className="menu-button" type="button" aria-label={menuOpen ? 'Close navigation' : 'Open navigation'} aria-expanded={menuOpen} onClick={() => setMenuOpen((open) => !open)}>{menuOpen ? <X /> : <Menu />}</button>
+          </div>
         </div>
       </header>
       <main>
@@ -1065,6 +1300,7 @@ function BusinessPage() {
       </main>
       <footer><div className="container footer-grid"><div><Brand href="/" /><p>Clear guidance for a stronger financial future.</p></div><div><strong>Explore</strong><a href="/">Individuals</a><a href="/business">Businesses</a></div><div><strong>Business</strong><a href="#business-assessment">Assessment</a><a href="#business-plans">Plans</a></div><div><strong>Reach Us</strong><a href="tel:+919114141011">+91 91141 41011</a><a href="mailto:info@scorenow.in">info@scorenow.in</a></div><AppDownload /></div><div className="container footer-bottom"><span>© 2026 Score Now. All rights reserved.</span><span>Privacy Policy · Terms of Use</span></div></footer>
       <ChatAssistant />
+      <AuthModal open={authOpen} onClose={() => setAuthOpen(false)} />
     </div>
   )
 }
