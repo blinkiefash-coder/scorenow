@@ -382,6 +382,7 @@ footer { background: #071238; color: #bac5dc; padding: 65px 0 22px; }.footer-gri
 .auth-forgot { align-self: flex-end; margin-top: -6px; border: 0; background: none; padding: 0; color: var(--blue-dark); font-size: 11px; font-weight: 800; text-decoration: underline; cursor: pointer; text-transform: none; }
 .auth-otp-note { display: flex; align-items: center; gap: 6px; margin: -2px 0 2px; color: var(--muted); font-size: 11px; font-weight: 600; text-transform: none; }
 .auth-otp-note svg { width: 14px; height: 14px; color: var(--green); flex: none; }
+.auth-error { margin: -6px 0 2px; padding: 8px 12px; border-radius: 10px; background: #fdecec; color: #c0392b; font-size: 12px; font-weight: 700; text-align: center; }
 .auth-terms { flex-direction: row!important; align-items: flex-start; gap: 9px!important; font-size: 11px!important; font-weight: 500!important; text-transform: none!important; letter-spacing: 0!important; color: var(--muted)!important; }
 .auth-terms input { min-height: 0; width: 16px; height: 16px; margin-top: 1px; flex: none; accent-color: var(--blue); }
 .auth-terms a { color: var(--blue-dark); font-weight: 700; }

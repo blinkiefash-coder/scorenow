@@ -8,6 +8,7 @@ import {
   UserRound, WalletCards, X, Zap,
 } from 'lucide-react'
 import './App.css'
+import { isFirebaseConfigured, startPhoneSignIn, type ConfirmationResult } from './firebase'
 
 const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:3000'
 
@@ -332,6 +333,10 @@ function AuthModal({ open, onClose }: { open: boolean; onClose: () => void }) {
   const [resendSeconds, setResendSeconds] = useState(28)
   const [otpOrigin, setOtpOrigin] = useState<'login' | 'signup'>('signup')
   const [otpContact, setOtpContact] = useState<{ type: 'mobile' | 'email'; value: string }>({ type: 'mobile', value: '' })
+  const [authError, setAuthError] = useState('')
+  const [authLoading, setAuthLoading] = useState(false)
+  const confirmationResultRef = useRef<ConfirmationResult | null>(null)
+  const pendingFullNameRef = useRef('')
 
   useEffect(() => {
     if (!open) return
@@ -339,6 +344,7 @@ function AuthModal({ open, onClose }: { open: boolean; onClose: () => void }) {
     setLoginMethod('mobile')
     setShowPassword(false)
     setOtpDigits(['', '', '', '', '', ''])
+    setAuthError('')
   }, [open])
 
   useEffect(() => {
@@ -361,28 +367,112 @@ function AuthModal({ open, onClose }: { open: boolean; onClose: () => void }) {
 
   if (!open) return null
 
-  const submitLogin = (event: FormEvent<HTMLFormElement>) => {
+  const requestMobileOtp = async (mobile: string) => {
+    if (!isFirebaseConfigured) {
+      throw new Error('Mobile sign-in is not configured yet. Please use email instead.')
+    }
+    confirmationResultRef.current = await startPhoneSignIn(`+91${mobile}`, 'recaptcha-container')
+  }
+
+  const requestEmailOtp = async (email: string) => {
+    const response = await fetch(`${apiUrl}/api/auth/otp/request`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ type: 'email', value: email }),
+    })
+    const result = await response.json() as { message?: string }
+    if (!response.ok) throw new Error(result.message || 'Unable to send a verification code.')
+  }
+
+  const submitLogin = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
     const data = new FormData(event.currentTarget)
     const value = loginMethod === 'mobile' ? String(data.get('mobile') || '') : String(data.get('email') || '')
-    setOtpContact({ type: loginMethod, value })
-    setOtpOrigin('login')
-    setOtpDigits(['', '', '', '', '', ''])
-    setView('otp')
+    setAuthError('')
+    setAuthLoading(true)
+    try {
+      if (loginMethod === 'mobile') await requestMobileOtp(value)
+      else await requestEmailOtp(value)
+      setOtpContact({ type: loginMethod, value })
+      setOtpOrigin('login')
+      setOtpDigits(['', '', '', '', '', ''])
+      setView('otp')
+    } catch (error) {
+      setAuthError(error instanceof Error ? error.message : 'Unable to send a verification code.')
+    } finally {
+      setAuthLoading(false)
+    }
   }
 
-  const submitSignup = (event: FormEvent<HTMLFormElement>) => {
+  const submitSignup = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
     const data = new FormData(event.currentTarget)
-    setOtpContact({ type: 'mobile', value: String(data.get('mobile') || '') })
-    setOtpOrigin('signup')
-    setOtpDigits(['', '', '', '', '', ''])
-    setView('otp')
+    const mobile = String(data.get('mobile') || '')
+    pendingFullNameRef.current = String(data.get('name') || '')
+    setAuthError('')
+    setAuthLoading(true)
+    try {
+      await requestMobileOtp(mobile)
+      setOtpContact({ type: 'mobile', value: mobile })
+      setOtpOrigin('signup')
+      setOtpDigits(['', '', '', '', '', ''])
+      setView('otp')
+    } catch (error) {
+      setAuthError(error instanceof Error ? error.message : 'Unable to send a verification code.')
+    } finally {
+      setAuthLoading(false)
+    }
   }
 
-  const submitOtp = (event: FormEvent<HTMLFormElement>) => {
+  const resendOtp = async () => {
+    if (resendSeconds > 0 || authLoading) return
+    setAuthError('')
+    setAuthLoading(true)
+    try {
+      if (otpContact.type === 'mobile') await requestMobileOtp(otpContact.value)
+      else await requestEmailOtp(otpContact.value)
+      setOtpDigits(['', '', '', '', '', ''])
+      setResendSeconds(28)
+    } catch (error) {
+      setAuthError(error instanceof Error ? error.message : 'Unable to resend the code.')
+    } finally {
+      setAuthLoading(false)
+    }
+  }
+
+  const submitOtp = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
-    onClose()
+    const code = otpDigits.join('')
+    setAuthError('')
+    setAuthLoading(true)
+    try {
+      if (otpContact.type === 'mobile') {
+        const confirmationResult = confirmationResultRef.current
+        if (!confirmationResult) throw new Error('Your code expired. Please request a new one.')
+        const credential = await confirmationResult.confirm(code)
+        const idToken = await credential.user.getIdToken()
+        const response = await fetch(`${apiUrl}/api/auth/session`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ idToken, fullName: pendingFullNameRef.current }),
+        })
+        const result = await response.json() as { message?: string }
+        if (!response.ok) throw new Error(result.message || 'Could not verify your sign-in.')
+      } else {
+        const response = await fetch(`${apiUrl}/api/auth/otp/verify`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ type: 'email', value: otpContact.value, code }),
+        })
+        const result = await response.json() as { message?: string }
+        if (!response.ok) throw new Error(result.message || 'Verification failed.')
+      }
+      onClose()
+    } catch (error) {
+      setAuthError(error instanceof Error ? error.message : 'Incorrect code. Please try again.')
+    } finally {
+      setAuthLoading(false)
+    }
   }
 
   const maskedContact = otpContact.type === 'mobile'
@@ -409,12 +499,13 @@ function AuthModal({ open, onClose }: { open: boolean; onClose: () => void }) {
             <span className="auth-shield"><ShieldCheck /></span>
             <h3>Verify Your {otpContact.type === 'mobile' ? 'Mobile Number' : 'Email Address'}</h3>
             <p>Enter the 6-digit code sent to<br /><strong>{maskedContact}</strong></p>
+            {authError && <p className="auth-error">{authError}</p>}
             <form className="auth-form otp-form" onSubmit={submitOtp}>
               <OtpInputs digits={otpDigits} onChange={setOtpDigits} />
-              <button className="auth-resend" type="button" disabled={resendSeconds > 0} onClick={() => setResendSeconds(28)}>
+              <button className="auth-resend" type="button" disabled={resendSeconds > 0 || authLoading} onClick={resendOtp}>
                 {resendSeconds > 0 ? `Resend OTP in 00:${String(resendSeconds).padStart(2, '0')}` : 'Resend OTP'}
               </button>
-              <button className="button button-primary" type="submit" disabled={otpDigits.some((digit) => !digit)}>Verify &amp; Continue <ArrowRight /></button>
+              <button className="button button-primary" type="submit" disabled={authLoading || otpDigits.some((digit) => !digit)}>{authLoading ? 'Verifying…' : <>Verify &amp; Continue <ArrowRight /></>}</button>
               <p className="auth-security"><LockKeyhole /> Your information is protected with bank-level security.</p>
             </form>
           </>
@@ -431,6 +522,8 @@ function AuthModal({ open, onClose }: { open: boolean; onClose: () => void }) {
               </div>
             )}
 
+            {authError && <p className="auth-error">{authError}</p>}
+
             {view === 'login' ? (
               <form className="auth-form" onSubmit={submitLogin}>
                 {loginMethod === 'mobile' ? (
@@ -441,7 +534,7 @@ function AuthModal({ open, onClose }: { open: boolean; onClose: () => void }) {
                   <label><span>Email Address</span><div className="auth-input-icon"><Mail /><input name="email" type="email" placeholder="Enter your email" required autoComplete="email" /></div></label>
                 )}
                 <p className="auth-otp-note"><ShieldCheck /> We'll send a one-time code to verify it's you.</p>
-                <button className="button button-primary" type="submit">Send OTP <ArrowRight /></button>
+                <button className="button button-primary" type="submit" disabled={authLoading}>{authLoading ? 'Sending…' : <>Send OTP <ArrowRight /></>}</button>
               </form>
             ) : (
               <form className="auth-form" onSubmit={submitSignup}>
@@ -450,9 +543,10 @@ function AuthModal({ open, onClose }: { open: boolean; onClose: () => void }) {
                 <label><span>Email Address (optional)</span><div className="auth-input-icon"><Mail /><input name="email" type="email" placeholder="Enter your email address" autoComplete="email" /></div></label>
                 <label><span>Create Password</span><div className="auth-password-input"><LockKeyhole /><input name="password" type={showPassword ? 'text' : 'password'} minLength={8} required placeholder="Minimum 8 characters" autoComplete="new-password" /><button type="button" onClick={() => setShowPassword((value) => !value)} aria-label={showPassword ? 'Hide password' : 'Show password'}>{showPassword ? <EyeOff /> : <Eye />}</button></div></label>
                 <label className="auth-terms"><input type="checkbox" required /><span>I agree to the <a href="#terms">Terms &amp; Conditions</a> and <a href="#privacy">Privacy Policy</a></span></label>
-                <button className="button button-primary" type="submit">Create Account <ArrowRight /></button>
+                <button className="button button-primary" type="submit" disabled={authLoading}>{authLoading ? 'Sending…' : <>Create Account <ArrowRight /></>}</button>
               </form>
             )}
+            <div id="recaptcha-container" />
 
             <div className="auth-divider"><span>or continue with</span></div>
             <button className="auth-google" type="button"><GoogleIcon /> Continue with Google</button>

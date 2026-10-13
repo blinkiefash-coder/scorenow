@@ -4,7 +4,16 @@ import express from "express";
 import multer from "multer";
 import nodemailer from "nodemailer";
 import path from "node:path";
-import { initializeDatabase, saveAssessment, saveWebsiteInquiry } from "./database.js";
+import {
+  createOtp,
+  initializeDatabase,
+  saveAssessment,
+  saveWebsiteInquiry,
+  upsertUserByContact,
+  upsertUserByFirebaseUid,
+  verifyOtp,
+} from "./database.js";
+import { verifyFirebaseIdToken } from "./firebaseAdmin.js";
 
 const app = express();
 const port = Number(process.env.PORT) || 3000;
@@ -63,6 +72,87 @@ const fieldLabels: Record<string, string> = {
 
 app.get("/api/health", (_request, response) => {
   response.json({ status: "ok", service: "Score Now API" });
+});
+
+app.post("/api/auth/otp/request", async (request, response) => {
+  const type = request.body.type === "email" ? "email" : request.body.type === "mobile" ? "mobile" : null;
+  const value = String(request.body.value || "").trim();
+
+  if (!type) {
+    response.status(400).json({ message: "Specify a mobile or email contact type." });
+    return;
+  }
+  if (type === "mobile") {
+    response.status(400).json({ message: "Mobile verification is handled by Firebase on the client." });
+    return;
+  }
+  if (!/^\S+@\S+\.\S+$/.test(value)) {
+    response.status(400).json({ message: "Enter a valid email address." });
+    return;
+  }
+
+  try {
+    const { code } = await createOtp({ contactType: "email", contactValue: value.toLowerCase() });
+
+    const transport = createMailTransport();
+    if (transport) {
+      await transport.sendMail({
+        from: process.env.SMTP_FROM || process.env.SMTP_USER || "Score Now Website <no-reply@scorenow.in>",
+        to: value,
+        subject: "Your Score Now verification code",
+        text: `Your Score Now verification code is ${code}. It expires in 5 minutes.`,
+        html: `<div style="font-family:Arial,sans-serif;max-width:480px;margin:auto;color:#081446"><div style="padding:20px;background:#087af5;color:white"><h1 style="margin:0;font-size:20px">Score Now</h1></div><div style="padding:22px;background:#f7fbff"><p>Your verification code is:</p><p style="font-size:28px;font-weight:800;letter-spacing:6px">${code}</p><p style="color:#65708a;font-size:12px">This code expires in 5 minutes. If you did not request this, you can ignore this email.</p></div></div>`,
+      });
+    } else {
+      console.log(`[dev] Email OTP for ${value}: ${code}`);
+    }
+
+    response.json({ message: "A verification code was sent to your email." });
+  } catch (error) {
+    response.status(429).json({ message: error instanceof Error ? error.message : "Unable to send a verification code." });
+  }
+});
+
+app.post("/api/auth/otp/verify", async (request, response) => {
+  const type = request.body.type === "email" ? "email" : null;
+  const value = String(request.body.value || "").trim().toLowerCase();
+  const code = String(request.body.code || "").trim();
+
+  if (!type || !value || !/^\d{6}$/.test(code)) {
+    response.status(400).json({ message: "Enter the 6-digit code sent to your email." });
+    return;
+  }
+
+  try {
+    await verifyOtp({ contactType: "email", contactValue: value, code });
+    const user = await upsertUserByContact({ contactType: "email", contactValue: value });
+    response.json({ message: "Verified successfully.", user });
+  } catch (error) {
+    response.status(400).json({ message: error instanceof Error ? error.message : "Verification failed." });
+  }
+});
+
+app.post("/api/auth/session", async (request, response) => {
+  const idToken = String(request.body.idToken || "");
+  const fullName = String(request.body.fullName || "").trim();
+  if (!idToken) {
+    response.status(400).json({ message: "Missing Firebase ID token." });
+    return;
+  }
+
+  try {
+    const decoded = await verifyFirebaseIdToken(idToken);
+    const user = await upsertUserByFirebaseUid({
+      firebaseUid: decoded.uid,
+      mobile: decoded.phone_number ?? null,
+      email: decoded.email ?? null,
+      fullName: fullName || null,
+    });
+    response.json({ message: "Signed in successfully.", user });
+  } catch (error) {
+    console.error("Firebase session verification failed", error);
+    response.status(401).json({ message: "Could not verify your sign-in. Please try again." });
+  }
 });
 
 app.post("/api/inquiries", async (request, response) => {
