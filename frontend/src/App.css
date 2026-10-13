@@ -41,6 +41,14 @@
   .empty-dashboard-state > svg { width: 27px; height: 27px; color: #8ca4bf; }
   .empty-dashboard-state strong { color: var(--navy); font-size: 12px; }
   .empty-dashboard-state span { max-width: 230px; font-size: 9px; line-height: 1.45; }
+
+  /* Dashboard readability pass */
+  .dashboard-sidebar nav button { font-size: 13px; }.dashboard-support strong { font-size: 13px; }.dashboard-support p { font-size: 11px; }.dashboard-support button { font-size: 11px; }
+  .dashboard-search input { font-size: 12px; }.dashboard-score-cta { font-size: 12px; }.dashboard-top-actions .auth-avatar-button .avatar-label { font-size: 12px; }
+  .dashboard-welcome h1 { font-size: 25px; }.dashboard-welcome p { font-size: 13px; }.dashboard-offer-banner strong { font-size: 12px; }.dashboard-offer-banner small { font-size: 10px; }
+  .dashboard-card-heading > strong { font-size: 14px; }.dashboard-card-heading button { font-size: 11px; }.dashboard-score-copy { font-size: 11px; }.dashboard-score-copy > small { font-size: 10px; }.dashboard-score-copy > strong { font-size: 12px; }.dashboard-score-copy > span { font-size: 10px; }.dashboard-score-copy p { font-size: 10px; }.dashboard-primary-action { font-size: 12px; }
+  .highlight-grid > div > strong { font-size: 23px; }.highlight-grid > div > small { font-size: 10px; }.quick-actions button { min-height: 38px; font-size: 11px; }.trend-y-labels, .trend-months { font-size: 10px; }.trend-current { font-size: 11px; }.factor-rows > div { font-size: 11px; }.status-good, .status-fair { font-size: 10px; }.action-list p strong { font-size: 11px; }.action-list p small { font-size: 10px; }.alert-list p strong { font-size: 11px; }.alert-list p small, .alert-list time { font-size: 10px; }.recommend-grid strong { font-size: 11px; }.recommend-grid small { font-size: 10px; }.recommend-grid button { font-size: 10px; }.learning-list p strong { font-size: 11px; }.learning-list p small { font-size: 10px; }.learning-list > div > span { font-size: 9px; }
+  .empty-dashboard-state strong { font-size: 14px; }.empty-dashboard-state span { font-size: 11px; }.score-unavailable h3 { font-size: 17px; }.score-unavailable p { font-size: 12px; }.score-unavailable > small { font-size: 10px; }
   .submit-message.success { color: #086841; border-color: #a6e7c5; background: #e8fbf0; }
   .submit-message.error { color: #a32235; border-color: #f0b6bd; background: #fff0f1; }
   .assessment-form > button:disabled { opacity: .68; cursor: wait; }
