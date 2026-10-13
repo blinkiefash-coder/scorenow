@@ -1191,7 +1191,49 @@ function ChatAssistant() {
   )
 }
 
+type DashboardStatus = {
+  profile: { id: string; name_as_per_pan: string; date_of_birth: string; city: string | null; kyc_status: string } | null
+  report: { id: string; credit_score: number | null; score_band: string | null; report_date: string; bureau: string; active_accounts: number | null; total_accounts: number | null; overdue_accounts: number | null; enquiries_last_6_months: number | null } | null
+}
+
+function ProfileOnboarding({ user, onComplete, onLogout }: { user: AuthUser; onComplete: () => void; onLogout: () => void }) {
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
+
+  const submitProfile = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    setSaving(true)
+    setError('')
+    const data = new FormData(event.currentTarget)
+    try {
+      const response = await fetch(`${apiUrl}/api/profile/${user.id}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(Object.fromEntries(data.entries())),
+      })
+      const result = await response.json() as { message?: string }
+      if (!response.ok) throw new Error(result.message || 'Unable to save your profile.')
+      onComplete()
+    } catch (submitError) {
+      setError(submitError instanceof Error ? submitError.message : 'Unable to save your profile.')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div className="dashboard-shell onboarding-shell">
+      <aside className="dashboard-sidebar"><Brand href="/" /><div className="dashboard-support"><span><ShieldCheck /></span><strong>Your details stay protected</strong><p>PAN is encrypted for this sample flow and only its last four characters are used for display.</p><button type="button" onClick={onLogout}>Log Out <ArrowRight /></button></div></aside>
+      <main className="dashboard-main"><div className="onboarding-wrap"><div className="onboarding-intro"><span className="onboarding-kicker"><Sparkles /> Almost there</span><h1>Complete your credit profile</h1><p>We need a few details before we can request your credit report. You can connect the live bureau API later without changing this flow.</p><div className="onboarding-steps"><span className="active"><b>1</b>Profile details</span><span><b>2</b>Score request</span><span><b>3</b>Credit dashboard</span></div></div><form className="onboarding-form" onSubmit={submitProfile}><div className="onboarding-form-heading"><span><FileCheck2 /></span><div><h2>Verify your identity</h2><p>Use the details exactly as they appear on your PAN card.</p></div></div><div className="onboarding-form-grid"><label><span>Name as per PAN *</span><input name="nameAsPerPan" required minLength={2} placeholder="Enter your full name" autoComplete="name" /></label><label><span>PAN number *</span><input name="pan" required pattern="[A-Za-z]{5}[0-9]{4}[A-Za-z]" placeholder="ABCDE1234F" autoCapitalize="characters" /></label><label><span>Date of birth *</span><input name="dateOfBirth" type="date" required /></label><label><span>Gender</span><select name="gender" defaultValue=""><option value="" disabled>Select gender</option><option>Female</option><option>Male</option><option>Prefer not to say</option></select></label><label className="field-wide"><span>Address</span><input name="addressLine1" placeholder="House number and street" autoComplete="street-address" /></label><label><span>City</span><input name="city" placeholder="Your city" autoComplete="address-level2" /></label><label><span>State</span><input name="state" placeholder="Your state" autoComplete="address-level1" /></label><label><span>PIN code</span><input name="pincode" inputMode="numeric" pattern="[0-9]{6}" placeholder="6-digit PIN" autoComplete="postal-code" /></label></div><label className="onboarding-consent"><input type="checkbox" required /><span>I agree to let ScoreNow prepare a sample credit-score request using these details. The live bureau consent and API connection will be added later.</span></label>{error && <p className="auth-error">{error}</p>}<button className="button button-primary onboarding-submit" type="submit" disabled={saving}>{saving ? 'Saving profile…' : <>Save Profile &amp; Continue <ArrowRight /></>}</button></form></div></main>
+    </div>
+  )
+}
+
 function DashboardPage({ user, onLogout }: { user: AuthUser; onLogout: () => void }) {
+  const [status, setStatus] = useState<DashboardStatus | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [requesting, setRequesting] = useState(false)
+  const [requestMessage, setRequestMessage] = useState('')
   const firstName = user.full_name.trim().split(' ')[0] || 'there'
   const sidebarItems = [
     { icon: House, label: 'Home', active: true },
@@ -1203,6 +1245,39 @@ function DashboardPage({ user, onLogout }: { user: AuthUser; onLogout: () => voi
     { icon: Settings, label: 'Settings' },
     { icon: CircleHelp, label: 'Help & Support' },
   ]
+
+  const loadStatus = async () => {
+    setLoading(true)
+    try {
+      const response = await fetch(`${apiUrl}/api/dashboard/${user.id}`)
+      if (!response.ok) throw new Error('Unable to load dashboard')
+      setStatus(await response.json() as DashboardStatus)
+    } catch {
+      setStatus({ profile: null, report: null })
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  useEffect(() => { void loadStatus() }, [user.id])
+
+  if (loading) return <div className="dashboard-loading"><span><RotateCcw /></span><strong>Loading your credit workspace…</strong></div>
+  if (!status?.profile) return <ProfileOnboarding user={user} onComplete={() => void loadStatus()} onLogout={onLogout} />
+
+  const requestScore = async () => {
+    setRequesting(true)
+    setRequestMessage('')
+    try {
+      const response = await fetch(`${apiUrl}/api/credit-score/request`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ userId: user.id }) })
+      const result = await response.json() as { message?: string }
+      if (!response.ok) throw new Error(result.message || 'Unable to request your score.')
+      setRequestMessage(result.message || 'Your score request is queued.')
+    } catch (requestError) {
+      setRequestMessage(requestError instanceof Error ? requestError.message : 'Unable to request your score.')
+    } finally {
+      setRequesting(false)
+    }
+  }
 
   return (
     <div className="dashboard-shell">
@@ -1240,8 +1315,7 @@ function DashboardPage({ user, onLogout }: { user: AuthUser; onLogout: () => voi
           <section className="dashboard-grid dashboard-grid-top">
             <article className="dashboard-card score-card">
               <div className="dashboard-card-heading"><strong>Your Credit Score</strong><CircleHelp /></div>
-              <div className="dashboard-score-area"><div className="dashboard-gauge"><div className="dashboard-gauge-track" /><div className="dashboard-gauge-needle" /><strong>742</strong><small>Good</small><span className="gauge-min">300</span><span className="gauge-max">900</span></div><div className="dashboard-score-copy"><small>Last updated: 12 Oct 2026 <RotateCcw /></small><strong><TrendingUp /> +36 points</strong><span>from last month</span><p>You're in a good range!<br />Keep making payments on time<br />to maintain a healthy credit score.</p></div></div>
-              <button className="dashboard-primary-action" type="button">View My Credit Report <ArrowRight /></button>
+              {status.report?.credit_score ? <><div className="dashboard-score-area"><div className="dashboard-gauge"><div className="dashboard-gauge-track" /><div className="dashboard-gauge-needle" /><strong>{status.report.credit_score}</strong><small>{status.report.score_band || 'Good'}</small><span className="gauge-min">300</span><span className="gauge-max">900</span></div><div className="dashboard-score-copy"><small>Last updated: {status.report.report_date} <RotateCcw /></small><strong><TrendingUp /> Live report</strong><span>{status.report.bureau} bureau</span><p>Your report is ready.<br />Review your score factors<br />and next best actions.</p></div></div><button className="dashboard-primary-action" type="button">View My Credit Report <ArrowRight /></button></> : <div className="score-unavailable"><span><FileSearch /></span><h3>Your score hasn't been fetched yet</h3><p>Complete the sample request to create a pending report. The real bureau API can be connected later.</p><button className="dashboard-primary-action" type="button" onClick={requestScore} disabled={requesting}>{requesting ? 'Queueing request…' : <>Request My Credit Score <ArrowRight /></>}</button>{requestMessage && <small>{requestMessage}</small>}</div>}
             </article>
 
             <article className="dashboard-card highlights-card"><div className="dashboard-card-heading"><strong>Key Highlights</strong><button type="button">View Report <ArrowRight /></button></div><div className="highlight-grid"><div><span className="metric-icon blue"><CreditCard /></span><strong>5</strong><small>Active Accounts</small><ArrowRight /></div><div><span className="metric-icon blue"><Search /></span><strong>3</strong><small>Credit Enquiries<br />(last 6 months)</small><ArrowRight /></div><div><span className="metric-icon red"><AlertTriangle /></span><strong>0</strong><small>Overdue Payments</small><ArrowRight /></div><div><span className="metric-icon violet"><WalletCards /></span><strong>2</strong><small>Closed Accounts</small><ArrowRight /></div></div></article>
@@ -1250,7 +1324,7 @@ function DashboardPage({ user, onLogout }: { user: AuthUser; onLogout: () => voi
           </section>
 
           <section className="dashboard-grid dashboard-grid-middle">
-            <article className="dashboard-card trend-card"><div className="dashboard-card-heading"><strong>Your Credit Score Trend</strong><button type="button">6 Months <ChevronDown /></button></div><div className="trend-chart"><div className="trend-y-labels"><span>900</span><span>750</span><span>600</span><span>450</span><span>300</span></div><div className="trend-plot"><div className="trend-grid-lines"><i /><i /><i /><i /><i /></div><svg viewBox="0 0 520 180" preserveAspectRatio="none" aria-label="Credit score trend"><polyline points="10,132 95,118 180,107 265,84 350,70 435,57 510,42" fill="none" stroke="#0a3d9c" strokeWidth="3" /><polyline points="10,132 95,118 180,107 265,84 350,70 435,57 510,42 510,180 10,180" fill="url(#trendFill)" stroke="none" /><defs><linearGradient id="trendFill" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor="#b9dcff" stopOpacity=".65" /><stop offset="1" stopColor="#eaf6ff" stopOpacity=".1" /></linearGradient></defs>{[10,95,180,265,350,435,510].map((x, index) => <circle key={x} cx={x} cy={[132,118,107,84,70,57,42][index]} r="5" fill="#fff" stroke="#0a3d9c" strokeWidth="3" />)}</svg><div className="trend-months"><span>Apr</span><span>May</span><span>Jun</span><span>Jul</span><span>Aug</span><span>Sep</span><span>Oct</span></div><b className="trend-current">742</b></div></div></article>
+            <article className="dashboard-card trend-card"><div className="dashboard-card-heading"><strong>Your Credit Score Trend</strong>{status.report && <button type="button">6 Months <ChevronDown /></button>}</div>{status.report?.credit_score ? <div className="trend-chart"><div className="trend-y-labels"><span>900</span><span>750</span><span>600</span><span>450</span><span>300</span></div><div className="trend-plot"><div className="trend-grid-lines"><i /><i /><i /><i /><i /></div><svg viewBox="0 0 520 180" preserveAspectRatio="none" aria-label="Credit score trend"><polyline points="10,132 95,118 180,107 265,84 350,70 435,57 510,42" fill="none" stroke="#0a3d9c" strokeWidth="3" /><polyline points="10,132 95,118 180,107 265,84 350,70 435,57 510,42 510,180 10,180" fill="url(#trendFill)" stroke="none" /><defs><linearGradient id="trendFill" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor="#b9dcff" stopOpacity=".65" /><stop offset="1" stopColor="#eaf6ff" stopOpacity=".1" /></linearGradient></defs>{[10,95,180,265,350,435,510].map((x, index) => <circle key={x} cx={x} cy={[132,118,107,84,70,57,42][index]} r="5" fill="#fff" stroke="#0a3d9c" strokeWidth="3" />)}</svg><div className="trend-months"><span>Apr</span><span>May</span><span>Jun</span><span>Jul</span><span>Aug</span><span>Sep</span><span>Oct</span></div><b className="trend-current">{status.report.credit_score}</b></div></div> : <div className="empty-dashboard-state"><FileSearch /><strong>Your score trend will appear here</strong><span>Once the bureau report is fetched, we’ll track changes month by month.</span></div>}</article>
 
             <article className="dashboard-card factors-card"><div className="dashboard-card-heading"><strong>Score Factors</strong><button type="button">View Details <ArrowRight /></button></div><div className="factor-rows"><div><span className="factor-icon green"><Check /></span><span>Payment History</span><b className="status-good">Excellent</b><ArrowRight /></div><div><span className="factor-icon gold"><Percent /></span><span>Credit Utilisation</span><b className="status-good">Good</b><ArrowRight /></div><div><span className="factor-icon gold"><Clock3 /></span><span>Length of Credit History</span><b className="status-good">Good</b><ArrowRight /></div><div><span className="factor-icon violet"><Search /></span><span>Credit Enquiries</span><b className="status-good">Good</b><ArrowRight /></div><div><span className="factor-icon gold"><WalletCards /></span><span>Credit Mix</span><b className="status-fair">Fair</b><ArrowRight /></div></div></article>
 

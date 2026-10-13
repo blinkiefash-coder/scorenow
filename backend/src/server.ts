@@ -6,11 +6,14 @@ import nodemailer from "nodemailer";
 import path from "node:path";
 import {
   createOtp,
+  createCreditReportRequest,
   findUserByEmail,
+  getDashboardStatus,
   initializeDatabase,
   markEmailVerified,
   saveAssessment,
   saveWebsiteInquiry,
+  saveKycProfile,
   upsertUserByMobile,
   verifyOtp,
 } from "./database.js";
@@ -170,6 +173,57 @@ app.post("/api/auth/otp/verify", async (request, response) => {
     response.json({ message: "Verified successfully.", user: updatedUser });
   } catch (error) {
     response.status(400).json({ message: error instanceof Error ? error.message : "Verification failed." });
+  }
+});
+
+app.get("/api/dashboard/:userId", async (request, response) => {
+  try {
+    response.json(await getDashboardStatus(request.params.userId));
+  } catch (error) {
+    console.error("Dashboard status lookup failed", error);
+    response.status(500).json({ message: "Unable to load your credit dashboard." });
+  }
+});
+
+app.post("/api/profile/:userId", async (request, response) => {
+  const nameAsPerPan = String(request.body.nameAsPerPan || "").trim();
+  const pan = String(request.body.pan || "").trim();
+  const dateOfBirth = String(request.body.dateOfBirth || "").trim();
+  const panPattern = /^[A-Z]{5}[0-9]{4}[A-Z]$/i;
+  if (nameAsPerPan.length < 2 || !panPattern.test(pan) || !/^\d{4}-\d{2}-\d{2}$/.test(dateOfBirth)) {
+    response.status(400).json({ message: "Enter a valid PAN, name, and date of birth." });
+    return;
+  }
+
+  try {
+    const profile = await saveKycProfile({
+      userId: request.params.userId,
+      nameAsPerPan,
+      pan,
+      dateOfBirth,
+      gender: String(request.body.gender || "").trim(),
+      addressLine1: String(request.body.addressLine1 || "").trim(),
+      city: String(request.body.city || "").trim(),
+      state: String(request.body.state || "").trim(),
+      pincode: String(request.body.pincode || "").trim(),
+    });
+    response.status(201).json({ message: "Profile saved. You can now request your credit score.", profile });
+  } catch (error) {
+    console.error("KYC profile save failed", error);
+    response.status(400).json({ message: "We could not save those details. Please check them and try again." });
+  }
+});
+
+app.post("/api/credit-score/request", async (request, response) => {
+  try {
+    const requestRecord = await createCreditReportRequest(String(request.body.userId || ""));
+    response.status(201).json({
+      message: "Your score request is queued. The live bureau API will populate the report when connected.",
+      request: requestRecord,
+    });
+  } catch (error) {
+    console.error("Credit score request failed", error);
+    response.status(400).json({ message: "Complete your profile before requesting a credit score." });
   }
 });
 

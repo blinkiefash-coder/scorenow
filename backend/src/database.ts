@@ -1,4 +1,4 @@
-import { createHash, randomInt } from "node:crypto";
+import { createCipheriv, createHash, randomBytes, randomInt } from "node:crypto";
 import { Pool } from "pg";
 
 const pool = new Pool({
@@ -161,6 +161,95 @@ export const markEmailVerified = async (userId: string) => {
     `UPDATE users SET email_verified = TRUE, updated_at = NOW() WHERE id = $1
      RETURNING id, mobile, email, full_name, email_verified`,
     [userId],
+  );
+  return rows[0];
+};
+
+const encryptPan = (pan: string) => {
+  const key = createHash("sha256")
+    .update(process.env.KYC_ENCRYPTION_KEY || "scorenow-local-development-key")
+    .digest();
+  const iv = randomBytes(12);
+  const cipher = createCipheriv("aes-256-gcm", key, iv);
+  const encrypted = Buffer.concat([cipher.update(pan, "utf8"), cipher.final()]);
+  return Buffer.concat([iv, cipher.getAuthTag(), encrypted]);
+};
+
+export const getDashboardStatus = async (userId: string) => {
+  const [profileResult, reportResult] = await Promise.all([
+    pool.query<{ id: string; name_as_per_pan: string; date_of_birth: string; city: string | null; kyc_status: string }>(
+      `SELECT id, name_as_per_pan, date_of_birth, city, kyc_status FROM kyc_profiles WHERE user_id = $1 ORDER BY created_at DESC LIMIT 1`,
+      [userId],
+    ),
+    pool.query<{ id: string; credit_score: number | null; score_band: string | null; report_date: string; bureau: string; active_accounts: number | null; total_accounts: number | null; overdue_accounts: number | null; enquiries_last_6_months: number | null }>(
+      `SELECT id, credit_score, score_band, report_date, bureau, active_accounts, total_accounts, overdue_accounts, enquiries_last_6_months
+       FROM credit_reports WHERE user_id = $1 ORDER BY report_date DESC, created_at DESC LIMIT 1`,
+      [userId],
+    ),
+  ]);
+  return { profile: profileResult.rows[0] ?? null, report: reportResult.rows[0] ?? null };
+};
+
+export const saveKycProfile = async ({
+  userId,
+  nameAsPerPan,
+  pan,
+  dateOfBirth,
+  gender,
+  addressLine1,
+  city,
+  state,
+  pincode,
+}: {
+  userId: string;
+  nameAsPerPan: string;
+  pan: string;
+  dateOfBirth: string;
+  gender?: string;
+  addressLine1?: string;
+  city?: string;
+  state?: string;
+  pincode?: string;
+}) => {
+  const normalizedPan = pan.toUpperCase().replace(/\s/g, "");
+  const panHash = createHash("sha256").update(normalizedPan).digest("hex");
+  const normalizedGender = ["female", "male", "other"].includes((gender || "").toLowerCase())
+    ? (gender || "").toLowerCase()
+    : null;
+  const { rows } = await pool.query<{ id: string; name_as_per_pan: string; date_of_birth: string; city: string | null; kyc_status: string }>(
+    `INSERT INTO kyc_profiles
+      (user_id, name_as_per_pan, pan_encrypted, pan_hash, pan_last4, date_of_birth, gender, address_line1, city, state, pincode, kyc_status, verification_provider)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 'pending', 'sample-flow')
+     ON CONFLICT (user_id) DO UPDATE SET
+       name_as_per_pan = EXCLUDED.name_as_per_pan,
+       pan_encrypted = EXCLUDED.pan_encrypted,
+       pan_hash = EXCLUDED.pan_hash,
+       pan_last4 = EXCLUDED.pan_last4,
+       date_of_birth = EXCLUDED.date_of_birth,
+       gender = EXCLUDED.gender,
+       address_line1 = EXCLUDED.address_line1,
+       city = EXCLUDED.city,
+       state = EXCLUDED.state,
+       pincode = EXCLUDED.pincode,
+       updated_at = NOW()
+     RETURNING id, name_as_per_pan, date_of_birth, city, kyc_status`,
+    [userId, nameAsPerPan.trim(), encryptPan(normalizedPan), panHash, normalizedPan.slice(-4), dateOfBirth, normalizedGender, addressLine1 || null, city || null, state || null, pincode || null],
+  );
+  return rows[0];
+};
+
+export const createCreditReportRequest = async (userId: string) => {
+  const consent = await pool.query<{ id: string }>(
+    `INSERT INTO user_consents (user_id, consent_type, consent_text_version, granted)
+     VALUES ($1, 'credit_report_pull', 'credit-score-sample-v1', TRUE)
+     RETURNING id`,
+    [userId],
+  );
+  const { rows } = await pool.query<{ id: string; status: string; requested_at: string }>(
+    `INSERT INTO credit_report_requests (user_id, consent_id, bureau, provider, status)
+     VALUES ($1, $2, 'cibil', 'sample-provider', 'initiated')
+     RETURNING id, status, requested_at`,
+    [userId, consent.rows[0].id],
   );
   return rows[0];
 };
