@@ -116,7 +116,7 @@ app.post("/api/auth/otp/request", async (request, response) => {
       }
       const { code } = await createOtp({ mobile, purpose: "login" });
       const delivered = await sendOtpSms(mobile, code);
-      response.json({ message: "A verification code was sent to your mobile number.", devCode: delivered ? undefined : code });
+      response.json({ message: "A verification code was sent to your mobile number.", devCode: !delivered && process.env.NODE_ENV !== "production" ? code : undefined });
       return;
     }
 
@@ -132,7 +132,7 @@ app.post("/api/auth/otp/request", async (request, response) => {
     }
     const { code } = await createOtp({ mobile: user.mobile, email, purpose: "login" });
     const delivered = await sendOtpEmail(email, code);
-    response.json({ message: "A verification code was sent to your email.", devCode: delivered ? undefined : code });
+    response.json({ message: "A verification code was sent to your email.", devCode: !delivered && process.env.NODE_ENV !== "production" ? code : undefined });
   } catch (error) {
     response.status(429).json({ message: error instanceof Error ? error.message : "Unable to send a verification code." });
   }

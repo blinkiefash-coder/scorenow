@@ -1,11 +1,11 @@
 import { useEffect, useRef, useState, type CSSProperties, type FormEvent } from 'react'
 import {
-  ArrowLeft, ArrowRight, BadgeIndianRupee, BarChart3, Building2, CalendarDays,
-  Check, ChevronDown, CircleHelp, Clock3, CreditCard, Eye, EyeOff, FileCheck2,
-  FileSearch, Handshake, Headphones, House, Lightbulb, LockKeyhole,
-  Mail, MapPin, Menu, MessageCircle, Pause, Phone, Play, RotateCcw, Search,
-  ShieldCheck, Smartphone, Sparkles, Star, TrendingUp, Users, Volume2, VolumeX,
-  UserRound, WalletCards, X, Zap,
+  AlertTriangle, ArrowLeft, ArrowRight, BadgeIndianRupee, BarChart3, Bell, BookOpen,
+  Building2, CalendarDays, Check, ChevronDown, CircleHelp, Clock3, CreditCard,
+  Download, Eye, EyeOff, FileCheck2, FileSearch, Gift, Handshake, Headphones,
+  House, Lightbulb, LockKeyhole, Mail, MapPin, Menu, MessageCircle, Pause, Percent,
+  Phone, Play, RotateCcw, Search, Settings, ShieldCheck, Smartphone, Sparkles, Star,
+  TrendingUp, Users, Volume2, VolumeX, UserRound, WalletCards, X, Zap,
 } from 'lucide-react'
 import './App.css'
 
@@ -1191,6 +1191,83 @@ function ChatAssistant() {
   )
 }
 
+function DashboardPage({ user, onLogout }: { user: AuthUser; onLogout: () => void }) {
+  const firstName = user.full_name.trim().split(' ')[0] || 'there'
+  const sidebarItems = [
+    { icon: House, label: 'Home', active: true },
+    { icon: FileSearch, label: 'My Report' },
+    { icon: TrendingUp, label: 'Improve' },
+    { icon: Gift, label: 'Offers' },
+    { icon: CreditCard, label: 'Payments' },
+    { icon: UserRound, label: 'My Profile' },
+    { icon: Settings, label: 'Settings' },
+    { icon: CircleHelp, label: 'Help & Support' },
+  ]
+
+  return (
+    <div className="dashboard-shell">
+      <aside className="dashboard-sidebar">
+        <Brand href="/" />
+        <nav aria-label="Dashboard navigation">
+          {sidebarItems.map(({ icon: Icon, label, active }) => (
+            <button key={label} className={active ? 'active' : ''} type="button"><Icon /><span>{label}</span>{active && <ArrowRight />}</button>
+          ))}
+        </nav>
+        <div className="dashboard-support">
+          <span><MessageCircle /></span>
+          <strong>Have questions?</strong>
+          <p>Get expert support for your credit report, disputes, or loan options.</p>
+          <button type="button">Contact Support <ArrowRight /></button>
+        </div>
+      </aside>
+
+      <main className="dashboard-main">
+        <header className="dashboard-topbar">
+          <div className="dashboard-search"><Search /><input aria-label="Search dashboard" placeholder="Search for loans, credit cards, or learn about credit..." /></div>
+          <div className="dashboard-top-actions">
+            <button className="dashboard-score-cta" type="button">Check My Credit Score <ArrowRight /></button>
+            <button className="dashboard-icon-button" type="button" aria-label="Notifications"><Bell /><b>3</b></button>
+            <AuthAvatarButton user={user} onClick={() => undefined} onLogout={onLogout} />
+          </div>
+        </header>
+
+        <div className="dashboard-content">
+          <div className="dashboard-welcome">
+            <div><h1>Good evening, {firstName}! <span>👋</span></h1><p>Here's your credit health at a glance.</p></div>
+            <div className="dashboard-offer-banner"><Gift /><span><strong>Special offers for you!</strong><small>Personalised loan and credit card offers based on your profile.</small></span><ArrowRight /></div>
+          </div>
+
+          <section className="dashboard-grid dashboard-grid-top">
+            <article className="dashboard-card score-card">
+              <div className="dashboard-card-heading"><strong>Your Credit Score</strong><CircleHelp /></div>
+              <div className="dashboard-score-area"><div className="dashboard-gauge"><div className="dashboard-gauge-track" /><div className="dashboard-gauge-needle" /><strong>742</strong><small>Good</small><span className="gauge-min">300</span><span className="gauge-max">900</span></div><div className="dashboard-score-copy"><small>Last updated: 12 Oct 2026 <RotateCcw /></small><strong><TrendingUp /> +36 points</strong><span>from last month</span><p>You're in a good range!<br />Keep making payments on time<br />to maintain a healthy credit score.</p></div></div>
+              <button className="dashboard-primary-action" type="button">View My Credit Report <ArrowRight /></button>
+            </article>
+
+            <article className="dashboard-card highlights-card"><div className="dashboard-card-heading"><strong>Key Highlights</strong><button type="button">View Report <ArrowRight /></button></div><div className="highlight-grid"><div><span className="metric-icon blue"><CreditCard /></span><strong>5</strong><small>Active Accounts</small><ArrowRight /></div><div><span className="metric-icon blue"><Search /></span><strong>3</strong><small>Credit Enquiries<br />(last 6 months)</small><ArrowRight /></div><div><span className="metric-icon red"><AlertTriangle /></span><strong>0</strong><small>Overdue Payments</small><ArrowRight /></div><div><span className="metric-icon violet"><WalletCards /></span><strong>2</strong><small>Closed Accounts</small><ArrowRight /></div></div></article>
+
+            <article className="dashboard-card quick-card"><div className="dashboard-card-heading"><strong>Quick Actions</strong></div><div className="quick-actions"><button type="button"><FileSearch /> View Full Credit Report <ArrowRight /></button><button type="button"><ShieldCheck /> Check My Credit Score <ArrowRight /></button><button type="button"><Download /> Download Report (PDF) <ArrowRight /></button><button type="button"><BarChart3 /> Improve My Credit Score <ArrowRight /></button><button type="button"><Gift /> Explore Loan &amp; Card Offers <ArrowRight /></button></div></article>
+          </section>
+
+          <section className="dashboard-grid dashboard-grid-middle">
+            <article className="dashboard-card trend-card"><div className="dashboard-card-heading"><strong>Your Credit Score Trend</strong><button type="button">6 Months <ChevronDown /></button></div><div className="trend-chart"><div className="trend-y-labels"><span>900</span><span>750</span><span>600</span><span>450</span><span>300</span></div><div className="trend-plot"><div className="trend-grid-lines"><i /><i /><i /><i /><i /></div><svg viewBox="0 0 520 180" preserveAspectRatio="none" aria-label="Credit score trend"><polyline points="10,132 95,118 180,107 265,84 350,70 435,57 510,42" fill="none" stroke="#0a3d9c" strokeWidth="3" /><polyline points="10,132 95,118 180,107 265,84 350,70 435,57 510,42 510,180 10,180" fill="url(#trendFill)" stroke="none" /><defs><linearGradient id="trendFill" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor="#b9dcff" stopOpacity=".65" /><stop offset="1" stopColor="#eaf6ff" stopOpacity=".1" /></linearGradient></defs>{[10,95,180,265,350,435,510].map((x, index) => <circle key={x} cx={x} cy={[132,118,107,84,70,57,42][index]} r="5" fill="#fff" stroke="#0a3d9c" strokeWidth="3" />)}</svg><div className="trend-months"><span>Apr</span><span>May</span><span>Jun</span><span>Jul</span><span>Aug</span><span>Sep</span><span>Oct</span></div><b className="trend-current">742</b></div></div></article>
+
+            <article className="dashboard-card factors-card"><div className="dashboard-card-heading"><strong>Score Factors</strong><button type="button">View Details <ArrowRight /></button></div><div className="factor-rows"><div><span className="factor-icon green"><Check /></span><span>Payment History</span><b className="status-good">Excellent</b><ArrowRight /></div><div><span className="factor-icon gold"><Percent /></span><span>Credit Utilisation</span><b className="status-good">Good</b><ArrowRight /></div><div><span className="factor-icon gold"><Clock3 /></span><span>Length of Credit History</span><b className="status-good">Good</b><ArrowRight /></div><div><span className="factor-icon violet"><Search /></span><span>Credit Enquiries</span><b className="status-good">Good</b><ArrowRight /></div><div><span className="factor-icon gold"><WalletCards /></span><span>Credit Mix</span><b className="status-fair">Fair</b><ArrowRight /></div></div></article>
+
+            <article className="dashboard-card action-card"><div className="dashboard-card-heading"><strong><Lightbulb /> Action for You</strong></div><div className="action-list"><div><span className="metric-icon green"><CreditCard /></span><p><strong>Maintain On-Time Payments</strong><small>You've been making payments consistently. Keep it up!</small></p><ArrowRight /></div><div><span className="metric-icon gold"><Percent /></span><p><strong>Reduce Credit Utilization</strong><small>Try to keep your credit usage below 30%.</small></p><ArrowRight /></div><div><span className="metric-icon blue"><Search /></span><p><strong>Limit New Credit Enquiries</strong><small>Multiple enquiries in a short period can impact your score.</small></p><ArrowRight /></div></div></article>
+          </section>
+
+          <section className="dashboard-grid dashboard-grid-bottom">
+            <article className="dashboard-card alerts-card"><div className="dashboard-card-heading"><strong><Bell /> Recent Alerts</strong><button type="button">View All <ArrowRight /></button></div><div className="alert-list"><div><Check /><p><strong>Your credit report is ready</strong><small>Generated on 12 Oct 2026</small></p><time>Today</time></div><div><Clock3 /><p><strong>New enquiry added</strong><small>HDFC Bank · Personal Loan</small></p><time>28 Sep 2026</time></div><div><CircleHelp /><p><strong>Score increased by 36 points</strong><small>Your score is now 742</small></p><time>12 Sep 2026</time></div></div></article>
+            <article className="dashboard-card recommended-card"><div className="dashboard-card-heading"><strong><Gift /> Recommended for You</strong><button type="button">View All Offers <ArrowRight /></button></div><div className="recommend-grid"><div><span className="recommend-brand hdfc">H</span><strong>HDFC Bank</strong><small>Up to ₹20,00,000<br />Starting 10.5% p.a.</small><button type="button">View Offer <ArrowRight /></button></div><div><span className="recommend-brand sbi">SBI</span><strong>SBI Credit Card</strong><small>Lifetime Free<br />Rewards &amp; Cashback</small><button type="button">View Offer <ArrowRight /></button></div></div></article>
+            <article className="dashboard-card learning-card"><div className="dashboard-card-heading"><strong><BookOpen /> Credit Learning Hub</strong><button type="button">View All <ArrowRight /></button></div><div className="learning-list"><div><span>5 min</span><p><strong>5 Ways to Improve Your Credit Score</strong><small>Simple tips to build a stronger credit profile.</small></p><ArrowRight /></div><div><span>4 min</span><p><strong>What is a Good Credit Score?</strong><small>Understand score ranges and what they mean.</small></p><ArrowRight /></div><div><span>6 min</span><p><strong>How Credit Enquiries Affect Your Score</strong><small>Learn how to manage credit applications.</small></p><ArrowRight /></div></div></article>
+          </section>
+        </div>
+      </main>
+    </div>
+  )
+}
+
 function HomePage() {
   const [menuOpen, setMenuOpen] = useState(false)
   const closeMenu = () => setMenuOpen(false)
@@ -1215,6 +1292,8 @@ function HomePage() {
     elements.forEach((element) => observer.observe(element))
     return () => observer.disconnect()
   }, [])
+
+  if (user) return <DashboardPage user={user} onLogout={logout} />
 
   return (
     <div className="site-shell">
