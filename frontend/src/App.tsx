@@ -8,7 +8,6 @@ import {
   UserRound, WalletCards, X, Zap,
 } from 'lucide-react'
 import './App.css'
-import { isFirebaseConfigured, startPhoneSignIn, type ConfirmationResult } from './firebase'
 
 const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:3000'
 
@@ -244,6 +243,32 @@ function Brand({ href = '#home' }: { href?: string }) {
   )
 }
 
+type AuthUser = { id: string; mobile: string; email: string | null; full_name: string }
+
+// Keeps the signed-in user in localStorage so a refresh doesn't log them out.
+function useAuthUser() {
+  const [user, setUser] = useState<AuthUser | null>(() => {
+    try {
+      const raw = localStorage.getItem('scorenow-user')
+      return raw ? JSON.parse(raw) as AuthUser : null
+    } catch {
+      return null
+    }
+  })
+
+  const login = (nextUser: AuthUser) => {
+    setUser(nextUser)
+    localStorage.setItem('scorenow-user', JSON.stringify(nextUser))
+  }
+
+  const logout = () => {
+    setUser(null)
+    localStorage.removeItem('scorenow-user')
+  }
+
+  return { user, login, logout }
+}
+
 // Opens the auth popup once per browser session, shortly after the visitor starts scrolling.
 function useScrollAuthPrompt() {
   const [open, setOpen] = useState(false)
@@ -265,12 +290,44 @@ function useScrollAuthPrompt() {
   return [open, setOpen] as const
 }
 
-function AuthAvatarButton({ onClick }: { onClick: () => void }) {
+function AuthAvatarButton({ user, onClick, onLogout }: { user: AuthUser | null; onClick: () => void; onLogout: () => void }) {
+  const [menuOpen, setMenuOpen] = useState(false)
+  const containerRef = useRef<HTMLDivElement | null>(null)
+
+  useEffect(() => {
+    if (!menuOpen) return
+    const onDocClick = (event: MouseEvent) => {
+      if (!containerRef.current?.contains(event.target as Node)) setMenuOpen(false)
+    }
+    document.addEventListener('mousedown', onDocClick)
+    return () => document.removeEventListener('mousedown', onDocClick)
+  }, [menuOpen])
+
+  if (!user) {
+    return (
+      <button className="auth-avatar-button" type="button" onClick={onClick} aria-label="Log in or sign up">
+        <span className="avatar-icon"><UserRound /></span>
+        <span className="avatar-label">Log In</span>
+      </button>
+    )
+  }
+
+  const firstName = user.full_name.trim().split(' ')[0] || 'Account'
+
   return (
-    <button className="auth-avatar-button" type="button" onClick={onClick} aria-label="Log in or sign up">
-      <span className="avatar-icon"><UserRound /></span>
-      <span className="avatar-label">Log In</span>
-    </button>
+    <div className="auth-user-menu" ref={containerRef}>
+      <button className="auth-avatar-button is-logged-in" type="button" onClick={() => setMenuOpen((open) => !open)} aria-expanded={menuOpen} aria-label={`Account menu for ${user.full_name}`}>
+        <span className="avatar-icon"><UserRound /></span>
+        <span className="avatar-label">{firstName}</span>
+      </button>
+      {menuOpen && (
+        <div className="auth-user-dropdown" role="menu">
+          <strong>{user.full_name}</strong>
+          <small>{user.mobile ? `+91 ${user.mobile}` : user.email}</small>
+          <button type="button" role="menuitem" onClick={() => { setMenuOpen(false); onLogout() }}>Log Out</button>
+        </div>
+      )}
+    </div>
   )
 }
 
@@ -325,7 +382,7 @@ function maskEmail(email: string) {
   return `${visible}${'•'.repeat(Math.max(name.length - visible.length, 3))}@${domain}`
 }
 
-function AuthModal({ open, onClose }: { open: boolean; onClose: () => void }) {
+function AuthModal({ open, onClose, onSuccess }: { open: boolean; onClose: () => void; onSuccess: (user: AuthUser) => void }) {
   const [view, setView] = useState<'login' | 'signup' | 'otp'>('login')
   const [loginMethod, setLoginMethod] = useState<'mobile' | 'email'>('mobile')
   const [showPassword, setShowPassword] = useState(false)
@@ -335,8 +392,9 @@ function AuthModal({ open, onClose }: { open: boolean; onClose: () => void }) {
   const [otpContact, setOtpContact] = useState<{ type: 'mobile' | 'email'; value: string }>({ type: 'mobile', value: '' })
   const [authError, setAuthError] = useState('')
   const [authLoading, setAuthLoading] = useState(false)
-  const confirmationResultRef = useRef<ConfirmationResult | null>(null)
+  const [sampleOtp, setSampleOtp] = useState('')
   const pendingFullNameRef = useRef('')
+  const pendingEmailRef = useRef('')
 
   useEffect(() => {
     if (!open) return
@@ -345,6 +403,7 @@ function AuthModal({ open, onClose }: { open: boolean; onClose: () => void }) {
     setShowPassword(false)
     setOtpDigits(['', '', '', '', '', ''])
     setAuthError('')
+    setSampleOtp('')
   }, [open])
 
   useEffect(() => {
@@ -367,32 +426,27 @@ function AuthModal({ open, onClose }: { open: boolean; onClose: () => void }) {
 
   if (!open) return null
 
-  const requestMobileOtp = async (mobile: string) => {
-    if (!isFirebaseConfigured) {
-      throw new Error('Mobile sign-in is not configured yet. Please use email instead.')
-    }
-    confirmationResultRef.current = await startPhoneSignIn(`+91${mobile}`, 'recaptcha-container')
-  }
-
-  const requestEmailOtp = async (email: string) => {
+  const requestOtp = async (type: 'mobile' | 'email', value: string) => {
     const response = await fetch(`${apiUrl}/api/auth/otp/request`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ type: 'email', value: email }),
+      body: JSON.stringify({ type, value }),
     })
-    const result = await response.json() as { message?: string }
+    const result = await response.json() as { message?: string; devCode?: string }
     if (!response.ok) throw new Error(result.message || 'Unable to send a verification code.')
+    setSampleOtp(result.devCode || '')
   }
 
   const submitLogin = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
     const data = new FormData(event.currentTarget)
     const value = loginMethod === 'mobile' ? String(data.get('mobile') || '') : String(data.get('email') || '')
+    pendingFullNameRef.current = ''
+    pendingEmailRef.current = ''
     setAuthError('')
     setAuthLoading(true)
     try {
-      if (loginMethod === 'mobile') await requestMobileOtp(value)
-      else await requestEmailOtp(value)
+      await requestOtp(loginMethod, value)
       setOtpContact({ type: loginMethod, value })
       setOtpOrigin('login')
       setOtpDigits(['', '', '', '', '', ''])
@@ -409,10 +463,11 @@ function AuthModal({ open, onClose }: { open: boolean; onClose: () => void }) {
     const data = new FormData(event.currentTarget)
     const mobile = String(data.get('mobile') || '')
     pendingFullNameRef.current = String(data.get('name') || '')
+    pendingEmailRef.current = String(data.get('email') || '')
     setAuthError('')
     setAuthLoading(true)
     try {
-      await requestMobileOtp(mobile)
+      await requestOtp('mobile', mobile)
       setOtpContact({ type: 'mobile', value: mobile })
       setOtpOrigin('signup')
       setOtpDigits(['', '', '', '', '', ''])
@@ -429,8 +484,7 @@ function AuthModal({ open, onClose }: { open: boolean; onClose: () => void }) {
     setAuthError('')
     setAuthLoading(true)
     try {
-      if (otpContact.type === 'mobile') await requestMobileOtp(otpContact.value)
-      else await requestEmailOtp(otpContact.value)
+      await requestOtp(otpContact.type, otpContact.value)
       setOtpDigits(['', '', '', '', '', ''])
       setResendSeconds(28)
     } catch (error) {
@@ -446,27 +500,14 @@ function AuthModal({ open, onClose }: { open: boolean; onClose: () => void }) {
     setAuthError('')
     setAuthLoading(true)
     try {
-      if (otpContact.type === 'mobile') {
-        const confirmationResult = confirmationResultRef.current
-        if (!confirmationResult) throw new Error('Your code expired. Please request a new one.')
-        const credential = await confirmationResult.confirm(code)
-        const idToken = await credential.user.getIdToken()
-        const response = await fetch(`${apiUrl}/api/auth/session`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ idToken, fullName: pendingFullNameRef.current }),
-        })
-        const result = await response.json() as { message?: string }
-        if (!response.ok) throw new Error(result.message || 'Could not verify your sign-in.')
-      } else {
-        const response = await fetch(`${apiUrl}/api/auth/otp/verify`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ type: 'email', value: otpContact.value, code }),
-        })
-        const result = await response.json() as { message?: string }
-        if (!response.ok) throw new Error(result.message || 'Verification failed.')
-      }
+      const response = await fetch(`${apiUrl}/api/auth/otp/verify`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ type: otpContact.type, value: otpContact.value, code, fullName: pendingFullNameRef.current, email: pendingEmailRef.current }),
+      })
+      const result = await response.json() as { message?: string; user?: AuthUser }
+      if (!response.ok) throw new Error(result.message || 'Verification failed.')
+      if (result.user) onSuccess(result.user)
       onClose()
     } catch (error) {
       setAuthError(error instanceof Error ? error.message : 'Incorrect code. Please try again.')
@@ -499,6 +540,11 @@ function AuthModal({ open, onClose }: { open: boolean; onClose: () => void }) {
             <span className="auth-shield"><ShieldCheck /></span>
             <h3>Verify Your {otpContact.type === 'mobile' ? 'Mobile Number' : 'Email Address'}</h3>
             <p>Enter the 6-digit code sent to<br /><strong>{maskedContact}</strong></p>
+            {sampleOtp && (
+              <button type="button" className="auth-sample-otp" onClick={() => setOtpDigits(sampleOtp.split(''))}>
+                <ShieldCheck /> Sample OTP (dev mode): <strong>{sampleOtp}</strong>
+              </button>
+            )}
             {authError && <p className="auth-error">{authError}</p>}
             <form className="auth-form otp-form" onSubmit={submitOtp}>
               <OtpInputs digits={otpDigits} onChange={setOtpDigits} />
@@ -546,7 +592,6 @@ function AuthModal({ open, onClose }: { open: boolean; onClose: () => void }) {
                 <button className="button button-primary" type="submit" disabled={authLoading}>{authLoading ? 'Sending…' : <>Create Account <ArrowRight /></>}</button>
               </form>
             )}
-            <div id="recaptcha-container" />
 
             <div className="auth-divider"><span>or continue with</span></div>
             <button className="auth-google" type="button"><GoogleIcon /> Continue with Google</button>
@@ -1150,6 +1195,7 @@ function HomePage() {
   const [menuOpen, setMenuOpen] = useState(false)
   const closeMenu = () => setMenuOpen(false)
   const [authOpen, setAuthOpen] = useScrollAuthPrompt()
+  const { user, login, logout } = useAuthUser()
 
   useEffect(() => {
     const elements = Array.from(document.querySelectorAll<HTMLElement>('[data-reveal]'))
@@ -1187,7 +1233,7 @@ function HomePage() {
               <a href="#contact" onClick={closeMenu}>Contact</a>
               <a className="button button-primary nav-cta" href="#personal-assessment" onClick={closeMenu}>Free Assessment <ArrowRight /></a>
             </nav>
-            <AuthAvatarButton onClick={() => setAuthOpen(true)} />
+            <AuthAvatarButton user={user} onClick={() => setAuthOpen(true)} onLogout={logout} />
             <button className="menu-button" type="button" aria-label={menuOpen ? 'Close navigation' : 'Open navigation'} aria-expanded={menuOpen} onClick={() => setMenuOpen((open) => !open)}>
               {menuOpen ? <X /> : <Menu />}
             </button>
@@ -1345,7 +1391,7 @@ function HomePage() {
         <div className="container footer-bottom"><span>© 2026 Score Now. All rights reserved.</span><span>Privacy Policy · Terms of Use</span></div>
       </footer>
       <ChatAssistant />
-      <AuthModal open={authOpen} onClose={() => setAuthOpen(false)} />
+      <AuthModal open={authOpen} onClose={() => setAuthOpen(false)} onSuccess={login} />
     </div>
   )
 }
@@ -1353,6 +1399,7 @@ function HomePage() {
 function BusinessPage() {
   const [menuOpen, setMenuOpen] = useState(false)
   const [authOpen, setAuthOpen] = useScrollAuthPrompt()
+  const { user, login, logout } = useAuthUser()
   const businessMessage = encodeURIComponent('Hello Score Now, I would like to discuss the Business CMR Improvement Programme.')
   const shieldMessage = encodeURIComponent('Hello Score Now, I would like to discuss the Credit Shield 360 annual business membership.')
 
@@ -1365,7 +1412,7 @@ function BusinessPage() {
             <nav className={menuOpen ? 'nav-links open' : 'nav-links'} aria-label="Business navigation">
               <a href="/">Home</a><a href="/#personal-assessment">For Individuals</a><a className="active" href="/business">For Businesses</a><a href="#business-plans">Business Plans</a><a href="/#about">About Us</a><a href="/#contact">Contact</a><a className="button button-primary nav-cta" href="#business-assessment">Free Assessment <ArrowRight /></a>
             </nav>
-            <AuthAvatarButton onClick={() => setAuthOpen(true)} />
+            <AuthAvatarButton user={user} onClick={() => setAuthOpen(true)} onLogout={logout} />
             <button className="menu-button" type="button" aria-label={menuOpen ? 'Close navigation' : 'Open navigation'} aria-expanded={menuOpen} onClick={() => setMenuOpen((open) => !open)}>{menuOpen ? <X /> : <Menu />}</button>
           </div>
         </div>
@@ -1394,7 +1441,7 @@ function BusinessPage() {
       </main>
       <footer><div className="container footer-grid"><div><Brand href="/" /><p>Clear guidance for a stronger financial future.</p></div><div><strong>Explore</strong><a href="/">Individuals</a><a href="/business">Businesses</a></div><div><strong>Business</strong><a href="#business-assessment">Assessment</a><a href="#business-plans">Plans</a></div><div><strong>Reach Us</strong><a href="tel:+919114141011">+91 91141 41011</a><a href="mailto:info@scorenow.in">info@scorenow.in</a></div><AppDownload /></div><div className="container footer-bottom"><span>© 2026 Score Now. All rights reserved.</span><span>Privacy Policy · Terms of Use</span></div></footer>
       <ChatAssistant />
-      <AuthModal open={authOpen} onClose={() => setAuthOpen(false)} />
+      <AuthModal open={authOpen} onClose={() => setAuthOpen(false)} onSuccess={login} />
     </div>
   )
 }

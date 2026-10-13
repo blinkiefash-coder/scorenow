@@ -33,86 +33,67 @@ export const initializeDatabase = async () => {
     )
   `);
 
-  await pool.query(`
-    CREATE TABLE IF NOT EXISTS app_users (
-      id BIGSERIAL PRIMARY KEY,
-      mobile TEXT UNIQUE,
-      email TEXT UNIQUE,
-      full_name TEXT,
-      firebase_uid TEXT UNIQUE,
-      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-      last_login_at TIMESTAMPTZ
-    )
-  `);
-
-  await pool.query(`
-    CREATE TABLE IF NOT EXISTS otp_codes (
-      id BIGSERIAL PRIMARY KEY,
-      contact_type TEXT NOT NULL CHECK (contact_type IN ('mobile', 'email')),
-      contact_value TEXT NOT NULL,
-      code_hash TEXT NOT NULL,
-      attempts INT NOT NULL DEFAULT 0,
-      expires_at TIMESTAMPTZ NOT NULL,
-      consumed_at TIMESTAMPTZ,
-      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-    )
-  `);
+  // Additive column on the existing otp_verifications table so an OTP request
+  // can also be delivered by email (mobile stays required, matching `users.mobile`).
+  await pool.query(`ALTER TABLE otp_verifications ADD COLUMN IF NOT EXISTS email TEXT`);
 };
 
 const OTP_TTL_MS = 5 * 60 * 1000;
 const OTP_RESEND_COOLDOWN_MS = 30 * 1000;
 const OTP_MAX_ATTEMPTS = 5;
 
-const hashOtp = (contactType: string, contactValue: string, code: string) =>
-  createHash("sha256").update(`${contactType}:${contactValue.toLowerCase()}:${code}`).digest("hex");
+const hashOtp = (mobile: string, code: string) =>
+  createHash("sha256").update(`${mobile}:${code}`).digest("hex");
 
 export const createOtp = async ({
-  contactType,
-  contactValue,
+  mobile,
+  email,
+  purpose = "login",
 }: {
-  contactType: "mobile" | "email";
-  contactValue: string;
+  mobile: string;
+  email?: string;
+  purpose?: "login" | "kyc" | "credit_consent";
 }) => {
   const { rows: recent } = await pool.query<{ created_at: Date }>(
-    `SELECT created_at FROM otp_codes
-     WHERE contact_type = $1 AND contact_value = $2
+    `SELECT created_at FROM otp_verifications
+     WHERE mobile = $1 AND purpose = $2
      ORDER BY created_at DESC LIMIT 1`,
-    [contactType, contactValue],
+    [mobile, purpose],
   );
   if (recent[0] && Date.now() - new Date(recent[0].created_at).getTime() < OTP_RESEND_COOLDOWN_MS) {
     throw new Error("Please wait before requesting another code.");
   }
 
   const code = randomInt(0, 1_000_000).toString().padStart(6, "0");
-  const codeHash = hashOtp(contactType, contactValue, code);
+  const otpHash = hashOtp(mobile, code);
   const expiresAt = new Date(Date.now() + OTP_TTL_MS);
 
   await pool.query(
-    `INSERT INTO otp_codes (contact_type, contact_value, code_hash, expires_at)
-     VALUES ($1, $2, $3, $4)`,
-    [contactType, contactValue, codeHash, expiresAt],
+    `INSERT INTO otp_verifications (mobile, email, otp_hash, purpose, expires_at)
+     VALUES ($1, $2, $3, $4, $5)`,
+    [mobile, email ?? null, otpHash, purpose, expiresAt],
   );
 
   return { code, expiresAt };
 };
 
 export const verifyOtp = async ({
-  contactType,
-  contactValue,
+  mobile,
   code,
+  purpose = "login",
 }: {
-  contactType: "mobile" | "email";
-  contactValue: string;
+  mobile: string;
   code: string;
+  purpose?: "login" | "kyc" | "credit_consent";
 }) => {
-  const { rows } = await pool.query<{ id: number; code_hash: string; attempts: number; expires_at: Date; consumed_at: Date | null }>(
-    `SELECT id, code_hash, attempts, expires_at, consumed_at FROM otp_codes
-     WHERE contact_type = $1 AND contact_value = $2
+  const { rows } = await pool.query<{ id: string; otp_hash: string; attempts: number; expires_at: Date; verified_at: Date | null }>(
+    `SELECT id, otp_hash, attempts, expires_at, verified_at FROM otp_verifications
+     WHERE mobile = $1 AND purpose = $2
      ORDER BY created_at DESC LIMIT 1`,
-    [contactType, contactValue],
+    [mobile, purpose],
   );
   const record = rows[0];
-  if (!record || record.consumed_at) {
+  if (!record || record.verified_at) {
     throw new Error("Request a new code and try again.");
   }
   if (new Date(record.expires_at).getTime() < Date.now()) {
@@ -122,58 +103,64 @@ export const verifyOtp = async ({
     throw new Error("Too many attempts. Request a new code.");
   }
 
-  const matches = record.code_hash === hashOtp(contactType, contactValue, code);
+  const matches = record.otp_hash === hashOtp(mobile, code);
   if (!matches) {
-    await pool.query(`UPDATE otp_codes SET attempts = attempts + 1 WHERE id = $1`, [record.id]);
+    await pool.query(`UPDATE otp_verifications SET attempts = attempts + 1 WHERE id = $1`, [record.id]);
     throw new Error("Incorrect code. Please try again.");
   }
 
-  await pool.query(`UPDATE otp_codes SET consumed_at = NOW() WHERE id = $1`, [record.id]);
+  await pool.query(`UPDATE otp_verifications SET verified_at = NOW() WHERE id = $1`, [record.id]);
 };
 
-export const upsertUserByContact = async ({
-  contactType,
-  contactValue,
-  fullName,
-}: {
-  contactType: "mobile" | "email";
-  contactValue: string;
-  fullName?: string;
-}) => {
-  const column = contactType === "mobile" ? "mobile" : "email";
-  const { rows } = await pool.query<{ id: number; mobile: string | null; email: string | null; full_name: string | null }>(
-    `INSERT INTO app_users (${column}, full_name, last_login_at)
-     VALUES ($1, $2, NOW())
-     ON CONFLICT (${column}) DO UPDATE
-       SET last_login_at = NOW(),
-           full_name = COALESCE(app_users.full_name, EXCLUDED.full_name)
-     RETURNING id, mobile, email, full_name`,
-    [contactValue, fullName ?? null],
-  );
-  return rows[0];
-};
-
-export const upsertUserByFirebaseUid = async ({
-  firebaseUid,
+export const upsertUserByMobile = async ({
   mobile,
-  email,
   fullName,
+  email,
 }: {
-  firebaseUid: string;
-  mobile?: string | null;
-  email?: string | null;
-  fullName?: string | null;
+  mobile: string;
+  fullName?: string;
+  email?: string;
 }) => {
-  const { rows } = await pool.query<{ id: number; mobile: string | null; email: string | null; full_name: string | null }>(
-    `INSERT INTO app_users (firebase_uid, mobile, email, full_name, last_login_at)
-     VALUES ($1, $2, $3, $4, NOW())
-     ON CONFLICT (firebase_uid) DO UPDATE
-       SET last_login_at = NOW(),
-           mobile = COALESCE(EXCLUDED.mobile, app_users.mobile),
-           email = COALESCE(EXCLUDED.email, app_users.email),
-           full_name = COALESCE(app_users.full_name, EXCLUDED.full_name)
-     RETURNING id, mobile, email, full_name`,
-    [firebaseUid, mobile ?? null, email ?? null, fullName ?? null],
+  const { rows } = await pool.query<{ id: string; mobile: string; email: string | null; full_name: string; email_verified: boolean }>(
+    `INSERT INTO users (mobile, full_name, mobile_verified)
+     VALUES ($1, $2, TRUE)
+     ON CONFLICT (mobile) DO UPDATE
+       SET mobile_verified = TRUE,
+           updated_at = NOW()
+     RETURNING id, mobile, email, full_name, email_verified`,
+    [mobile, fullName?.trim() || "Score Now User"],
+  );
+  const user = rows[0];
+  if (!user.email && email) {
+    try {
+      const { rows: updated } = await pool.query<{ id: string; mobile: string; email: string | null; full_name: string; email_verified: boolean }>(
+        `UPDATE users SET email = $1, updated_at = NOW() WHERE id = $2
+         RETURNING id, mobile, email, full_name, email_verified`,
+        [email, user.id],
+      );
+      return updated[0];
+    } catch {
+      // Email already belongs to another account; keep the user signed in without it.
+      return user;
+    }
+  }
+  return user;
+};
+
+
+export const findUserByEmail = async (email: string) => {
+  const { rows } = await pool.query<{ id: string; mobile: string; email: string | null; full_name: string; email_verified: boolean }>(
+    `SELECT id, mobile, email, full_name, email_verified FROM users WHERE email = $1`,
+    [email],
+  );
+  return rows[0] ?? null;
+};
+
+export const markEmailVerified = async (userId: string) => {
+  const { rows } = await pool.query<{ id: string; mobile: string; email: string | null; full_name: string; email_verified: boolean }>(
+    `UPDATE users SET email_verified = TRUE, updated_at = NOW() WHERE id = $1
+     RETURNING id, mobile, email, full_name, email_verified`,
+    [userId],
   );
   return rows[0];
 };
