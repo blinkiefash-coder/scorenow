@@ -238,7 +238,7 @@ function ImpactStats() {
 function Brand({ href = '#home' }: { href?: string }) {
   return (
     <a className="brand" href={href} aria-label="Score Now home">
-      <img src="/scorenow-logo-hd.png" alt="Score Now - Improve Your Credit Score" />
+      <img src="/scorenow-logo-2026.jpg" alt="Score Now - Improve Your Credit Score" />
     </a>
   )
 }
