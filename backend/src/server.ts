@@ -17,6 +17,7 @@ import {
   upsertUserByMobile,
   verifyOtp,
 } from "./database.js";
+import { verifyFirebasePhoneToken } from "./firebaseAdmin.js";
 
 const app = express();
 const port = Number(process.env.PORT) || 3000;
@@ -176,6 +177,27 @@ app.post("/api/auth/otp/verify", async (request, response) => {
   }
 });
 
+app.post("/api/auth/firebase-session", async (request, response) => {
+  const idToken = String(request.body.idToken || "");
+  const fullName = String(request.body.fullName || "").trim();
+  const email = String(request.body.email || "").trim().toLowerCase();
+  if (!idToken) {
+    response.status(400).json({ message: "Missing Firebase ID token." });
+    return;
+  }
+
+  try {
+    const token = await verifyFirebasePhoneToken(idToken);
+    const mobile = token.phone_number!.replace(/^\+91/, "").replace(/\D/g, "");
+    if (mobile.length !== 10) throw new Error("Use an Indian mobile number for this account.");
+    const user = await upsertUserByMobile({ mobile, fullName, email: email || undefined });
+    response.json({ message: "Phone verified successfully.", user });
+  } catch (error) {
+    console.error("Firebase phone session verification failed", error);
+    response.status(503).json({ message: error instanceof Error ? error.message : "Unable to verify your mobile sign-in." });
+  }
+});
+
 app.get("/api/dashboard/:userId", async (request, response) => {
   try {
     response.json(await getDashboardStatus(request.params.userId));
@@ -224,6 +246,84 @@ app.post("/api/credit-score/request", async (request, response) => {
   } catch (error) {
     console.error("Credit score request failed", error);
     response.status(400).json({ message: "Complete your profile before requesting a credit score." });
+  }
+});
+
+const isCreditScorePinValid = (value: unknown) =>
+  String(value || "") === (process.env.CIBIL_PAGE_PIN || "00998877");
+
+app.post("/api/cibil-report/access", (request, response) => {
+  if (!isCreditScorePinValid(request.body.pin)) {
+    response.status(401).json({ message: "That PIN is not correct." });
+    return;
+  }
+  response.json({ access: true });
+});
+
+app.post("/api/cibil-report", async (request, response) => {
+  if (!isCreditScorePinValid(request.body.pin)) {
+    response.status(401).json({ message: "Your page access has expired. Enter the PIN again." });
+    return;
+  }
+
+  const token = process.env.CIBIL_API_TOKEN;
+  if (!token) {
+    response.status(503).json({ message: "CIBIL API is not configured. Set CIBIL_API_TOKEN on the backend." });
+    return;
+  }
+
+  const firstName = String(request.body.first_name || "").trim();
+  const lastName = String(request.body.last_name || "").trim();
+  const idNumber = String(request.body.id_number || "").trim().toUpperCase();
+  const streetAddress = String(request.body.street_address || "").trim();
+  const city = String(request.body.city || "").trim();
+  const postalCode = String(request.body.postal_code || "").trim();
+  const region = String(request.body.region || "").trim();
+  const email = String(request.body.email || "").trim();
+  const phone = String(request.body.phone || "").replace(/\D/g, "");
+  const dob = String(request.body.dob || "").trim();
+  const gender = String(request.body.gender || "").trim();
+
+  if (
+    firstName.length < 2 || lastName.length < 1 || !/^[A-Z]{5}[0-9]{4}[A-Z]$/.test(idNumber)
+    || !streetAddress || !city || !/^\d{6}$/.test(postalCode) || !/^\d+$/.test(region)
+    || !/^\S+@\S+\.\S+$/.test(email) || !/^\d{10}$/.test(phone)
+    || !/^\d{4}-\d{2}-\d{2}$/.test(dob) || !["Male", "Female"].includes(gender)
+    || request.body.user_consent_data_share !== true
+  ) {
+    response.status(400).json({ message: "Complete every required field with valid details and accept the data-sharing consent." });
+    return;
+  }
+
+  try {
+    const upstream = await fetch("https://b2b.payprime.in/api/cibil-report", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        token,
+        first_name: firstName,
+        last_name: lastName,
+        id_type: "TaxId",
+        id_number: idNumber,
+        street_address: streetAddress,
+        city,
+        postal_code: Number(postalCode),
+        region,
+        address_type: 1,
+        email,
+        phone: Number(phone),
+        dob,
+        gender,
+        legal_copy_status: "Accept",
+        user_consent_data_share: true,
+      }),
+      signal: AbortSignal.timeout(60000),
+    });
+    const result: unknown = await upstream.json().catch(() => null);
+    response.status(upstream.status).json(result ?? { message: "The CIBIL provider returned an unreadable response." });
+  } catch (error) {
+    console.error("CIBIL report request failed", error);
+    response.status(502).json({ message: "Unable to reach the CIBIL report provider. Please try again." });
   }
 });
 

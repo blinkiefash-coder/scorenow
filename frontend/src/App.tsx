@@ -8,6 +8,7 @@ import {
   TrendingUp, Users, Volume2, VolumeX, UserRound, WalletCards, X, Zap,
 } from 'lucide-react'
 import './App.css'
+import { resetFirebaseRecaptcha, sendFirebasePhoneOtp, type ConfirmationResult } from './firebase.ts'
 
 const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:3000'
 
@@ -395,6 +396,7 @@ function AuthModal({ open, onClose, onSuccess }: { open: boolean; onClose: () =>
   const [sampleOtp, setSampleOtp] = useState('')
   const pendingFullNameRef = useRef('')
   const pendingEmailRef = useRef('')
+  const firebaseConfirmationRef = useRef<ConfirmationResult | null>(null)
 
   useEffect(() => {
     if (!open) return
@@ -404,6 +406,8 @@ function AuthModal({ open, onClose, onSuccess }: { open: boolean; onClose: () =>
     setOtpDigits(['', '', '', '', '', ''])
     setAuthError('')
     setSampleOtp('')
+    firebaseConfirmationRef.current = null
+    resetFirebaseRecaptcha()
   }, [open])
 
   useEffect(() => {
@@ -427,6 +431,12 @@ function AuthModal({ open, onClose, onSuccess }: { open: boolean; onClose: () =>
   if (!open) return null
 
   const requestOtp = async (type: 'mobile' | 'email', value: string) => {
+    if (type === 'mobile') {
+      resetFirebaseRecaptcha()
+      firebaseConfirmationRef.current = await sendFirebasePhoneOtp(value)
+      setSampleOtp('')
+      return
+    }
     const response = await fetch(`${apiUrl}/api/auth/otp/request`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -500,11 +510,23 @@ function AuthModal({ open, onClose, onSuccess }: { open: boolean; onClose: () =>
     setAuthError('')
     setAuthLoading(true)
     try {
-      const response = await fetch(`${apiUrl}/api/auth/otp/verify`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ type: otpContact.type, value: otpContact.value, code, fullName: pendingFullNameRef.current, email: pendingEmailRef.current }),
-      })
+      const response = otpContact.type === 'mobile'
+        ? await (async () => {
+            const confirmation = firebaseConfirmationRef.current
+            if (!confirmation) throw new Error('Request a new SMS code and try again.')
+            const credential = await confirmation.confirm(code)
+            const idToken = await credential.user.getIdToken()
+            return fetch(`${apiUrl}/api/auth/firebase-session`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ idToken, fullName: pendingFullNameRef.current, email: pendingEmailRef.current }),
+            })
+          })()
+        : await fetch(`${apiUrl}/api/auth/otp/verify`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ type: 'email', value: otpContact.value, code }),
+          })
       const result = await response.json() as { message?: string; user?: AuthUser }
       if (!response.ok) throw new Error(result.message || 'Verification failed.')
       if (result.user) onSuccess(result.user)
@@ -534,6 +556,7 @@ function AuthModal({ open, onClose, onSuccess }: { open: boolean; onClose: () =>
           : <button className="auth-close" type="button" onClick={onClose} aria-label="Close"><X /></button>}
 
         <img className="auth-brand" src="/scorenow-logo-hd.png" alt="Score Now" />
+        <div id="firebase-recaptcha" />
 
         {view === 'otp' ? (
           <>
@@ -1599,8 +1622,169 @@ function BusinessPage() {
   )
 }
 
+type CibilReportResponse = {
+  status?: boolean
+  txn_id?: string
+  txn_status?: string
+  message?: string
+  data?: { data?: { htmlUrl?: string; cibilData?: unknown } }
+}
+
+function CreditScorePage() {
+  const [pin, setPin] = useState('')
+  const [unlocked, setUnlocked] = useState(false)
+  const [accessError, setAccessError] = useState('')
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState('')
+  const [report, setReport] = useState<CibilReportResponse | null>(null)
+  const [reportHttpOk, setReportHttpOk] = useState<boolean | null>(null)
+
+  const unlockPage = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    setLoading(true)
+    setAccessError('')
+    try {
+      const response = await fetch(`${apiUrl}/api/cibil-report/access`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pin }),
+      })
+      const result = await response.json() as { message?: string; access?: boolean }
+      if (!response.ok) throw new Error(result.message || 'Unable to verify the PIN.')
+      setUnlocked(Boolean(result.access))
+    } catch (unlockError) {
+      setAccessError(unlockError instanceof Error ? unlockError.message : 'Unable to verify the PIN.')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const requestReport = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    setLoading(true)
+    setError('')
+    setReport(null)
+    setReportHttpOk(null)
+    const data = new FormData(event.currentTarget)
+    try {
+      const response = await fetch(`${apiUrl}/api/cibil-report`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          pin,
+          first_name: data.get('first_name'),
+          last_name: data.get('last_name'),
+          id_number: data.get('id_number'),
+          street_address: data.get('street_address'),
+          city: data.get('city'),
+          postal_code: data.get('postal_code'),
+          region: data.get('region'),
+          email: data.get('email'),
+          phone: data.get('phone'),
+          dob: data.get('dob'),
+          gender: data.get('gender'),
+          user_consent_data_share: data.get('consent') === 'on',
+        }),
+      })
+      const result = await response.json() as CibilReportResponse
+      setReport(result)
+      setReportHttpOk(response.ok)
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : 'The report request could not be completed.')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const reportFailed = reportHttpOk === false || report?.status === false || /failed|error|declin/i.test(report?.txn_status || '')
+
+  return (
+    <main className="cibil-page">
+      <header className="cibil-header"><Brand href="/" /><a href="/" aria-label="Return to Score Now"><ArrowLeft /> Home</a></header>
+      <div className="cibil-layout">
+        <section className="cibil-intro">
+          <span className="cibil-kicker"><ShieldCheck /> Secure credit report request</span>
+          <h1>Get your <span>CIBIL report</span></h1>
+          <p>Enter the report details as they appear on your identity and address records. Your consent is required before data is shared with the report provider.</p>
+          <div className="cibil-note"><LockKeyhole /><span><strong>Protected access</strong><small>Personal and identity details are sent securely to the provider.</small></span></div>
+        </section>
+
+        {!unlocked ? (
+          <form className="cibil-panel cibil-pin-panel" onSubmit={unlockPage}>
+            <span className="cibil-panel-icon"><LockKeyhole /></span>
+            <h2>Enter access PIN</h2>
+            <p>This page is restricted to authorised use.</p>
+            <label><span>PIN</span><input type="password" inputMode="numeric" autoComplete="new-password" value={pin} onChange={(event) => setPin(event.target.value)} required aria-label="Access PIN" /></label>
+            {accessError && <p className="cibil-error" role="alert">{accessError}</p>}
+            <button className="cibil-submit" type="submit" disabled={loading}>{loading ? 'Checking…' : <>Unlock page <ArrowRight /></>}</button>
+          </form>
+        ) : (
+          <form className="cibil-panel cibil-request-form" onSubmit={requestReport}>
+            <div className="cibil-form-heading"><div><span className="cibil-kicker">PERSONAL DETAILS</span><h2>Request a report</h2></div><button className="cibil-lock-button" type="button" onClick={() => { setUnlocked(false); setPin(''); setReport(null) }} aria-label="Lock this page"><LockKeyhole /></button></div>
+            <div className="cibil-fields">
+              <label><span>First name *</span><input name="first_name" required autoComplete="given-name" /></label>
+              <label><span>Last name *</span><input name="last_name" required autoComplete="family-name" /></label>
+              <label><span>PAN number *</span><input name="id_number" required pattern="[A-Za-z]{5}[0-9]{4}[A-Za-z]" maxLength={10} placeholder="ABCDE1234F" autoCapitalize="characters" /></label>
+              <label><span>Date of birth *</span><input name="dob" type="date" required /></label>
+              <label><span>Gender *</span><select name="gender" defaultValue="" required><option value="" disabled>Select gender</option><option>Male</option><option>Female</option></select></label>
+              <label><span>Email *</span><input name="email" type="email" required autoComplete="email" /></label>
+              <label><span>Phone *</span><input name="phone" type="tel" inputMode="numeric" pattern="[0-9]{10}" maxLength={10} required autoComplete="tel-national" /></label>
+              <label className="cibil-wide"><span>Street address *</span><input name="street_address" required autoComplete="street-address" /></label>
+              <label><span>City *</span><input name="city" required autoComplete="address-level2" /></label>
+              <label><span>Postal code *</span><input name="postal_code" inputMode="numeric" pattern="[0-9]{6}" maxLength={6} required autoComplete="postal-code" /></label>
+              <label className="cibil-wide"><span>Region code *</span><input name="region" inputMode="numeric" pattern="[0-9]+" placeholder="For example: 28" required /></label>
+            </div>
+            <label className="cibil-consent"><input type="checkbox" name="consent" required /><span>I consent to sharing these details with the CIBIL report provider to generate my credit report.</span></label>
+            {error && <p className="cibil-error" role="alert">{error}</p>}
+            <button className="cibil-submit" type="submit" disabled={loading}>{loading ? 'Requesting report…' : <>Generate CIBIL report <ArrowRight /></>}</button>
+          </form>
+        )}
+
+        {report && <section className="cibil-result" aria-live="polite">
+          <div className="cibil-result-heading"><span className={reportFailed ? 'is-error' : ''}>{reportFailed ? <AlertTriangle /> : <Check />}</span><div><small>PROVIDER RESPONSE</small><h2>{report.message || (reportFailed ? 'Report request failed' : 'Report request received')}</h2></div></div>
+          <dl><div><dt>Transaction ID</dt><dd>{report.txn_id || 'Not provided'}</dd></div><div><dt>Status</dt><dd>{report.txn_status || (reportFailed ? 'Failed' : report.status ? 'Success' : 'Received')}</dd></div></dl>
+          {!reportFailed && report.data?.data?.htmlUrl && <a className="cibil-report-link" href={report.data.data.htmlUrl} target="_blank" rel="noreferrer"><FileCheck2 /> Open CIBIL report <ArrowRight /></a>}
+          <details className="cibil-raw-response"><summary>View full API response</summary><pre>{JSON.stringify(report, null, 2)}</pre></details>
+        </section>}
+      </div>
+      <footer className="cibil-footer">Score Now <span>·</span> Handle credit and identity data responsibly.</footer>
+    </main>
+  )
+}
+
 function App() {
-  return window.location.pathname.replace(/\/$/, '') === '/business' ? <BusinessPage /> : <HomePage />
+  const pathname = window.location.pathname.replace(/\/$/, '')
+  useEffect(() => {
+    const isBusinessPage = pathname === '/business'
+    const isCreditScorePage = pathname === '/creditscore'
+    const title = isCreditScorePage
+      ? 'Credit Score Report Request | Score Now'
+      : isBusinessPage
+        ? 'Business Credit Report & CMR Guidance | Score Now'
+        : 'Score Now | Credit Score Guidance in India'
+    const description = isBusinessPage
+      ? 'Understand your commercial credit report, identify CMR issues, and get practical business credit guidance from Score Now.'
+      : 'Understand your credit report, identify issues, and get practical credit score improvement guidance from Score Now. Personal and business credit support in India.'
+    const canonicalUrl = `https://scorenow.in${pathname || '/'}`
+    const robotsContent = isCreditScorePage ? 'noindex,nofollow,noarchive' : 'index,follow,max-image-preview:large'
+
+    document.title = title
+    const updateMeta = (selector: string, attribute: string, value: string) => {
+      const element = document.querySelector<HTMLMetaElement>(selector)
+      element?.setAttribute(attribute, value)
+    }
+    updateMeta('meta[name="description"]', 'content', description)
+    updateMeta('meta[name="robots"]', 'content', robotsContent)
+    updateMeta('meta[property="og:title"]', 'content', title)
+    updateMeta('meta[property="og:description"]', 'content', description)
+    updateMeta('meta[property="og:url"]', 'content', canonicalUrl)
+    updateMeta('meta[name="twitter:title"]', 'content', title)
+    updateMeta('meta[name="twitter:description"]', 'content', description)
+    document.querySelector<HTMLLinkElement>('link[rel="canonical"]')?.setAttribute('href', canonicalUrl)
+  }, [pathname])
+
+  if (pathname === '/creditscore') return <CreditScorePage />
+  return pathname === '/business' ? <BusinessPage /> : <HomePage />
 }
 
 export default App

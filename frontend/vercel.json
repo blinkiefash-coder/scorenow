@@ -1,6 +1,18 @@
 {
   "rewrites": [
     { "source": "/business", "destination": "/" },
-    { "source": "/business/", "destination": "/" }
+    { "source": "/business/", "destination": "/" },
+    { "source": "/creditscore", "destination": "/" },
+    { "source": "/creditscore/", "destination": "/" }
+  ],
+  "headers": [
+    {
+      "source": "/creditscore",
+      "headers": [{ "key": "X-Robots-Tag", "value": "noindex, nofollow, noarchive" }]
+    },
+    {
+      "source": "/creditscore/",
+      "headers": [{ "key": "X-Robots-Tag", "value": "noindex, nofollow, noarchive" }]
+    }
   ]
 }
