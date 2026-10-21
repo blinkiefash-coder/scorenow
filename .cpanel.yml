@@ -1,8 +1,7 @@
 ---
 deployment:
   tasks:
-    - /bin/mkdir -p /home/spjheceg/public_html/ /home/spjheceg/scorenow-api/dist/
+    - /bin/mkdir -p /home/spjheceg/public_html/
     - /bin/cp -R frontend/dist/. /home/spjheceg/public_html/
-    - /bin/cp -R backend/dist/. /home/spjheceg/scorenow-api/dist/
-    - /bin/cp backend/package.json backend/package-lock.json /home/spjheceg/scorenow-api/
-    - /bin/cp backend/cpanel-app.js /home/spjheceg/scorenow-api/app.js
+    - /bin/cp backend/package.json /home/spjheceg/scorenow-api/package.json
+    - /bin/cp backend/package-lock.json /homespjheceg/scorenow-api/package-lock.json
