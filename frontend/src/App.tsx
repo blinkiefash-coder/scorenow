@@ -1761,10 +1761,12 @@ function App() {
       ? 'Credit Score Report Request | Score Now'
       : isBusinessPage
         ? 'Business Credit Report & CMR Guidance | Score Now'
-        : 'Score Now | Credit Score Guidance in India'
+        : 'Credit Score Guidance & Report Help in India | Score Now'
     const description = isBusinessPage
       ? 'Understand your commercial credit report, identify CMR issues, and get practical business credit guidance from Score Now.'
-      : 'Understand your credit report, identify issues, and get practical credit score improvement guidance from Score Now. Personal and business credit support in India.'
+      : isCreditScorePage
+        ? 'Securely request a CIBIL credit report through Score Now. This private report request page is restricted to authorised use.'
+        : 'Get practical credit score and credit report guidance in India. Score Now helps you understand CIBIL reports, identify errors, and plan next steps.'
     const canonicalUrl = `https://scorenow.in${pathname || '/'}`
     const robotsContent = isCreditScorePage ? 'noindex,nofollow,noarchive' : 'index,follow,max-image-preview:large'
 
