@@ -4,4 +4,4 @@ deployment:
     - /bin/mkdir -p /home/spjheceg/public_html/
     - /bin/cp -R frontend/dist/. /home/spjheceg/public_html/
     - /bin/cp backend/package.json /home/spjheceg/scorenow-api/package.json
-    - /bin/cp backend/package-lock.json /homespjheceg/scorenow-api/package-lock.json
+    - /bin/cp backend/package-lock.json /home/spjheceg/scorenow-api/package-lock.json
