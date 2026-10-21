@@ -1,5 +1,5 @@
 ---
 deployment:
   tasks:
-    -export DEPLOYPATH=/home/spjheceg/public_html/
+    - export DEPLOYPATH=/home/spjheceg/public_html/
     - /bin/cp -R frontend/dist/. $DEPLOYPATH
