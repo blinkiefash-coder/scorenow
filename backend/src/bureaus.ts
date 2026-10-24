@@ -200,14 +200,16 @@ export const fetchBureauReport = async (bureau: Bureau, applicant: Applicant): P
   }
 
   const body = await response.json().catch(() => null) as {
-    status?: boolean;
+    status?: boolean | string;
+    statuscode?: boolean;
     txn_id?: string;
     txn_status?: string;
     message?: string;
     data?: { data?: { htmlUrl?: string } };
   } | null;
 
-  if (!response.ok || !body || body.status === false || (body.txn_status && body.txn_status !== "success")) {
+  // Payprime errors come back as HTTP 200 with `status` set to an error string, so only `status: true` counts as success.
+  if (!response.ok || !body || body.status !== true || (body.txn_status && body.txn_status !== "success")) {
     return { ok: false, message: body?.message || `The ${bureauNames[bureau]} provider could not generate your report.`, raw: body };
   }
 
