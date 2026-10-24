@@ -1,0 +1,222 @@
+export const BUREAUS = ["cibil", "equifax", "experian"] as const;
+export type Bureau = (typeof BUREAUS)[number];
+
+export const bureauNames: Record<Bureau, string> = {
+  cibil: "TransUnion CIBIL",
+  equifax: "Equifax",
+  experian: "Experian",
+};
+
+export const isBureau = (value: unknown): value is Bureau =>
+  typeof value === "string" && (BUREAUS as readonly string[]).includes(value);
+
+const payprimeToken = () => process.env.PAYPRIME_API_TOKEN || process.env.CIBIL_API_TOKEN;
+
+const providerConfig = (bureau: Bureau) => {
+  if (bureau === "cibil") {
+    return { url: process.env.CIBIL_API_URL || "https://b2b.payprime.in/api/cibil-report", token: process.env.CIBIL_API_TOKEN || payprimeToken() };
+  }
+  if (bureau === "equifax") {
+    return { url: process.env.EQUIFAX_API_URL || "https://b2b.payprime.in/api/equifax-ccr", token: process.env.EQUIFAX_API_TOKEN || payprimeToken() };
+  }
+  return { url: process.env.EXPERIAN_API_URL || "https://b2b.payprime.in/api/experian-report", token: process.env.EXPERIAN_API_TOKEN || payprimeToken() };
+};
+
+export const isBureauAvailable = (bureau: Bureau) => {
+  const { url, token } = providerConfig(bureau);
+  return Boolean(url && token);
+};
+
+// TransUnion CIBIL state codes used in the `region` field.
+export const stateCodes: Record<string, string> = {
+  "Jammu and Kashmir": "01",
+  "Himachal Pradesh": "02",
+  "Punjab": "03",
+  "Chandigarh": "04",
+  "Uttarakhand": "05",
+  "Haryana": "06",
+  "Delhi": "07",
+  "Rajasthan": "08",
+  "Uttar Pradesh": "09",
+  "Bihar": "10",
+  "Sikkim": "11",
+  "Arunachal Pradesh": "12",
+  "Nagaland": "13",
+  "Manipur": "14",
+  "Mizoram": "15",
+  "Tripura": "16",
+  "Meghalaya": "17",
+  "Assam": "18",
+  "West Bengal": "19",
+  "Jharkhand": "20",
+  "Odisha": "21",
+  "Chhattisgarh": "22",
+  "Madhya Pradesh": "23",
+  "Gujarat": "24",
+  "Daman and Diu": "25",
+  "Dadra and Nagar Haveli": "26",
+  "Maharashtra": "27",
+  "Andhra Pradesh": "28",
+  "Karnataka": "29",
+  "Goa": "30",
+  "Lakshadweep": "31",
+  "Kerala": "32",
+  "Tamil Nadu": "33",
+  "Puducherry": "34",
+  "Andaman and Nicobar Islands": "35",
+  "Telangana": "36",
+  "Ladakh": "38",
+};
+
+export type Applicant = {
+  fullName: string;
+  pan: string;
+  dateOfBirth: string;
+  gender: string | null;
+  addressLine1: string | null;
+  city: string | null;
+  state: string | null;
+  pincode: string | null;
+  email: string | null;
+  mobile: string;
+};
+
+// Equifax and Experian only need name, PAN and mobile; CIBIL also needs address, email, DOB and gender.
+export const missingApplicantFields = (bureau: Bureau, applicant: Applicant) => {
+  const missing: string[] = [];
+  if (bureau !== "cibil") return missing;
+  if (!applicant.addressLine1) missing.push("address");
+  if (!applicant.city) missing.push("city");
+  if (!applicant.state || !stateCodes[applicant.state]) missing.push("state");
+  if (!applicant.pincode || !/^\d{6}$/.test(applicant.pincode)) missing.push("PIN code");
+  if (!applicant.email) missing.push("email");
+  if (applicant.gender !== "male" && applicant.gender !== "female") missing.push("gender (male/female)");
+  return missing;
+};
+
+const findNumber = (value: unknown, keys: RegExp, isValid: (n: number) => boolean, depth = 0): number | null => {
+  if (!value || typeof value !== "object" || depth > 14) return null;
+  for (const [key, child] of Object.entries(value as Record<string, unknown>)) {
+    if (keys.test(key) && (typeof child === "number" || typeof child === "string") && child !== "") {
+      const number = Number(child);
+      if (Number.isFinite(number) && isValid(number)) return number;
+    }
+  }
+  for (const child of Object.values(value as Record<string, unknown>)) {
+    const nested = findNumber(child, keys, isValid, depth + 1);
+    if (nested !== null) return nested;
+  }
+  return null;
+};
+
+const findScore = (value: unknown) =>
+  findNumber(value, /^(riskScore|creditScore|credit_score|score|scoreValue)$/i, (n) => Number.isInteger(n) && n >= 300 && n <= 900);
+
+const countField = (value: unknown, keys: RegExp) =>
+  findNumber(value, keys, (n) => Number.isInteger(n) && n >= 0 && n < 10000);
+
+export type ReportMetrics = {
+  totalAccounts: number | null;
+  activeAccounts: number | null;
+  overdueAccounts: number | null;
+  enquiriesLast6Months: number | null;
+};
+
+// Field names from the Experian (CAIS/CAPS) and Equifax (CCR) report formats.
+const extractMetrics = (report: unknown): ReportMetrics => ({
+  totalAccounts: countField(report, /^(CreditAccountTotal|NoOfAccounts)$/),
+  activeAccounts: countField(report, /^(CreditAccountActive|NoOfActiveAccounts)$/),
+  overdueAccounts: countField(report, /^(NoOfPastDueAccounts|CreditAccountDefault)$/),
+  enquiriesLast6Months: countField(report, /^(TotalCAPSLast180Days|Past6Months)$/),
+});
+
+export const scoreBand = (score: number | null) => {
+  if (score === null) return null;
+  if (score >= 750) return "Excellent";
+  if (score >= 700) return "Good";
+  if (score >= 650) return "Fair";
+  return "Needs attention";
+};
+
+export type BureauResult =
+  | { ok: true; providerTxnId: string | null; reportUrl: string | null; score: number | null; metrics: ReportMetrics; raw: unknown }
+  | { ok: false; message: string; raw: unknown };
+
+const buildPayload = (bureau: Bureau, token: string, applicant: Applicant) => {
+  const nameParts = applicant.fullName.trim().split(/\s+/);
+  const firstName = nameParts.length > 1 ? nameParts.slice(0, -1).join(" ") : nameParts[0];
+  const lastName = nameParts.length > 1 ? nameParts[nameParts.length - 1] : nameParts[0];
+
+  if (bureau === "equifax") {
+    return {
+      token,
+      first_name: firstName,
+      last_name: lastName,
+      id_type: "pan",
+      id_number: applicant.pan,
+      phone: applicant.mobile,
+      consent_text: "I approve TransBnk to capture and process user data based on user consent",
+      consent: true,
+    };
+  }
+  if (bureau === "experian") {
+    return { token, first_name: firstName, last_name: lastName, pan: applicant.pan, phone: applicant.mobile, consent: "Y" };
+  }
+  return {
+    token,
+    first_name: firstName,
+    last_name: lastName,
+    id_type: "TaxId",
+    id_number: applicant.pan,
+    street_address: applicant.addressLine1,
+    city: applicant.city,
+    postal_code: Number(applicant.pincode),
+    region: stateCodes[applicant.state || ""],
+    address_type: 1,
+    email: applicant.email,
+    phone: Number(applicant.mobile),
+    dob: applicant.dateOfBirth,
+    gender: applicant.gender === "female" ? "Female" : "Male",
+    legal_copy_status: "Accept",
+    user_consent_data_share: true,
+  };
+};
+
+export const fetchBureauReport = async (bureau: Bureau, applicant: Applicant): Promise<BureauResult> => {
+  const { url, token } = providerConfig(bureau);
+  if (!url || !token) return { ok: false, message: `${bureauNames[bureau]} API is not configured.`, raw: null };
+
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(buildPayload(bureau, token, applicant)),
+      signal: AbortSignal.timeout(90000),
+    });
+  } catch (error) {
+    console.error(`${bureau} report request failed`, error);
+    return { ok: false, message: `Unable to reach the ${bureauNames[bureau]} report provider.`, raw: null };
+  }
+
+  const body = await response.json().catch(() => null) as {
+    status?: boolean;
+    txn_id?: string;
+    txn_status?: string;
+    message?: string;
+    data?: { data?: { htmlUrl?: string } };
+  } | null;
+
+  if (!response.ok || !body || body.status === false || (body.txn_status && body.txn_status !== "success")) {
+    return { ok: false, message: body?.message || `The ${bureauNames[bureau]} provider could not generate your report.`, raw: body };
+  }
+
+  return {
+    ok: true,
+    providerTxnId: body.txn_id ?? null,
+    reportUrl: body.data?.data?.htmlUrl ?? null,
+    score: findScore(body.data),
+    metrics: extractMetrics(body.data),
+    raw: body,
+  };
+};

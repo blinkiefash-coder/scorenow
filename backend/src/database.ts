@@ -1,5 +1,6 @@
-import { createCipheriv, createHash, randomBytes, randomInt } from "node:crypto";
+import { createCipheriv, createDecipheriv, createHash, randomBytes, randomInt } from "node:crypto";
 import { Pool } from "pg";
+import type { Applicant, Bureau, ReportMetrics } from "./bureaus.js";
 
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
@@ -39,17 +40,40 @@ export const initializeDatabase = async () => {
 
   await pool.query(`ALTER TABLE assessment_submissions ADD COLUMN IF NOT EXISTS user_id UUID REFERENCES users(id)`);
   await pool.query(`ALTER TABLE website_inquiries ADD COLUMN IF NOT EXISTS user_id UUID REFERENCES users(id)`);
+
+  await pool.query(`ALTER TABLE payments ADD COLUMN IF NOT EXISTS report_bureau TEXT`);
+  await pool.query(`ALTER TABLE credit_report_requests ADD COLUMN IF NOT EXISTS payment_id UUID REFERENCES payments(id)`);
+  await pool.query(`ALTER TABLE credit_reports ADD COLUMN IF NOT EXISTS report_url TEXT`);
+  await pool.query(`ALTER TABLE credit_reports ADD COLUMN IF NOT EXISTS raw_report JSONB`);
 };
 
-const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 
-export const findUserById = async (userId: string) => {
-  if (!UUID_PATTERN.test(userId)) return null;
+const hashToken = (token: string) => createHash("sha256").update(token).digest("hex");
+
+export const createSession = async ({ userId, ipAddress, userAgent }: { userId: string; ipAddress?: string; userAgent?: string }) => {
+  const token = randomBytes(32).toString("hex");
+  await pool.query(
+    `INSERT INTO user_sessions (user_id, token_hash, ip_address, user_agent, expires_at)
+     VALUES ($1, $2, $3, $4, $5)`,
+    [userId, hashToken(token), ipAddress || null, userAgent?.slice(0, 500) || null, new Date(Date.now() + SESSION_TTL_MS)],
+  );
+  return token;
+};
+
+export const findSessionUser = async (token: string) => {
+  if (!/^[0-9a-f]{64}$/.test(token)) return null;
   const { rows } = await pool.query<{ id: string; mobile: string; email: string | null; full_name: string }>(
-    `SELECT id, mobile, email, full_name FROM users WHERE id = $1`,
-    [userId],
+    `SELECT u.id, u.mobile, u.email, u.full_name
+     FROM user_sessions s JOIN users u ON u.id = s.user_id
+     WHERE s.token_hash = $1 AND s.revoked_at IS NULL AND s.expires_at > NOW()`,
+    [hashToken(token)],
   );
   return rows[0] ?? null;
+};
+
+export const revokeSession = async (token: string) => {
+  await pool.query(`UPDATE user_sessions SET revoked_at = NOW() WHERE token_hash = $1 AND revoked_at IS NULL`, [hashToken(token)]);
 };
 
 const OTP_TTL_MS = 5 * 60 * 1000;
@@ -179,14 +203,72 @@ export const markEmailVerified = async (userId: string) => {
   return rows[0];
 };
 
+const kycKey = () => createHash("sha256")
+  .update(process.env.KYC_ENCRYPTION_KEY || "scorenow-local-development-key")
+  .digest();
+
 const encryptPan = (pan: string) => {
-  const key = createHash("sha256")
-    .update(process.env.KYC_ENCRYPTION_KEY || "scorenow-local-development-key")
-    .digest();
   const iv = randomBytes(12);
-  const cipher = createCipheriv("aes-256-gcm", key, iv);
+  const cipher = createCipheriv("aes-256-gcm", kycKey(), iv);
   const encrypted = Buffer.concat([cipher.update(pan, "utf8"), cipher.final()]);
   return Buffer.concat([iv, cipher.getAuthTag(), encrypted]);
+};
+
+const decryptPan = (payload: Buffer) => {
+  const decipher = createDecipheriv("aes-256-gcm", kycKey(), payload.subarray(0, 12));
+  decipher.setAuthTag(payload.subarray(12, 28));
+  return Buffer.concat([decipher.update(payload.subarray(28)), decipher.final()]).toString("utf8");
+};
+
+export const getApplicant = async (userId: string): Promise<Applicant | null> => {
+  const { rows } = await pool.query<{
+    name_as_per_pan: string; pan_encrypted: Buffer; date_of_birth: string; gender: string | null;
+    address_line1: string | null; city: string | null; state: string | null; pincode: string | null;
+    email: string | null; mobile: string;
+  }>(
+    `SELECT k.name_as_per_pan, k.pan_encrypted, to_char(k.date_of_birth, 'YYYY-MM-DD') AS date_of_birth, k.gender,
+            k.address_line1, k.city, k.state, k.pincode, u.email, u.mobile
+     FROM kyc_profiles k JOIN users u ON u.id = k.user_id WHERE k.user_id = $1`,
+    [userId],
+  );
+  const row = rows[0];
+  if (!row) return null;
+  return {
+    fullName: row.name_as_per_pan,
+    pan: decryptPan(row.pan_encrypted),
+    dateOfBirth: row.date_of_birth,
+    gender: row.gender,
+    addressLine1: row.address_line1,
+    city: row.city,
+    state: row.state,
+    pincode: row.pincode,
+    email: row.email,
+    mobile: row.mobile,
+  };
+};
+
+export const setUserEmailIfMissing = async (userId: string, email: string) => {
+  try {
+    await pool.query(`UPDATE users SET email = $1, updated_at = NOW() WHERE id = $2 AND email IS NULL`, [email, userId]);
+  } catch {
+    throw new Error("That email is already linked to another account.");
+  }
+};
+
+type ReportSummary = {
+  request_id: string;
+  bureau: Bureau;
+  status: string;
+  failure_reason: string | null;
+  requested_at: string;
+  credit_score: number | null;
+  score_band: string | null;
+  report_date: string | null;
+  report_url: string | null;
+  total_accounts: number | null;
+  active_accounts: number | null;
+  overdue_accounts: number | null;
+  enquiries_last_6_months: number | null;
 };
 
 export const getDashboardStatus = async (userId: string) => {
@@ -195,13 +277,161 @@ export const getDashboardStatus = async (userId: string) => {
       `SELECT id, name_as_per_pan, date_of_birth, city, kyc_status FROM kyc_profiles WHERE user_id = $1 ORDER BY created_at DESC LIMIT 1`,
       [userId],
     ),
-    pool.query<{ id: string; credit_score: number | null; score_band: string | null; report_date: string; bureau: string; active_accounts: number | null; total_accounts: number | null; overdue_accounts: number | null; enquiries_last_6_months: number | null }>(
-      `SELECT id, credit_score, score_band, report_date, bureau, active_accounts, total_accounts, overdue_accounts, enquiries_last_6_months
-       FROM credit_reports WHERE user_id = $1 ORDER BY report_date DESC, created_at DESC LIMIT 1`,
+    pool.query<ReportSummary>(
+      `SELECT DISTINCT ON (r.bureau)
+         r.id AS request_id, r.bureau, r.status, r.failure_reason, r.requested_at,
+         c.credit_score, c.score_band, to_char(c.report_date, 'YYYY-MM-DD') AS report_date, c.report_url,
+         c.total_accounts, c.active_accounts, c.overdue_accounts, c.enquiries_last_6_months
+       FROM credit_report_requests r
+       LEFT JOIN credit_reports c ON c.request_id = r.id
+       WHERE r.user_id = $1 AND r.payment_id IS NOT NULL
+       ORDER BY r.bureau, r.requested_at DESC`,
       [userId],
     ),
   ]);
-  return { profile: profileResult.rows[0] ?? null, report: reportResult.rows[0] ?? null };
+  return { profile: profileResult.rows[0] ?? null, reports: reportResult.rows };
+};
+
+export const createReportPayment = async ({
+  userId,
+  bureau,
+  orderId,
+  amount,
+  gstAmount,
+}: {
+  userId: string;
+  bureau: Bureau;
+  orderId: string;
+  amount: number;
+  gstAmount: number;
+}) => {
+  await pool.query(
+    `INSERT INTO payments (user_id, gateway, gateway_order_id, amount, gst_amount, status, report_bureau)
+     VALUES ($1, 'razorpay', $2, $3, $4, 'created', $5)`,
+    [userId, orderId, amount, gstAmount, bureau],
+  );
+};
+
+export const findReportPayment = async (userId: string, orderId: string) => {
+  const { rows } = await pool.query<{ id: string; status: string; report_bureau: Bureau | null }>(
+    `SELECT id, status, report_bureau FROM payments WHERE user_id = $1 AND gateway_order_id = $2`,
+    [userId, orderId],
+  );
+  return rows[0] ?? null;
+};
+
+export const markPaymentFailed = async (paymentId: string) => {
+  await pool.query(`UPDATE payments SET status = 'failed' WHERE id = $1 AND status = 'created'`, [paymentId]);
+};
+
+// Marks the payment paid and opens its report request exactly once, even if verify is called twice.
+export const markPaymentPaidAndCreateRequest = async ({
+  userId,
+  paymentDbId,
+  gatewayPaymentId,
+  bureau,
+}: {
+  userId: string;
+  paymentDbId: string;
+  gatewayPaymentId: string;
+  bureau: Bureau;
+}) => {
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const paid = await client.query(
+      `UPDATE payments SET status = 'paid', gateway_payment_id = $2, paid_at = NOW()
+       WHERE id = $1 AND status = 'created'`,
+      [paymentDbId, gatewayPaymentId],
+    );
+    if (paid.rowCount === 0) {
+      await client.query("ROLLBACK");
+      const { rows } = await pool.query<{ id: string }>(`SELECT id FROM credit_report_requests WHERE payment_id = $1`, [paymentDbId]);
+      return rows[0]?.id ?? null;
+    }
+    const consent = await client.query<{ id: string }>(
+      `INSERT INTO user_consents (user_id, consent_type, consent_text_version, granted)
+       VALUES ($1, 'credit_report_pull', 'paid-report-v1', TRUE) RETURNING id`,
+      [userId],
+    );
+    const request = await client.query<{ id: string }>(
+      `INSERT INTO credit_report_requests (user_id, consent_id, bureau, provider, status, payment_id)
+       VALUES ($1, $2, $3, 'payprime', 'processing', $4) RETURNING id`,
+      [userId, consent.rows[0].id, bureau, paymentDbId],
+    );
+    await client.query("COMMIT");
+    return request.rows[0].id;
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
+};
+
+export const findReportRequest = async (userId: string, requestId: string) => {
+  const { rows } = await pool.query<{ id: string; bureau: Bureau; status: string }>(
+    `SELECT id, bureau, status FROM credit_report_requests
+     WHERE id::text = $1 AND user_id = $2 AND payment_id IS NOT NULL`,
+    [requestId, userId],
+  );
+  return rows[0] ?? null;
+};
+
+export const markReportProcessing = async (requestId: string) => {
+  await pool.query(`UPDATE credit_report_requests SET status = 'processing', failure_reason = NULL WHERE id = $1`, [requestId]);
+};
+
+export const completeReportRequest = async ({
+  userId,
+  requestId,
+  bureau,
+  providerTxnId,
+  score,
+  band,
+  reportUrl,
+  metrics,
+  raw,
+}: {
+  userId: string;
+  requestId: string;
+  bureau: Bureau;
+  providerTxnId: string | null;
+  score: number | null;
+  band: string | null;
+  reportUrl: string | null;
+  metrics: ReportMetrics;
+  raw: unknown;
+}) => {
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    await client.query(
+      `UPDATE credit_report_requests SET status = 'completed', provider_request_id = $2, completed_at = NOW(), failure_reason = NULL
+       WHERE id = $1`,
+      [requestId, providerTxnId],
+    );
+    await client.query(
+      `INSERT INTO credit_reports (user_id, request_id, bureau, credit_score, score_band, report_date, report_url, raw_report,
+         total_accounts, active_accounts, overdue_accounts, enquiries_last_6_months)
+       VALUES ($1, $2, $3, $4, $5, CURRENT_DATE, $6, $7, $8, $9, $10, $11)`,
+      [userId, requestId, bureau, score, band, reportUrl, JSON.stringify(raw),
+        metrics.totalAccounts, metrics.activeAccounts, metrics.overdueAccounts, metrics.enquiriesLast6Months],
+    );
+    await client.query("COMMIT");
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
+};
+
+export const failReportRequest = async (requestId: string, reason: string) => {
+  await pool.query(
+    `UPDATE credit_report_requests SET status = 'failed', failure_reason = $2 WHERE id = $1`,
+    [requestId, reason.slice(0, 500)],
+  );
 };
 
 export const saveKycProfile = async ({
@@ -248,22 +478,6 @@ export const saveKycProfile = async ({
        updated_at = NOW()
      RETURNING id, name_as_per_pan, date_of_birth, city, kyc_status`,
     [userId, nameAsPerPan.trim(), encryptPan(normalizedPan), panHash, normalizedPan.slice(-4), dateOfBirth, normalizedGender, addressLine1 || null, city || null, state || null, pincode || null],
-  );
-  return rows[0];
-};
-
-export const createCreditReportRequest = async (userId: string) => {
-  const consent = await pool.query<{ id: string }>(
-    `INSERT INTO user_consents (user_id, consent_type, consent_text_version, granted)
-     VALUES ($1, 'credit_report_pull', 'credit-score-sample-v1', TRUE)
-     RETURNING id`,
-    [userId],
-  );
-  const { rows } = await pool.query<{ id: string; status: string; requested_at: string }>(
-    `INSERT INTO credit_report_requests (user_id, consent_id, bureau, provider, status)
-     VALUES ($1, $2, 'cibil', 'sample-provider', 'initiated')
-     RETURNING id, status, requested_at`,
-    [userId, consent.rows[0].id],
   );
   return rows[0];
 };

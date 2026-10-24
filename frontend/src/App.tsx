@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState, type CSSProperties, type FormEvent } from 'react'
 import {
-  AlertTriangle, ArrowLeft, ArrowRight, BadgeIndianRupee, BarChart3, Bell, BookOpen,
+  AlertTriangle, ArrowLeft, ArrowRight, BadgeIndianRupee, BarChart3, BookOpen,
   Building2, CalendarDays, Check, ChevronDown, CircleHelp, Clock3, CreditCard,
-  Download, Eye, EyeOff, FileCheck2, FileSearch, Gift, Handshake, Headphones,
-  House, Lightbulb, LockKeyhole, Mail, MapPin, Menu, MessageCircle, Pause, Percent,
+  Eye, EyeOff, FileCheck2, FileSearch, Gift, Handshake, Headphones,
+  House, Lightbulb, LockKeyhole, Mail, MapPin, Menu, MessageCircle, Pause,
   Phone, Play, RotateCcw, Search, Settings, ShieldCheck, Smartphone, Sparkles, Star,
   TrendingUp, Users, Volume2, VolumeX, UserRound, WalletCards, X, Zap,
 } from 'lucide-react'
@@ -244,14 +244,17 @@ function Brand({ href = '#home' }: { href?: string }) {
   )
 }
 
-type AuthUser = { id: string; mobile: string; email: string | null; full_name: string }
+type AuthUser = { id: string; mobile: string; email: string | null; full_name: string; token: string }
+
+const authHeaders = (user: AuthUser) => ({ Authorization: `Bearer ${user.token}` })
 
 // Keeps the signed-in user in localStorage so a refresh doesn't log them out.
 function useAuthUser() {
   const [user, setUser] = useState<AuthUser | null>(() => {
     try {
       const raw = localStorage.getItem('scorenow-user')
-      return raw ? JSON.parse(raw) as AuthUser : null
+      const stored = raw ? JSON.parse(raw) as Partial<AuthUser> : null
+      return stored?.id && stored.token ? stored as AuthUser : null
     } catch {
       return null
     }
@@ -263,6 +266,7 @@ function useAuthUser() {
   }
 
   const logout = () => {
+    if (user) void fetch(`${apiUrl}/api/auth/logout`, { method: 'POST', headers: authHeaders(user) }).catch(() => undefined)
     setUser(null)
     localStorage.removeItem('scorenow-user')
   }
@@ -572,9 +576,9 @@ function AuthModal({ open, notice, onClose, onSuccess }: { open: boolean; notice
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ type: 'email', value: otpContact.value, code }),
           })
-      const result = await response.json() as { message?: string; user?: AuthUser }
+      const result = await response.json() as { message?: string; user?: Omit<AuthUser, 'token'>; token?: string }
       if (!response.ok) throw new Error(result.message || 'Verification failed.')
-      if (result.user) onSuccess(result.user)
+      if (result.user && result.token) onSuccess({ ...result.user, token: result.token })
       onClose()
     } catch (error) {
       setAuthError(error instanceof Error ? error.message : 'Incorrect code. Please try again.')
@@ -725,17 +729,16 @@ function AssessmentForm({ business = false, user, requireLogin }: { business?: b
     const data = new FormData(form)
     data.set('assessmentType', business ? 'business' : 'individual')
     requireLogin('Please log in or sign up to submit your assessment.', (currentUser) => {
-      data.set('userId', currentUser.id)
-      void sendAssessment(form, data)
+      void sendAssessment(form, data, currentUser)
     })
   }
 
-  const sendAssessment = async (form: HTMLFormElement, data: FormData) => {
+  const sendAssessment = async (form: HTMLFormElement, data: FormData, currentUser: AuthUser) => {
     setSubmitStatus('sending')
     setSubmitMessage('')
 
     try {
-      const response = await fetch(`${apiUrl}/api/assessments`, { method: 'POST', body: data })
+      const response = await fetch(`${apiUrl}/api/assessments`, { method: 'POST', headers: authHeaders(currentUser), body: data })
       const result = await response.json() as { message?: string }
       if (!response.ok) throw new Error(result.message || 'Unable to send the assessment.')
       setSubmitStatus('success')
@@ -1172,8 +1175,8 @@ function ChatAssistant({ requireLogin }: { requireLogin: RequireLogin }) {
     try {
       const response = await fetch(`${apiUrl}/api/inquiries`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ userId: currentUser.id, fullName: name, mobile: phoneDigits, concern, scoreRange }),
+        headers: { 'Content-Type': 'application/json', ...authHeaders(currentUser) },
+        body: JSON.stringify({ fullName: name, mobile: phoneDigits, concern, scoreRange }),
       })
       const result = await response.json() as { message?: string }
       if (!response.ok) throw new Error(result.message || 'Unable to save your callback request.')
@@ -1272,10 +1275,61 @@ function ChatAssistant({ requireLogin }: { requireLogin: RequireLogin }) {
   )
 }
 
+type BureauId = 'cibil' | 'equifax' | 'experian'
+
+type BureauReport = {
+  request_id: string
+  bureau: BureauId
+  status: 'processing' | 'completed' | 'failed' | string
+  failure_reason: string | null
+  requested_at: string
+  credit_score: number | null
+  score_band: string | null
+  report_date: string | null
+  report_url: string | null
+  total_accounts: number | null
+  active_accounts: number | null
+  overdue_accounts: number | null
+  enquiries_last_6_months: number | null
+}
+
 type DashboardStatus = {
   profile: { id: string; name_as_per_pan: string; date_of_birth: string; city: string | null; kyc_status: string } | null
-  report: { id: string; credit_score: number | null; score_band: string | null; report_date: string; bureau: string; active_accounts: number | null; total_accounts: number | null; overdue_accounts: number | null; enquiries_last_6_months: number | null } | null
+  reports: BureauReport[]
 }
+
+type ReportOptions = { price: number; paymentsEnabled: boolean; bureaus: { id: BureauId; name: string; available: boolean }[] }
+
+const bureauCatalog: { id: BureauId; name: string; logo: string }[] = [
+  { id: 'cibil', name: 'TransUnion CIBIL', logo: '/logo-cibil.png' },
+  { id: 'equifax', name: 'Equifax', logo: '/logo-equifax.svg' },
+  { id: 'experian', name: 'Experian', logo: '/logo-experian-new.svg' },
+]
+
+const indianStates = [
+  'Andaman and Nicobar Islands', 'Andhra Pradesh', 'Arunachal Pradesh', 'Assam', 'Bihar', 'Chandigarh', 'Chhattisgarh',
+  'Dadra and Nagar Haveli', 'Daman and Diu', 'Delhi', 'Goa', 'Gujarat', 'Haryana', 'Himachal Pradesh', 'Jammu and Kashmir',
+  'Jharkhand', 'Karnataka', 'Kerala', 'Ladakh', 'Lakshadweep', 'Madhya Pradesh', 'Maharashtra', 'Manipur', 'Meghalaya',
+  'Mizoram', 'Nagaland', 'Odisha', 'Puducherry', 'Punjab', 'Rajasthan', 'Sikkim', 'Tamil Nadu', 'Telangana', 'Tripura',
+  'Uttar Pradesh', 'Uttarakhand', 'West Bengal',
+]
+
+type RazorpayCheckout = { open: () => void; on: (event: 'payment.failed', callback: (response: { error?: { description?: string } }) => void) => void }
+type RazorpayConstructor = new (options: Record<string, unknown>) => RazorpayCheckout
+type RazorpaySuccess = { razorpay_order_id: string; razorpay_payment_id: string; razorpay_signature: string }
+
+const loadRazorpayCheckout = () => new Promise<RazorpayConstructor | null>((resolve) => {
+  const existing = (window as unknown as { Razorpay?: RazorpayConstructor }).Razorpay
+  if (existing) {
+    resolve(existing)
+    return
+  }
+  const script = document.createElement('script')
+  script.src = 'https://checkout.razorpay.com/v1/checkout.js'
+  script.onload = () => resolve((window as unknown as { Razorpay?: RazorpayConstructor }).Razorpay ?? null)
+  script.onerror = () => resolve(null)
+  document.body.appendChild(script)
+})
 
 function ProfileOnboarding({ user, onComplete, onLogout }: { user: AuthUser; onComplete: () => void; onLogout: () => void }) {
   const [saving, setSaving] = useState(false)
@@ -1287,9 +1341,9 @@ function ProfileOnboarding({ user, onComplete, onLogout }: { user: AuthUser; onC
     setError('')
     const data = new FormData(event.currentTarget)
     try {
-      const response = await fetch(`${apiUrl}/api/profile/${user.id}`, {
+      const response = await fetch(`${apiUrl}/api/profile`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...authHeaders(user) },
         body: JSON.stringify(Object.fromEntries(data.entries())),
       })
       const result = await response.json() as { message?: string }
@@ -1304,18 +1358,22 @@ function ProfileOnboarding({ user, onComplete, onLogout }: { user: AuthUser; onC
 
   return (
     <div className="dashboard-shell onboarding-shell">
-      <aside className="dashboard-sidebar"><Brand href="/" /><div className="dashboard-support"><span><ShieldCheck /></span><strong>Your details stay protected</strong><p>PAN is encrypted for this sample flow and only its last four characters are used for display.</p><button type="button" onClick={onLogout}>Log Out <ArrowRight /></button></div></aside>
-      <main className="dashboard-main"><div className="onboarding-wrap"><div className="onboarding-intro"><span className="onboarding-kicker"><Sparkles /> Almost there</span><h1>Complete your credit profile</h1><p>We need a few details before we can request your credit report. You can connect the live bureau API later without changing this flow.</p><div className="onboarding-steps"><span className="active"><b>1</b>Profile details</span><span><b>2</b>Score request</span><span><b>3</b>Credit dashboard</span></div></div><form className="onboarding-form" onSubmit={submitProfile}><div className="onboarding-form-heading"><span><FileCheck2 /></span><div><h2>Verify your identity</h2><p>Use the details exactly as they appear on your PAN card.</p></div></div><div className="onboarding-form-grid"><label><span>Name as per PAN *</span><input name="nameAsPerPan" required minLength={2} placeholder="Enter your full name" autoComplete="name" /></label><label><span>PAN number *</span><input name="pan" required pattern="[A-Za-z]{5}[0-9]{4}[A-Za-z]" placeholder="ABCDE1234F" autoCapitalize="characters" /></label><label><span>Date of birth *</span><input name="dateOfBirth" type="date" required /></label><label><span>Gender</span><select name="gender" defaultValue=""><option value="" disabled>Select gender</option><option>Female</option><option>Male</option><option>Prefer not to say</option></select></label><label className="field-wide"><span>Address</span><input name="addressLine1" placeholder="House number and street" autoComplete="street-address" /></label><label><span>City</span><input name="city" placeholder="Your city" autoComplete="address-level2" /></label><label><span>State</span><input name="state" placeholder="Your state" autoComplete="address-level1" /></label><label><span>PIN code</span><input name="pincode" inputMode="numeric" pattern="[0-9]{6}" placeholder="6-digit PIN" autoComplete="postal-code" /></label></div><label className="onboarding-consent"><input type="checkbox" required /><span>I agree to let ScoreNow prepare a sample credit-score request using these details. The live bureau consent and API connection will be added later.</span></label>{error && <p className="auth-error">{error}</p>}<button className="button button-primary onboarding-submit" type="submit" disabled={saving}>{saving ? 'Saving profile…' : <>Save Profile &amp; Continue <ArrowRight /></>}</button></form></div></main>
+      <aside className="dashboard-sidebar"><Brand href="/" /><div className="dashboard-support"><span><ShieldCheck /></span><strong>Your details stay protected</strong><p>PAN is stored encrypted and only shared with the credit bureau you choose.</p><button type="button" onClick={onLogout}>Log Out <ArrowRight /></button></div></aside>
+      <main className="dashboard-main"><div className="onboarding-wrap"><div className="onboarding-intro"><span className="onboarding-kicker"><Sparkles /> Almost there</span><h1>Complete your credit profile</h1><p>We need these details to fetch your credit report from CIBIL, Equifax, or Experian.</p><div className="onboarding-steps"><span className="active"><b>1</b>Profile details</span><span><b>2</b>Choose bureau &amp; pay</span><span><b>3</b>Credit dashboard</span></div></div><form className="onboarding-form" onSubmit={submitProfile}><div className="onboarding-form-heading"><span><FileCheck2 /></span><div><h2>Verify your identity</h2><p>Use the details exactly as they appear on your PAN card.</p></div></div><div className="onboarding-form-grid"><label><span>Name as per PAN *</span><input name="nameAsPerPan" required minLength={2} placeholder="Enter your full name" autoComplete="name" /></label><label><span>PAN number *</span><input name="pan" required pattern="[A-Za-z]{5}[0-9]{4}[A-Za-z]" placeholder="ABCDE1234F" autoCapitalize="characters" /></label><label><span>Date of birth *</span><input name="dateOfBirth" type="date" required /></label><label><span>Gender *</span><select name="gender" required defaultValue=""><option value="" disabled>Select gender</option><option value="female">Female</option><option value="male">Male</option><option value="other">Other</option></select></label><label className="field-wide"><span>Address *</span><input name="addressLine1" required placeholder="House number and street" autoComplete="street-address" /></label><label><span>City *</span><input name="city" required placeholder="Your city" autoComplete="address-level2" /></label><label><span>State *</span><select name="state" required defaultValue=""><option value="" disabled>Select state</option>{indianStates.map((state) => <option key={state}>{state}</option>)}</select></label><label><span>PIN code *</span><input name="pincode" required inputMode="numeric" pattern="[0-9]{6}" placeholder="6-digit PIN" autoComplete="postal-code" /></label>{!user.email && <label className="field-wide"><span>Email address *</span><input name="email" type="email" required placeholder="you@example.com" autoComplete="email" /></label>}</div><label className="onboarding-consent"><input type="checkbox" required /><span>I agree to let Score Now share these details with the credit bureau I choose to fetch my credit report.</span></label>{error && <p className="auth-error">{error}</p>}<button className="button button-primary onboarding-submit" type="submit" disabled={saving}>{saving ? 'Saving profile…' : <>Save Profile &amp; Continue <ArrowRight /></>}</button></form></div></main>
     </div>
   )
 }
 
 function DashboardPage({ user, onLogout }: { user: AuthUser; onLogout: () => void }) {
   const [status, setStatus] = useState<DashboardStatus | null>(null)
+  const [options, setOptions] = useState<ReportOptions | null>(null)
   const [loading, setLoading] = useState(true)
-  const [requesting, setRequesting] = useState(false)
-  const [requestMessage, setRequestMessage] = useState('')
+  const [busyBureau, setBusyBureau] = useState<BureauId | null>(null)
+  const [selectedBureau, setSelectedBureau] = useState<BureauId | null>(null)
+  const [notice, setNotice] = useState<{ tone: 'info' | 'success' | 'error'; text: string } | null>(null)
   const firstName = user.full_name.trim().split(' ')[0] || 'there'
+  const hour = new Date().getHours()
+  const greeting = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening'
   const sidebarItems = [
     { icon: House, label: 'Home', active: true },
     { icon: FileSearch, label: 'My Report' },
@@ -1330,11 +1388,19 @@ function DashboardPage({ user, onLogout }: { user: AuthUser; onLogout: () => voi
   const loadStatus = async () => {
     setLoading(true)
     try {
-      const response = await fetch(`${apiUrl}/api/dashboard/${user.id}`)
-      if (!response.ok) throw new Error('Unable to load dashboard')
-      setStatus(await response.json() as DashboardStatus)
+      const [statusResponse, optionsResponse] = await Promise.all([
+        fetch(`${apiUrl}/api/dashboard`, { headers: authHeaders(user) }),
+        fetch(`${apiUrl}/api/reports/options`),
+      ])
+      if (statusResponse.status === 401) {
+        onLogout()
+        return
+      }
+      if (!statusResponse.ok) throw new Error('Unable to load dashboard')
+      setStatus(await statusResponse.json() as DashboardStatus)
+      if (optionsResponse.ok) setOptions(await optionsResponse.json() as ReportOptions)
     } catch {
-      setStatus({ profile: null, report: null })
+      setStatus({ profile: null, reports: [] })
     } finally {
       setLoading(false)
     }
@@ -1345,20 +1411,99 @@ function DashboardPage({ user, onLogout }: { user: AuthUser; onLogout: () => voi
   if (loading) return <div className="dashboard-loading"><span><RotateCcw /></span><strong>Loading your credit workspace…</strong></div>
   if (!status?.profile) return <ProfileOnboarding user={user} onComplete={() => void loadStatus()} onLogout={onLogout} />
 
-  const requestScore = async () => {
-    setRequesting(true)
-    setRequestMessage('')
-    try {
-      const response = await fetch(`${apiUrl}/api/credit-score/request`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ userId: user.id }) })
-      const result = await response.json() as { message?: string }
-      if (!response.ok) throw new Error(result.message || 'Unable to request your score.')
-      setRequestMessage(result.message || 'Your score request is queued.')
-    } catch (requestError) {
-      setRequestMessage(requestError instanceof Error ? requestError.message : 'Unable to request your score.')
-    } finally {
-      setRequesting(false)
+  const reportFor = (bureau: BureauId) => status.reports.find((report) => report.bureau === bureau)
+  const bureauName = (bureau: BureauId) => bureauCatalog.find((item) => item.id === bureau)?.name ?? bureau
+  const completedReports = status.reports.filter((report) => report.status === 'completed')
+  const activeBureau = selectedBureau && reportFor(selectedBureau)?.status === 'completed' ? selectedBureau : completedReports[0]?.bureau ?? null
+  const activeReport = activeBureau ? reportFor(activeBureau) : undefined
+  const price = options?.price ?? 99
+
+  const applyReportResult = (result: DashboardStatus, bureau: BureauId) => {
+    setStatus(result)
+    const report = result.reports.find((item) => item.bureau === bureau)
+    if (report?.status === 'completed') {
+      setSelectedBureau(bureau)
+      setNotice({ tone: 'success', text: `Your ${bureauName(bureau)} report is ready.` })
+    } else {
+      setNotice({ tone: 'error', text: `${report?.failure_reason || 'We could not fetch the report.'} Use Retry — you won't be charged again.` })
     }
   }
+
+  const verifyPayment = async (bureau: BureauId, payment: RazorpaySuccess) => {
+    setNotice({ tone: 'info', text: `Payment received. Fetching your ${bureauName(bureau)} report…` })
+    try {
+      const response = await fetch(`${apiUrl}/api/reports/verify`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...authHeaders(user) },
+        body: JSON.stringify({ orderId: payment.razorpay_order_id, paymentId: payment.razorpay_payment_id, signature: payment.razorpay_signature }),
+      })
+      const result = await response.json() as DashboardStatus & { message?: string }
+      if (!response.ok) throw new Error(result.message || 'Payment verification failed.')
+      applyReportResult(result, bureau)
+    } catch (error) {
+      setNotice({ tone: 'error', text: error instanceof Error ? error.message : 'Payment verification failed.' })
+    }
+  }
+
+  const buyReport = async (bureau: BureauId) => {
+    setBusyBureau(bureau)
+    setNotice(null)
+    try {
+      const response = await fetch(`${apiUrl}/api/reports/order`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...authHeaders(user) },
+        body: JSON.stringify({ bureau }),
+      })
+      const order = await response.json() as { message?: string; orderId: string; amount: number; currency: string; keyId: string; bureauName: string; prefill: Record<string, string> }
+      if (response.status === 401) {
+        onLogout()
+        return
+      }
+      if (!response.ok) throw new Error(order.message || 'Unable to start the payment.')
+      const Razorpay = await loadRazorpayCheckout()
+      if (!Razorpay) throw new Error('Unable to load Razorpay checkout. Check your connection and try again.')
+
+      await new Promise<void>((resolve) => {
+        const checkout = new Razorpay({
+          key: order.keyId,
+          amount: order.amount,
+          currency: order.currency,
+          order_id: order.orderId,
+          name: 'Score Now',
+          description: `${order.bureauName} credit report`,
+          image: '/scorenow-logo-hd.png',
+          prefill: order.prefill,
+          theme: { color: '#087af5' },
+          handler: (payment: RazorpaySuccess) => { void verifyPayment(bureau, payment).finally(resolve) },
+          modal: { ondismiss: () => resolve() },
+        })
+        checkout.on('payment.failed', (failure) => setNotice({ tone: 'error', text: failure.error?.description || 'Payment failed. You have not been charged.' }))
+        checkout.open()
+      })
+    } catch (error) {
+      setNotice({ tone: 'error', text: error instanceof Error ? error.message : 'Unable to start the payment.' })
+    } finally {
+      setBusyBureau(null)
+    }
+  }
+
+  const retryReport = async (report: BureauReport) => {
+    setBusyBureau(report.bureau)
+    setNotice({ tone: 'info', text: `Fetching your ${bureauName(report.bureau)} report…` })
+    try {
+      const response = await fetch(`${apiUrl}/api/reports/${report.request_id}/retry`, { method: 'POST', headers: authHeaders(user) })
+      const result = await response.json() as DashboardStatus & { message?: string }
+      if (!response.ok) throw new Error(result.message || 'Unable to fetch the report.')
+      applyReportResult(result, report.bureau)
+    } catch (error) {
+      setNotice({ tone: 'error', text: error instanceof Error ? error.message : 'Unable to fetch the report.' })
+    } finally {
+      setBusyBureau(null)
+    }
+  }
+
+  const metric = (value: number | null | undefined) => value ?? '—'
+  const needleAngle = activeReport?.credit_score ? 180 + ((activeReport.credit_score - 300) / 600) * 180 : 180
 
   return (
     <div className="dashboard-shell">
@@ -1381,40 +1526,60 @@ function DashboardPage({ user, onLogout }: { user: AuthUser; onLogout: () => voi
         <header className="dashboard-topbar">
           <div className="dashboard-search"><Search /><input aria-label="Search dashboard" placeholder="Search for loans, credit cards, or learn about credit..." /></div>
           <div className="dashboard-top-actions">
-            <button className="dashboard-score-cta" type="button">Check My Credit Score <ArrowRight /></button>
-            <button className="dashboard-icon-button" type="button" aria-label="Notifications"><Bell /><b>3</b></button>
+            <a className="dashboard-score-cta" href="#credit-reports">Get My Credit Report <ArrowRight /></a>
             <AuthAvatarButton user={user} onClick={() => undefined} onLogout={onLogout} />
           </div>
         </header>
 
         <div className="dashboard-content">
           <div className="dashboard-welcome">
-            <div><h1>Good evening, {firstName}! <span>👋</span></h1><p>Here's your credit health at a glance.</p></div>
-            <div className="dashboard-offer-banner"><Gift /><span><strong>Special offers for you!</strong><small>Personalised loan and credit card offers based on your profile.</small></span><ArrowRight /></div>
+            <div><h1>{greeting}, {firstName}! <span>👋</span></h1><p>{completedReports.length ? "Here's your credit health at a glance." : 'Choose a credit bureau below to fetch your first report.'}</p></div>
           </div>
 
+          {notice && <p className={`dashboard-notice ${notice.tone}`} role="status">{notice.text}</p>}
+
+          <section className="dashboard-card bureau-section" id="credit-reports">
+            <div className="dashboard-card-heading"><strong>Your Credit Reports</strong><small><LockKeyhole /> ₹{price} per report · secure payment by Razorpay</small></div>
+            <div className="bureau-grid">
+              {bureauCatalog.map((bureau) => {
+                const report = reportFor(bureau.id)
+                const available = options?.bureaus.find((item) => item.id === bureau.id)?.available ?? false
+                const busy = busyBureau === bureau.id
+                const canBuy = available && Boolean(options?.paymentsEnabled) && !busyBureau && report?.status !== 'processing'
+                return (
+                  <article className={`bureau-card${activeBureau === bureau.id ? ' selected' : ''}`} key={bureau.id}>
+                    <img src={bureau.logo} alt={bureau.name} />
+                    <strong>{bureau.name}</strong>
+                    {report?.status === 'completed' ? <span className="bureau-status ready"><Check /> Score {report.credit_score ?? 'in full report'} · {report.report_date}</span>
+                      : report?.status === 'processing' ? <span className="bureau-status pending"><Clock3 /> Fetching report…</span>
+                        : report?.status === 'failed' ? <span className="bureau-status failed"><AlertTriangle /> {report.failure_reason || 'Fetch failed'}</span>
+                          : <span className="bureau-status">{available ? 'Not fetched yet' : 'Coming soon'}</span>}
+                    <div className="bureau-actions">
+                      {report?.status === 'completed' && <button type="button" className="button button-outline" onClick={() => setSelectedBureau(bureau.id)}>View</button>}
+                      {report?.status === 'failed'
+                        ? <button type="button" className="button button-primary" disabled={Boolean(busyBureau)} onClick={() => void retryReport(report)}>{busy ? 'Fetching…' : <>Retry free <RotateCcw /></>}</button>
+                        : <button type="button" className="button button-primary" disabled={!canBuy} onClick={() => void buyReport(bureau.id)}>{busy ? 'Processing…' : report?.status === 'completed' ? `Refresh · ₹${price}` : `Get report · ₹${price}`}</button>}
+                    </div>
+                  </article>
+                )
+              })}
+            </div>
+            {options && !options.paymentsEnabled && <p className="bureau-note">Online payments are being set up. Please check back shortly.</p>}
+          </section>
+
           <section className="dashboard-grid dashboard-grid-top">
-            <article className="dashboard-card score-card">
-              <div className="dashboard-card-heading"><strong>Your Credit Score</strong><CircleHelp /></div>
-              {status.report?.credit_score ? <><div className="dashboard-score-area"><div className="dashboard-gauge"><div className="dashboard-gauge-track" /><div className="dashboard-gauge-needle" /><strong>{status.report.credit_score}</strong><small>{status.report.score_band || 'Good'}</small><span className="gauge-min">300</span><span className="gauge-max">900</span></div><div className="dashboard-score-copy"><small>Last updated: {status.report.report_date} <RotateCcw /></small><strong><TrendingUp /> Live report</strong><span>{status.report.bureau} bureau</span><p>Your report is ready.<br />Review your score factors<br />and next best actions.</p></div></div><button className="dashboard-primary-action" type="button">View My Credit Report <ArrowRight /></button></> : <div className="score-unavailable"><span><FileSearch /></span><h3>Your score hasn't been fetched yet</h3><p>Complete the sample request to create a pending report. The real bureau API can be connected later.</p><button className="dashboard-primary-action" type="button" onClick={requestScore} disabled={requesting}>{requesting ? 'Queueing request…' : <>Request My Credit Score <ArrowRight /></>}</button>{requestMessage && <small>{requestMessage}</small>}</div>}
-            </article>
-
-            <article className="dashboard-card highlights-card"><div className="dashboard-card-heading"><strong>Key Highlights</strong><button type="button">View Report <ArrowRight /></button></div><div className="highlight-grid"><div><span className="metric-icon blue"><CreditCard /></span><strong>5</strong><small>Active Accounts</small><ArrowRight /></div><div><span className="metric-icon blue"><Search /></span><strong>3</strong><small>Credit Enquiries<br />(last 6 months)</small><ArrowRight /></div><div><span className="metric-icon red"><AlertTriangle /></span><strong>0</strong><small>Overdue Payments</small><ArrowRight /></div><div><span className="metric-icon violet"><WalletCards /></span><strong>2</strong><small>Closed Accounts</small><ArrowRight /></div></div></article>
-
-            <article className="dashboard-card quick-card"><div className="dashboard-card-heading"><strong>Quick Actions</strong></div><div className="quick-actions"><button type="button"><FileSearch /> View Full Credit Report <ArrowRight /></button><button type="button"><ShieldCheck /> Check My Credit Score <ArrowRight /></button><button type="button"><Download /> Download Report (PDF) <ArrowRight /></button><button type="button"><BarChart3 /> Improve My Credit Score <ArrowRight /></button><button type="button"><Gift /> Explore Loan &amp; Card Offers <ArrowRight /></button></div></article>
+            {activeReport ? <>
+              <article className="dashboard-card score-card">
+                <div className="dashboard-card-heading"><strong>{bureauName(activeReport.bureau)} Score</strong><CircleHelp /></div>
+                <div className="dashboard-score-area"><div className="dashboard-gauge"><div className="dashboard-gauge-track" /><div className="dashboard-gauge-needle" style={{ transform: `rotate(${needleAngle}deg)` }} /><strong>{activeReport.credit_score ?? '—'}</strong><small>{activeReport.score_band || 'See full report'}</small><span className="gauge-min">300</span><span className="gauge-max">900</span></div><div className="dashboard-score-copy"><small>Report date: {activeReport.report_date}</small><strong><ShieldCheck /> {bureauName(activeReport.bureau)}</strong><p>{activeReport.credit_score ? 'Your latest score from this bureau.' : 'Your score is available in the full report.'}</p></div></div>
+                {activeReport.report_url && <a className="dashboard-primary-action" href={activeReport.report_url} target="_blank" rel="noreferrer">View Full Report <ArrowRight /></a>}
+              </article>
+              <article className="dashboard-card highlights-card"><div className="dashboard-card-heading"><strong>Key Highlights</strong></div><div className="highlight-grid"><div><span className="metric-icon blue"><WalletCards /></span><strong>{metric(activeReport.total_accounts)}</strong><small>Total Accounts</small></div><div><span className="metric-icon blue"><CreditCard /></span><strong>{metric(activeReport.active_accounts)}</strong><small>Active Accounts</small></div><div><span className="metric-icon red"><AlertTriangle /></span><strong>{metric(activeReport.overdue_accounts)}</strong><small>Overdue Accounts</small></div><div><span className="metric-icon violet"><Search /></span><strong>{metric(activeReport.enquiries_last_6_months)}</strong><small>Enquiries<br />(last 6 months)</small></div></div></article>
+              <article className="dashboard-card quick-card"><div className="dashboard-card-heading"><strong>Your Reports</strong></div><div className="quick-actions">{completedReports.map((report) => <button type="button" key={report.bureau} onClick={() => setSelectedBureau(report.bureau)}><FileSearch /> {bureauName(report.bureau)} · {report.credit_score ?? '—'} <ArrowRight /></button>)}</div></article>
+            </> : <article className="dashboard-card empty-report-card"><div className="empty-dashboard-state"><FileSearch /><strong>No credit data yet</strong><span>Choose CIBIL, Equifax, or Experian above. Your score, accounts, and enquiries will appear here once the report is fetched.</span></div></article>}
           </section>
 
-          <section className="dashboard-grid dashboard-grid-middle">
-            <article className="dashboard-card trend-card"><div className="dashboard-card-heading"><strong>Your Credit Score Trend</strong>{status.report && <button type="button">6 Months <ChevronDown /></button>}</div>{status.report?.credit_score ? <div className="trend-chart"><div className="trend-y-labels"><span>900</span><span>750</span><span>600</span><span>450</span><span>300</span></div><div className="trend-plot"><div className="trend-grid-lines"><i /><i /><i /><i /><i /></div><svg viewBox="0 0 520 180" preserveAspectRatio="none" aria-label="Credit score trend"><polyline points="10,132 95,118 180,107 265,84 350,70 435,57 510,42" fill="none" stroke="#0a3d9c" strokeWidth="3" /><polyline points="10,132 95,118 180,107 265,84 350,70 435,57 510,42 510,180 10,180" fill="url(#trendFill)" stroke="none" /><defs><linearGradient id="trendFill" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor="#b9dcff" stopOpacity=".65" /><stop offset="1" stopColor="#eaf6ff" stopOpacity=".1" /></linearGradient></defs>{[10,95,180,265,350,435,510].map((x, index) => <circle key={x} cx={x} cy={[132,118,107,84,70,57,42][index]} r="5" fill="#fff" stroke="#0a3d9c" strokeWidth="3" />)}</svg><div className="trend-months"><span>Apr</span><span>May</span><span>Jun</span><span>Jul</span><span>Aug</span><span>Sep</span><span>Oct</span></div><b className="trend-current">{status.report.credit_score}</b></div></div> : <div className="empty-dashboard-state"><FileSearch /><strong>Your score trend will appear here</strong><span>Once the bureau report is fetched, we’ll track changes month by month.</span></div>}</article>
-
-            <article className="dashboard-card factors-card"><div className="dashboard-card-heading"><strong>Score Factors</strong><button type="button">View Details <ArrowRight /></button></div><div className="factor-rows"><div><span className="factor-icon green"><Check /></span><span>Payment History</span><b className="status-good">Excellent</b><ArrowRight /></div><div><span className="factor-icon gold"><Percent /></span><span>Credit Utilisation</span><b className="status-good">Good</b><ArrowRight /></div><div><span className="factor-icon gold"><Clock3 /></span><span>Length of Credit History</span><b className="status-good">Good</b><ArrowRight /></div><div><span className="factor-icon violet"><Search /></span><span>Credit Enquiries</span><b className="status-good">Good</b><ArrowRight /></div><div><span className="factor-icon gold"><WalletCards /></span><span>Credit Mix</span><b className="status-fair">Fair</b><ArrowRight /></div></div></article>
-
-            <article className="dashboard-card action-card"><div className="dashboard-card-heading"><strong><Lightbulb /> Action for You</strong></div><div className="action-list"><div><span className="metric-icon green"><CreditCard /></span><p><strong>Maintain On-Time Payments</strong><small>You've been making payments consistently. Keep it up!</small></p><ArrowRight /></div><div><span className="metric-icon gold"><Percent /></span><p><strong>Reduce Credit Utilization</strong><small>Try to keep your credit usage below 30%.</small></p><ArrowRight /></div><div><span className="metric-icon blue"><Search /></span><p><strong>Limit New Credit Enquiries</strong><small>Multiple enquiries in a short period can impact your score.</small></p><ArrowRight /></div></div></article>
-          </section>
-
-          <section className="dashboard-grid dashboard-grid-bottom">
-            <article className="dashboard-card alerts-card"><div className="dashboard-card-heading"><strong><Bell /> Recent Alerts</strong><button type="button">View All <ArrowRight /></button></div><div className="alert-list"><div><Check /><p><strong>Your credit report is ready</strong><small>Generated on 12 Oct 2026</small></p><time>Today</time></div><div><Clock3 /><p><strong>New enquiry added</strong><small>HDFC Bank · Personal Loan</small></p><time>28 Sep 2026</time></div><div><CircleHelp /><p><strong>Score increased by 36 points</strong><small>Your score is now 742</small></p><time>12 Sep 2026</time></div></div></article>
-            <article className="dashboard-card recommended-card"><div className="dashboard-card-heading"><strong><Gift /> Recommended for You</strong><button type="button">View All Offers <ArrowRight /></button></div><div className="recommend-grid"><div><span className="recommend-brand hdfc">H</span><strong>HDFC Bank</strong><small>Up to ₹20,00,000<br />Starting 10.5% p.a.</small><button type="button">View Offer <ArrowRight /></button></div><div><span className="recommend-brand sbi">SBI</span><strong>SBI Credit Card</strong><small>Lifetime Free<br />Rewards &amp; Cashback</small><button type="button">View Offer <ArrowRight /></button></div></div></article>
+          <section className="dashboard-grid dashboard-grid-bottom learning-only">
             <article className="dashboard-card learning-card"><div className="dashboard-card-heading"><strong><BookOpen /> Credit Learning Hub</strong><button type="button">View All <ArrowRight /></button></div><div className="learning-list"><div><span>5 min</span><p><strong>5 Ways to Improve Your Credit Score</strong><small>Simple tips to build a stronger credit profile.</small></p><ArrowRight /></div><div><span>4 min</span><p><strong>What is a Good Credit Score?</strong><small>Understand score ranges and what they mean.</small></p><ArrowRight /></div><div><span>6 min</span><p><strong>How Credit Enquiries Affect Your Score</strong><small>Learn how to manage credit applications.</small></p><ArrowRight /></div></div></article>
           </section>
         </div>
