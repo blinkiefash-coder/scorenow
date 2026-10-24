@@ -68,6 +68,32 @@
   a.dashboard-primary-action { display: flex; align-items: center; justify-content: center; gap: 8px; text-decoration: none; }
   a.dashboard-score-cta { text-decoration: none; }
   .learning-only { grid-template-columns: 1fr !important; }
+  .sim-checkout { width: min(400px, calc(100vw - 32px)); overflow: hidden; border-radius: 14px; background: white; box-shadow: 0 30px 80px rgba(8,20,70,.35); }
+  .sim-checkout header { display: flex; align-items: center; gap: 10px; padding: 16px; background: #0b2a5b; color: white; }
+  .sim-checkout header img { width: 40px; height: 40px; object-fit: contain; border-radius: 8px; background: white; padding: 4px; }
+  .sim-checkout header div { display: grid; flex: 1; gap: 2px; }
+  .sim-checkout header strong { font-size: 15px; }
+  .sim-checkout header small { opacity: .8; font-size: 12px; }
+  .sim-checkout header b { font-size: 18px; }
+  .sim-checkout header button { border: 0; background: none; color: white; cursor: pointer; }
+  .sim-checkout header button svg { width: 18px; }
+  .sim-contact { margin: 0; padding: 10px 16px; border-bottom: 1px solid #edf2f7; color: var(--muted); font-size: 12px; }
+  .sim-methods { display: grid; gap: 8px; padding: 14px 16px 4px; }
+  .sim-methods button { display: flex; align-items: center; justify-content: space-between; padding: 12px 14px; border: 1px solid #dce8f5; border-radius: 10px; background: #fbfdff; text-align: left; cursor: pointer; }
+  .sim-methods button.active { border-color: var(--blue); box-shadow: 0 0 0 3px #e8f3ff; }
+  .sim-methods span { display: grid; gap: 2px; }
+  .sim-methods strong { color: var(--navy); font-size: 14px; }
+  .sim-methods small { color: var(--muted); font-size: 11px; }
+  .sim-methods svg { width: 18px; color: var(--blue); }
+  .sim-pay { width: calc(100% - 32px); margin: 12px 16px 0; }
+  .sim-note { display: flex; gap: 6px; margin: 12px 16px 16px; color: #8a5a00; font-size: 11px; line-height: 1.45; }
+  .sim-note svg { width: 14px; flex-shrink: 0; }
+  .sim-status { display: grid; justify-items: center; gap: 8px; padding: 38px 16px; text-align: center; }
+  .sim-status strong { color: var(--navy); font-size: 16px; }
+  .sim-status small { color: var(--muted); font-size: 12px; }
+  .sim-status .spin { width: 28px; height: 28px; color: var(--blue); animation: spin 1s linear infinite; }
+  .sim-status.approved span { width: 54px; height: 54px; display: grid; place-items: center; border-radius: 50%; background: #2fb36d; color: white; }
+  .sim-status.approved span svg { width: 28px; height: 28px; }
   .report-loading { display: flex; align-items: center; gap: 8px; margin-top: 12px; color: var(--muted); font-size: 13px; }
   .report-loading svg { width: 16px; animation: spin 1s linear infinite; }
   .report-detail { display: grid; gap: 12px; margin: 12px 0; }

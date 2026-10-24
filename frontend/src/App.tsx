@@ -1421,6 +1421,49 @@ type RazorpayCheckout = { open: () => void; on: (event: 'payment.failed', callba
 type RazorpayConstructor = new (options: Record<string, unknown>) => RazorpayCheckout
 type RazorpaySuccess = { razorpay_order_id: string; razorpay_payment_id: string; razorpay_signature: string }
 
+type SimulatedCheckoutState = { bureau: BureauId; orderId: string; amount: number; bureauName: string; prefill: Record<string, string>; done: () => void }
+
+// Stand-in for Razorpay checkout while the website is under Razorpay review; payments auto-approve server-side.
+function SimulatedCheckout({ checkout, onApprove, onDismiss }: { checkout: SimulatedCheckoutState; onApprove: () => void; onDismiss: () => void }) {
+  const [method, setMethod] = useState<'upi' | 'card' | 'netbanking'>('upi')
+  const [stage, setStage] = useState<'select' | 'processing' | 'approved'>('select')
+
+  const pay = () => {
+    setStage('processing')
+    window.setTimeout(() => {
+      setStage('approved')
+      window.setTimeout(onApprove, 900)
+    }, 1200)
+  }
+
+  return (
+    <div className="auth-overlay" role="presentation" onClick={stage === 'select' ? onDismiss : undefined}>
+      <div className="sim-checkout" role="dialog" aria-modal="true" aria-label="Payment" onClick={(event) => event.stopPropagation()}>
+        <header>
+          <img src="/scorenow-logo-hd.png" alt="Score Now" />
+          <div><strong>Score Now</strong><small>{checkout.bureauName} credit report</small></div>
+          <b>₹{(checkout.amount / 100).toFixed(2)}</b>
+          {stage === 'select' && <button type="button" onClick={onDismiss} aria-label="Close"><X /></button>}
+        </header>
+        {stage === 'select' && <>
+          <p className="sim-contact">{checkout.prefill.contact}{checkout.prefill.email ? ` · ${checkout.prefill.email}` : ''}</p>
+          <div className="sim-methods" role="radiogroup" aria-label="Payment method">
+            {([['upi', 'UPI', 'Google Pay, PhonePe, Paytm & more'], ['card', 'Card', 'Visa, Mastercard, RuPay'], ['netbanking', 'Netbanking', 'All major banks']] as const).map(([id, label, hint]) => (
+              <button type="button" role="radio" aria-checked={method === id} className={method === id ? 'active' : ''} key={id} onClick={() => setMethod(id)}>
+                <span><strong>{label}</strong><small>{hint}</small></span>{method === id && <Check />}
+              </button>
+            ))}
+          </div>
+          <button type="button" className="button button-primary sim-pay" onClick={pay}>Pay ₹{(checkout.amount / 100).toFixed(2)}</button>
+          <p className="sim-note"><ShieldCheck /> Payments are auto-approved while our payment gateway is being activated. You will not be charged.</p>
+        </>}
+        {stage === 'processing' && <div className="sim-status"><RotateCcw className="spin" /><strong>Processing payment…</strong></div>}
+        {stage === 'approved' && <div className="sim-status approved"><span><Check /></span><strong>Payment approved</strong><small>Fetching your report…</small></div>}
+      </div>
+    </div>
+  )
+}
+
 const loadRazorpayCheckout = () => new Promise<RazorpayConstructor | null>((resolve) => {
   const existing = (window as unknown as { Razorpay?: RazorpayConstructor }).Razorpay
   if (existing) {
@@ -1474,6 +1517,7 @@ function DashboardPage({ user, onLogout }: { user: AuthUser; onLogout: () => voi
   const [busyBureau, setBusyBureau] = useState<BureauId | null>(null)
   const [selectedBureau, setSelectedBureau] = useState<BureauId | null>(null)
   const [notice, setNotice] = useState<{ tone: 'info' | 'success' | 'error'; text: string } | null>(null)
+  const [simCheckout, setSimCheckout] = useState<SimulatedCheckoutState | null>(null)
   const firstName = user.full_name.trim().split(' ')[0] || 'there'
   const hour = new Date().getHours()
   const greeting = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening'
@@ -1557,12 +1601,16 @@ function DashboardPage({ user, onLogout }: { user: AuthUser; onLogout: () => voi
         headers: { 'Content-Type': 'application/json', ...authHeaders(user) },
         body: JSON.stringify({ bureau }),
       })
-      const order = await response.json() as { message?: string; orderId: string; amount: number; currency: string; keyId: string; bureauName: string; prefill: Record<string, string> }
+      const order = await response.json() as { message?: string; simulated?: boolean; orderId: string; amount: number; currency: string; keyId: string; bureauName: string; prefill: Record<string, string> }
       if (response.status === 401) {
         onLogout()
         return
       }
       if (!response.ok) throw new Error(order.message || 'Unable to start the payment.')
+      if (order.simulated) {
+        await new Promise<void>((resolve) => setSimCheckout({ bureau, orderId: order.orderId, amount: order.amount, bureauName: order.bureauName, prefill: order.prefill, done: resolve }))
+        return
+      }
       const Razorpay = await loadRazorpayCheckout()
       if (!Razorpay) throw new Error('Unable to load Razorpay checkout. Check your connection and try again.')
 
@@ -1709,6 +1757,15 @@ function DashboardPage({ user, onLogout }: { user: AuthUser; onLogout: () => voi
           </section>
         </div>
       </main>
+      {simCheckout && <SimulatedCheckout
+        checkout={simCheckout}
+        onDismiss={() => { simCheckout.done(); setSimCheckout(null) }}
+        onApprove={() => {
+          const current = simCheckout
+          setSimCheckout(null)
+          void verifyPayment(current.bureau, { razorpay_order_id: current.orderId, razorpay_payment_id: '', razorpay_signature: '' }).finally(current.done)
+        }}
+      />}
     </div>
   )
 }

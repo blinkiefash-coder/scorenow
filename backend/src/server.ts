@@ -44,7 +44,7 @@ import {
 } from "./database.js";
 import { verifyFirebasePhoneToken } from "./firebaseAdmin.js";
 import { demoReportResponses, isReportsDemoMode } from "./demoReports.js";
-import { createRazorpayOrder, isRazorpayConfigured, isValidPaymentSignature } from "./razorpay.js";
+import { createRazorpayOrder, isRazorpayConfigured, isSimulatedPayments, isValidPaymentSignature, simulatedId } from "./razorpay.js";
 import { normalizeReport } from "./reportParser.js";
 
 const app = express();
@@ -302,7 +302,8 @@ app.post("/api/profile", requireUser, async (request, response) => {
 app.get("/api/reports/options", (_request, response) => {
   response.json({
     price: REPORT_PRICE_RUPEES,
-    paymentsEnabled: isRazorpayConfigured(),
+    paymentsEnabled: isSimulatedPayments() || isRazorpayConfigured(),
+    paymentsMode: isSimulatedPayments() ? "simulated" : "razorpay",
     demoMode: isReportsDemoMode(),
     bureaus: BUREAUS.map((id) => ({ id, name: bureauNames[id], available: isBureauAvailable(id) })),
   });
@@ -376,7 +377,7 @@ app.post("/api/reports/order", requireUser, async (request, response) => {
     response.status(503).json({ message: `${bureauNames[bureau]} reports are not available yet.` });
     return;
   }
-  if (!isRazorpayConfigured()) {
+  if (!isSimulatedPayments() && !isRazorpayConfigured()) {
     response.status(503).json({ message: "Online payments are not configured yet. Please try again later." });
     return;
   }
@@ -393,17 +394,24 @@ app.post("/api/reports/order", requireUser, async (request, response) => {
       return;
     }
 
-    const order = await createRazorpayOrder({
-      amountPaise: REPORT_PRICE_RUPEES * 100,
-      receipt: `rpt_${bureau}_${Date.now()}`,
-      notes: { userId: user.id, bureau },
+    const simulated = isSimulatedPayments();
+    const order = simulated
+      ? { id: simulatedId("order"), amount: REPORT_PRICE_RUPEES * 100, currency: "INR" }
+      : await createRazorpayOrder({
+        amountPaise: REPORT_PRICE_RUPEES * 100,
+        receipt: `rpt_${bureau}_${Date.now()}`,
+        notes: { userId: user.id, bureau },
+      });
+    await createReportPayment({
+      userId: user.id, bureau, orderId: order.id, amount: REPORT_PRICE_RUPEES, gstAmount: REPORT_GST_RUPEES,
+      gateway: simulated ? "simulated" : "razorpay",
     });
-    await createReportPayment({ userId: user.id, bureau, orderId: order.id, amount: REPORT_PRICE_RUPEES, gstAmount: REPORT_GST_RUPEES });
     response.status(201).json({
+      simulated,
       orderId: order.id,
       amount: order.amount,
       currency: order.currency,
-      keyId: process.env.RAZORPAY_KEY_ID,
+      keyId: simulated ? undefined : process.env.RAZORPAY_KEY_ID,
       bureau,
       bureauName: bureauNames[bureau],
       prefill: { name: user.full_name, email: user.email ?? undefined, contact: `+91${user.mobile}` },
@@ -417,7 +425,7 @@ app.post("/api/reports/order", requireUser, async (request, response) => {
 app.post("/api/reports/verify", requireUser, async (request, response) => {
   const user = sessionUser(response);
   const orderId = String(request.body.orderId || "");
-  const paymentId = String(request.body.paymentId || "");
+  let paymentId = String(request.body.paymentId || "");
   const signature = String(request.body.signature || "");
 
   const payment = orderId ? await findReportPayment(user.id, orderId) : null;
@@ -425,7 +433,14 @@ app.post("/api/reports/verify", requireUser, async (request, response) => {
     response.status(404).json({ message: "We could not find that payment." });
     return;
   }
-  if (!paymentId || !signature || !isValidPaymentSignature(orderId, paymentId, signature)) {
+  if (payment.gateway === "simulated") {
+    if (!isSimulatedPayments()) {
+      await markPaymentFailed(payment.id);
+      response.status(400).json({ message: "Simulated payments are no longer accepted. Please pay again." });
+      return;
+    }
+    paymentId = simulatedId("pay");
+  } else if (!paymentId || !signature || !isValidPaymentSignature(orderId, paymentId, signature)) {
     await markPaymentFailed(payment.id);
     response.status(400).json({ message: "Payment verification failed. If money was deducted, it will be refunded by Razorpay." });
     return;
@@ -674,6 +689,7 @@ const startServer = async () => {
         process.exit(1);
       }
       console.log(`Score Now API is running at http://localhost:${port}`);
+      if (isSimulatedPayments()) console.warn("PAYMENTS_MODE=simulated: report payments are auto-approved and NOT charged.");
     });
   } catch (error) {
     console.error("Database initialization failed", error);

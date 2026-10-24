@@ -1,4 +1,9 @@
-import { createHmac, timingSafeEqual } from "node:crypto";
+import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
+
+// Temporary mode while Razorpay reviews the website: checkout is shown but payments auto-approve without charging.
+export const isSimulatedPayments = () => process.env.PAYMENTS_MODE === "simulated";
+
+export const simulatedId = (prefix: "order" | "pay") => `sim_${prefix}_${randomBytes(9).toString("hex")}`;
 
 export const isRazorpayConfigured = () =>
   Boolean(process.env.RAZORPAY_KEY_ID && process.env.RAZORPAY_KEY_SECRET);

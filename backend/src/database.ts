@@ -306,23 +306,25 @@ export const createReportPayment = async ({
   orderId,
   amount,
   gstAmount,
+  gateway,
 }: {
   userId: string;
   bureau: Bureau;
   orderId: string;
   amount: number;
   gstAmount: number;
+  gateway: "razorpay" | "simulated";
 }) => {
   await pool.query(
     `INSERT INTO payments (user_id, gateway, gateway_order_id, amount, gst_amount, status, report_bureau)
-     VALUES ($1, 'razorpay', $2, $3, $4, 'created', $5)`,
-    [userId, orderId, amount, gstAmount, bureau],
+     VALUES ($1, $6, $2, $3, $4, 'created', $5)`,
+    [userId, orderId, amount, gstAmount, bureau, gateway],
   );
 };
 
 export const findReportPayment = async (userId: string, orderId: string) => {
-  const { rows } = await pool.query<{ id: string; status: string; report_bureau: Bureau | null }>(
-    `SELECT id, status, report_bureau FROM payments WHERE user_id = $1 AND gateway_order_id = $2`,
+  const { rows } = await pool.query<{ id: string; status: string; gateway: string; report_bureau: Bureau | null }>(
+    `SELECT id, status, gateway, report_bureau FROM payments WHERE user_id = $1 AND gateway_order_id = $2`,
     [userId, orderId],
   );
   return rows[0] ?? null;
