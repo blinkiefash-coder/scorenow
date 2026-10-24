@@ -36,6 +36,20 @@ export const initializeDatabase = async () => {
   // Additive column on the existing otp_verifications table so an OTP request
   // can also be delivered by email (mobile stays required, matching `users.mobile`).
   await pool.query(`ALTER TABLE otp_verifications ADD COLUMN IF NOT EXISTS email TEXT`);
+
+  await pool.query(`ALTER TABLE assessment_submissions ADD COLUMN IF NOT EXISTS user_id UUID REFERENCES users(id)`);
+  await pool.query(`ALTER TABLE website_inquiries ADD COLUMN IF NOT EXISTS user_id UUID REFERENCES users(id)`);
+};
+
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+export const findUserById = async (userId: string) => {
+  if (!UUID_PATTERN.test(userId)) return null;
+  const { rows } = await pool.query<{ id: string; mobile: string; email: string | null; full_name: string }>(
+    `SELECT id, mobile, email, full_name FROM users WHERE id = $1`,
+    [userId],
+  );
+  return rows[0] ?? null;
 };
 
 const OTP_TTL_MS = 5 * 60 * 1000;
@@ -255,10 +269,12 @@ export const createCreditReportRequest = async (userId: string) => {
 };
 
 export const saveAssessment = async ({
+  userId,
   assessmentType,
   fields,
   report,
 }: {
+  userId: string;
   assessmentType: "individual" | "business";
   fields: Record<string, string>;
   report?: {
@@ -269,9 +285,10 @@ export const saveAssessment = async ({
 }) => {
   await pool.query(
     `INSERT INTO assessment_submissions
-      (assessment_type, form_data, report_content, report_filename, report_mime_type)
-     VALUES ($1, $2, $3, $4, $5)`,
+      (user_id, assessment_type, form_data, report_content, report_filename, report_mime_type)
+     VALUES ($1, $2, $3, $4, $5, $6)`,
     [
+      userId,
       assessmentType,
       JSON.stringify(fields),
       report?.buffer ?? null,
@@ -282,19 +299,21 @@ export const saveAssessment = async ({
 };
 
 export const saveWebsiteInquiry = async ({
+  userId,
   fullName,
   mobile,
   concern,
   scoreRange,
 }: {
+  userId: string;
   fullName: string;
   mobile: string;
   concern: string;
   scoreRange: string;
 }) => {
   await pool.query(
-    `INSERT INTO website_inquiries (full_name, mobile, concern, score_range)
-     VALUES ($1, $2, $3, $4)`,
-    [fullName, mobile, concern, scoreRange],
+    `INSERT INTO website_inquiries (user_id, full_name, mobile, concern, score_range)
+     VALUES ($1, $2, $3, $4, $5)`,
+    [userId, fullName, mobile, concern, scoreRange],
   );
 };

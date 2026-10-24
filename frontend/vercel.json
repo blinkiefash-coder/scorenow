@@ -3,7 +3,9 @@
     { "source": "/business", "destination": "/" },
     { "source": "/business/", "destination": "/" },
     { "source": "/creditscore", "destination": "/" },
-    { "source": "/creditscore/", "destination": "/" }
+    { "source": "/creditscore/", "destination": "/" },
+    { "source": "/dashboard", "destination": "/" },
+    { "source": "/dashboard/", "destination": "/" }
   ],
   "headers": [
     {

@@ -87,6 +87,7 @@
 .auth-user-dropdown strong { color: var(--navy); font-size: 13px; }
 .auth-user-dropdown small { color: var(--muted); font-size: 11px; margin-bottom: 8px; }
 .auth-user-dropdown button { margin-top: 4px; border: 1px solid var(--line); border-radius: 8px; background: none; padding: 8px 10px; font-size: 12px; font-weight: 800; color: #c0392b; cursor: pointer; text-align: left; }
+.auth-user-dropdown a { margin-top: 4px; border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; font-size: 12px; font-weight: 800; color: var(--navy); text-decoration: none; }
 .auth-sample-otp { display: flex; align-items: center; gap: 6px; margin: -2px 0 2px; padding: 8px 12px; border: 1px dashed var(--blue); border-radius: 10px; background: var(--sky); color: var(--blue-dark); font-size: 11px; font-weight: 700; cursor: pointer; text-transform: none; }
 .auth-sample-otp svg { width: 14px; height: 14px; flex: none; }
 .auth-sample-otp strong { font-size: 13px; letter-spacing: 2px; }
@@ -447,6 +448,8 @@ footer { background: #071238; color: #bac5dc; padding: 65px 0 22px; }.footer-gri
 .auth-otp-note { display: flex; align-items: center; gap: 6px; margin: -2px 0 2px; color: var(--muted); font-size: 11px; font-weight: 600; text-transform: none; }
 .auth-otp-note svg { width: 14px; height: 14px; color: var(--green); flex: none; }
 .auth-error { margin: -6px 0 2px; padding: 8px 12px; border-radius: 10px; background: #fdecec; color: #c0392b; font-size: 12px; font-weight: 700; text-align: center; }
+.auth-notice { display: flex; align-items: center; justify-content: center; gap: 6px; margin: -4px 0 2px; padding: 8px 12px; border-radius: 10px; background: #fff6e0; color: #8a5a00; font-size: 12px; font-weight: 700; text-align: center; }
+.auth-notice svg { width: 14px; height: 14px; flex-shrink: 0; }
 .auth-terms { flex-direction: row!important; align-items: flex-start; gap: 9px!important; font-size: 11px!important; font-weight: 500!important; text-transform: none!important; letter-spacing: 0!important; color: var(--muted)!important; }
 .auth-terms input { min-height: 0; width: 16px; height: 16px; margin-top: 1px; flex: none; accent-color: var(--blue); }
 .auth-terms a { color: var(--blue-dark); font-weight: 700; }

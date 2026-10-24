@@ -291,6 +291,50 @@ function useScrollAuthPrompt() {
   return [open, setOpen] as const
 }
 
+type RequireLogin = (notice: string, action: (user: AuthUser) => void) => void
+
+// Runs an action immediately for signed-in users, otherwise opens the auth popup and runs it after login.
+function useLoginGate({ redirectAfterLogin }: { redirectAfterLogin?: string } = {}) {
+  const [authOpen, setAuthOpen] = useScrollAuthPrompt()
+  const { user, login, logout } = useAuthUser()
+  const [authNotice, setAuthNotice] = useState('')
+  const pendingActionRef = useRef<((user: AuthUser) => void) | null>(null)
+
+  const requireLogin: RequireLogin = (notice, action) => {
+    if (user) {
+      action(user)
+      return
+    }
+    pendingActionRef.current = action
+    setAuthNotice(notice)
+    setAuthOpen(true)
+  }
+
+  const openAuth = () => {
+    pendingActionRef.current = null
+    setAuthNotice('')
+    setAuthOpen(true)
+  }
+
+  const closeAuth = () => {
+    pendingActionRef.current = null
+    setAuthNotice('')
+    setAuthOpen(false)
+  }
+
+  const handleLogin = (nextUser: AuthUser) => {
+    login(nextUser)
+    const action = pendingActionRef.current
+    pendingActionRef.current = null
+    if (action) action(nextUser)
+    else if (redirectAfterLogin) window.location.href = redirectAfterLogin
+  }
+
+  const authModal = <AuthModal open={authOpen} notice={authNotice} onClose={closeAuth} onSuccess={handleLogin} />
+
+  return { user, logout, requireLogin, openAuth, authModal }
+}
+
 function AuthAvatarButton({ user, onClick, onLogout }: { user: AuthUser | null; onClick: () => void; onLogout: () => void }) {
   const [menuOpen, setMenuOpen] = useState(false)
   const containerRef = useRef<HTMLDivElement | null>(null)
@@ -325,6 +369,7 @@ function AuthAvatarButton({ user, onClick, onLogout }: { user: AuthUser | null; 
         <div className="auth-user-dropdown" role="menu">
           <strong>{user.full_name}</strong>
           <small>{user.mobile ? `+91 ${user.mobile}` : user.email}</small>
+          <a role="menuitem" href="/dashboard">My Dashboard</a>
           <button type="button" role="menuitem" onClick={() => { setMenuOpen(false); onLogout() }}>Log Out</button>
         </div>
       )}
@@ -383,7 +428,7 @@ function maskEmail(email: string) {
   return `${visible}${'•'.repeat(Math.max(name.length - visible.length, 3))}@${domain}`
 }
 
-function AuthModal({ open, onClose, onSuccess }: { open: boolean; onClose: () => void; onSuccess: (user: AuthUser) => void }) {
+function AuthModal({ open, notice, onClose, onSuccess }: { open: boolean; notice?: string; onClose: () => void; onSuccess: (user: AuthUser) => void }) {
   const [view, setView] = useState<'login' | 'signup' | 'otp'>('login')
   const [loginMethod, setLoginMethod] = useState<'mobile' | 'email'>('mobile')
   const [showPassword, setShowPassword] = useState(false)
@@ -583,6 +628,7 @@ function AuthModal({ open, onClose, onSuccess }: { open: boolean; onClose: () =>
             <span className="auth-avatar"><UserRound /></span>
             <h3>{view === 'login' ? 'Welcome Back' : 'Create Your Account'}</h3>
             <p>{view === 'login' ? 'Sign in to continue to Score Now.' : 'Start improving your credit profile in just a few steps.'}</p>
+            {notice && <p className="auth-notice" role="alert"><LockKeyhole /> {notice}</p>}
 
             {view === 'login' && (
               <div className="auth-tabs" role="tablist">
@@ -667,17 +713,24 @@ function FeatureRow({ icon: Icon, tone, title, text }: Feature) {
   )
 }
 
-function AssessmentForm({ business = false }: { business?: boolean }) {
+function AssessmentForm({ business = false, user, requireLogin }: { business?: boolean; user: AuthUser | null; requireLogin: RequireLogin }) {
   const [fileName, setFileName] = useState('')
   const [fileError, setFileError] = useState('')
   const [submitStatus, setSubmitStatus] = useState<'idle' | 'sending' | 'success' | 'error'>('idle')
   const [submitMessage, setSubmitMessage] = useState('')
 
-  const submitAssessment = async (event: FormEvent<HTMLFormElement>) => {
+  const submitAssessment = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
     const form = event.currentTarget
     const data = new FormData(form)
     data.set('assessmentType', business ? 'business' : 'individual')
+    requireLogin('Please log in or sign up to submit your assessment.', (currentUser) => {
+      data.set('userId', currentUser.id)
+      void sendAssessment(form, data)
+    })
+  }
+
+  const sendAssessment = async (form: HTMLFormElement, data: FormData) => {
     setSubmitStatus('sending')
     setSubmitMessage('')
 
@@ -705,11 +758,11 @@ function AssessmentForm({ business = false }: { business?: boolean }) {
           <p>{business ? 'Review commercial credit exposure, payment behaviour, trade lines, and reported issues.' : 'Understand your report, identify important issues, and choose the right improvement path.'}</p>
           <ul><li><ShieldCheck /> Privacy-conscious handling</li><li><FileSearch /> Structured report review</li><li><Headphones /> Expert-guided next steps</li></ul>
         </div>
-        <form className="assessment-form" onSubmit={submitAssessment}>
+        <form className="assessment-form" onSubmit={submitAssessment} key={user?.id ?? 'guest'}>
           {business && <label className="field-wide"><span>Business name *</span><input name="businessName" required placeholder="Enter registered business name" autoComplete="organization" /></label>}
-          <label><span>Full name *</span><input name="fullName" required placeholder="Enter your full name" autoComplete="name" /></label>
-          <label><span>Mobile number *</span><input name="mobile" required pattern="[0-9]{10}" inputMode="numeric" placeholder="10-digit mobile number" autoComplete="tel-national" /></label>
-          <label><span>Email address *</span><input name="email" required type="email" placeholder="you@example.com" autoComplete="email" /></label>
+          <label><span>Full name *</span><input name="fullName" required defaultValue={user?.full_name ?? ''} placeholder="Enter your full name" autoComplete="name" /></label>
+          <label><span>Mobile number *</span><input name="mobile" required defaultValue={user?.mobile ?? ''} pattern="[0-9]{10}" inputMode="numeric" placeholder="10-digit mobile number" autoComplete="tel-national" /></label>
+          <label><span>Email address *</span><input name="email" required defaultValue={user?.email ?? ''} type="email" placeholder="you@example.com" autoComplete="email" /></label>
           {business ? <>
             <label><span>Business type *</span><select name="businessType" required defaultValue=""><option value="" disabled>Select business type</option><option>Proprietorship</option><option>Partnership</option><option>Private Limited</option><option>LLP</option><option>Other</option></select></label>
             <label><span>Current CMR rank</span><input name="cmr" placeholder="If known" /></label>
@@ -722,6 +775,7 @@ function AssessmentForm({ business = false }: { business?: boolean }) {
           <label className="file-field field-wide"><span>Upload credit report (optional)</span><input name="report" type="file" accept=".pdf,.jpg,.jpeg,.png" onChange={(event) => { const file = event.target.files?.[0]; if (file && file.size > 10 * 1024 * 1024) { event.target.value = ''; setFileName(''); setFileError('The selected file exceeds 10 MB.'); return } setFileError(''); setFileName(file?.name || '') }} /><span className="file-control"><FileCheck2 />{fileName || 'Choose PDF, JPG, or PNG (max 10 MB)'}</span></label>
           {fileError && <p className="file-error field-wide">{fileError}</p>}
           <p className="attachment-note field-wide"><Mail /> Your details and optional report are saved securely for our team to review.</p>
+          {!user && <p className="attachment-note field-wide"><LockKeyhole /> You need to log in or sign up before submitting.</p>}
           {submitMessage && <p className={`submit-message ${submitStatus} field-wide`} role="status">{submitMessage}</p>}
           <button className="button button-primary field-wide" type="submit" disabled={submitStatus === 'sending'}>{submitStatus === 'sending' ? 'Sending Assessment…' : 'Send Assessment Securely'} <ArrowRight /></button>
         </form>
@@ -1078,7 +1132,7 @@ function CreditScoreEstimator() {
   )
 }
 
-function ChatAssistant() {
+function ChatAssistant({ requireLogin }: { requireLogin: RequireLogin }) {
   const [isOpen, setIsOpen] = useState(false)
   const [step, setStep] = useState(0)
   const [name, setName] = useState('')
@@ -1103,19 +1157,23 @@ function ChatAssistant() {
     setStep(2)
   }
 
-  const submitPhone = async (event: FormEvent) => {
+  const submitPhone = (event: FormEvent) => {
     event.preventDefault()
     if (phoneDigits.length !== 10) {
       setPhoneError('Enter a valid 10-digit mobile number.')
       return
     }
     setPhoneError('')
+    requireLogin('Please log in or sign up to request a callback.', (currentUser) => { void saveInquiry(currentUser) })
+  }
+
+  const saveInquiry = async (currentUser: AuthUser) => {
     setIsSavingInquiry(true)
     try {
       const response = await fetch(`${apiUrl}/api/inquiries`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ fullName: name, mobile: phoneDigits, concern, scoreRange }),
+        body: JSON.stringify({ userId: currentUser.id, fullName: name, mobile: phoneDigits, concern, scoreRange }),
       })
       const result = await response.json() as { message?: string }
       if (!response.ok) throw new Error(result.message || 'Unable to save your callback request.')
@@ -1368,8 +1426,7 @@ function DashboardPage({ user, onLogout }: { user: AuthUser; onLogout: () => voi
 function HomePage() {
   const [menuOpen, setMenuOpen] = useState(false)
   const closeMenu = () => setMenuOpen(false)
-  const [authOpen, setAuthOpen] = useScrollAuthPrompt()
-  const { user, login, logout } = useAuthUser()
+  const { user, logout, requireLogin, openAuth, authModal } = useLoginGate({ redirectAfterLogin: '/dashboard' })
 
   useEffect(() => {
     const elements = Array.from(document.querySelectorAll<HTMLElement>('[data-reveal]'))
@@ -1390,8 +1447,6 @@ function HomePage() {
     return () => observer.disconnect()
   }, [])
 
-  if (user) return <DashboardPage user={user} onLogout={logout} />
-
   return (
     <div className="site-shell">
       <header className="site-header">
@@ -1409,7 +1464,7 @@ function HomePage() {
               <a href="#contact" onClick={closeMenu}>Contact</a>
               <a className="button button-primary nav-cta" href="#personal-assessment" onClick={closeMenu}>Free Assessment <ArrowRight /></a>
             </nav>
-            <AuthAvatarButton user={user} onClick={() => setAuthOpen(true)} onLogout={logout} />
+            <AuthAvatarButton user={user} onClick={openAuth} onLogout={logout} />
             <button className="menu-button" type="button" aria-label={menuOpen ? 'Close navigation' : 'Open navigation'} aria-expanded={menuOpen} onClick={() => setMenuOpen((open) => !open)}>
               {menuOpen ? <X /> : <Menu />}
             </button>
@@ -1465,7 +1520,7 @@ function HomePage() {
 
         <AssessmentPathways />
 
-        <AssessmentForm />
+        <AssessmentForm user={user} requireLogin={requireLogin} />
 
         <section className="insights-section section reveal-section" id="insights" data-reveal>
           <div className="container split-grid">
@@ -1566,16 +1621,15 @@ function HomePage() {
         <div className="container footer-grid"><div><Brand /><p>Clear guidance for a stronger financial future.</p></div><div><strong>Company</strong><a href="#about">About Us</a><a href="#partner-opportunity">Partner with us</a><a href="#contact">Contact</a></div><div><strong>Services</strong><a href="#insights">Credit Report</a><a href="#services">Score Improvement</a></div><div><strong>Reach Us</strong><a href="tel:+919114141011">+91 91141 41011</a><a href="mailto:info@scorenow.in">info@scorenow.in</a></div><AppDownload /></div>
         <div className="container footer-bottom"><span>© 2026 Score Now. All rights reserved.</span><span>Privacy Policy · Terms of Use</span></div>
       </footer>
-      <ChatAssistant />
-      <AuthModal open={authOpen} onClose={() => setAuthOpen(false)} onSuccess={login} />
+      <ChatAssistant requireLogin={requireLogin} />
+      {authModal}
     </div>
   )
 }
 
 function BusinessPage() {
   const [menuOpen, setMenuOpen] = useState(false)
-  const [authOpen, setAuthOpen] = useScrollAuthPrompt()
-  const { user, login, logout } = useAuthUser()
+  const { user, logout, requireLogin, openAuth, authModal } = useLoginGate()
   const businessMessage = encodeURIComponent('Hello Score Now, I would like to discuss the Business CMR Improvement Programme.')
   const shieldMessage = encodeURIComponent('Hello Score Now, I would like to discuss the Credit Shield 360 annual business membership.')
 
@@ -1588,7 +1642,7 @@ function BusinessPage() {
             <nav className={menuOpen ? 'nav-links open' : 'nav-links'} aria-label="Business navigation">
               <a href="/">Home</a><a href="/#personal-assessment">For Individuals</a><a className="active" href="/business">For Businesses</a><a href="#business-plans">Business Plans</a><a href="/#about">About Us</a><a href="/#contact">Contact</a><a className="button button-primary nav-cta" href="#business-assessment">Free Assessment <ArrowRight /></a>
             </nav>
-            <AuthAvatarButton user={user} onClick={() => setAuthOpen(true)} onLogout={logout} />
+            <AuthAvatarButton user={user} onClick={openAuth} onLogout={logout} />
             <button className="menu-button" type="button" aria-label={menuOpen ? 'Close navigation' : 'Open navigation'} aria-expanded={menuOpen} onClick={() => setMenuOpen((open) => !open)}>{menuOpen ? <X /> : <Menu />}</button>
           </div>
         </div>
@@ -1601,7 +1655,7 @@ function BusinessPage() {
           </div>
         </section>
 
-        <AssessmentForm business />
+        <AssessmentForm business user={user} requireLogin={requireLogin} />
 
         <section className="business-plans-section section" id="business-plans">
           <div className="container plans-heading"><p className="section-kicker">Business Credit Plans</p><h2>CMR Support Built for <span>Growing Businesses</span></h2><p>Choose a structured improvement programme or request a custom advisory scope for complex profiles.</p></div>
@@ -1616,10 +1670,16 @@ function BusinessPage() {
         </section>
       </main>
       <footer><div className="container footer-grid"><div><Brand href="/" /><p>Clear guidance for a stronger financial future.</p></div><div><strong>Explore</strong><a href="/">Individuals</a><a href="/business">Businesses</a></div><div><strong>Business</strong><a href="#business-assessment">Assessment</a><a href="#business-plans">Plans</a></div><div><strong>Reach Us</strong><a href="tel:+919114141011">+91 91141 41011</a><a href="mailto:info@scorenow.in">info@scorenow.in</a></div><AppDownload /></div><div className="container footer-bottom"><span>© 2026 Score Now. All rights reserved.</span><span>Privacy Policy · Terms of Use</span></div></footer>
-      <ChatAssistant />
-      <AuthModal open={authOpen} onClose={() => setAuthOpen(false)} onSuccess={login} />
+      <ChatAssistant requireLogin={requireLogin} />
+      {authModal}
     </div>
   )
+}
+
+function DashboardRoute() {
+  const { user, logout } = useAuthUser()
+  useEffect(() => { if (!user) window.location.replace('/') }, [user])
+  return user ? <DashboardPage user={user} onLogout={logout} /> : null
 }
 
 type CibilReportResponse = {
@@ -1786,6 +1846,7 @@ function App() {
   }, [pathname])
 
   if (pathname === '/creditscore') return <CreditScorePage />
+  if (pathname === '/dashboard') return <DashboardRoute />
   return pathname === '/business' ? <BusinessPage /> : <HomePage />
 }
 

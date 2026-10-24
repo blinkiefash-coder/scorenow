@@ -8,6 +8,7 @@ import {
   createOtp,
   createCreditReportRequest,
   findUserByEmail,
+  findUserById,
   getDashboardStatus,
   initializeDatabase,
   markEmailVerified,
@@ -333,6 +334,11 @@ app.post("/api/inquiries", async (request, response) => {
   const concern = String(request.body.concern || "").trim();
   const scoreRange = String(request.body.scoreRange || "").trim();
 
+  const user = await findUserById(String(request.body.userId || "")).catch(() => null);
+  if (!user) {
+    response.status(401).json({ message: "Please log in or sign up to request a callback." });
+    return;
+  }
   if (fullName.length < 2 || fullName.length > 120) {
     response.status(400).json({ message: "Enter your name to request a callback." });
     return;
@@ -347,7 +353,7 @@ app.post("/api/inquiries", async (request, response) => {
   }
 
   try {
-    await saveWebsiteInquiry({ fullName, mobile, concern, scoreRange });
+    await saveWebsiteInquiry({ userId: user.id, fullName, mobile, concern, scoreRange });
     response.status(201).json({ message: "Your callback request was saved." });
   } catch (error) {
     console.error("Website inquiry database save failed", error);
@@ -357,6 +363,11 @@ app.post("/api/inquiries", async (request, response) => {
 
 app.post("/api/assessments", upload.single("report"), async (request, response) => {
   const assessmentType = request.body.assessmentType === "business" ? "business" : "individual";
+  const user = await findUserById(String(request.body.userId || "")).catch(() => null);
+  if (!user) {
+    response.status(401).json({ message: "Please log in or sign up to submit an assessment." });
+    return;
+  }
   const requiredFields = assessmentType === "business"
     ? ["businessName", "fullName", "mobile", "email", "businessType"]
     : ["fullName", "mobile", "email", "city", "goal"];
@@ -392,6 +403,7 @@ app.post("/api/assessments", upload.single("report"), async (request, response) 
 
   try {
     await saveAssessment({
+      userId: user.id,
       assessmentType,
       fields: formData,
       report: request.file,
@@ -450,7 +462,11 @@ app.use((error: Error, _request: express.Request, response: express.Response, _n
 const startServer = async () => {
   try {
     await initializeDatabase();
-    app.listen(port, () => {
+    app.listen(port, (error?: Error) => {
+      if (error) {
+        console.error(`Unable to start Score Now API on port ${port}`, error);
+        process.exit(1);
+      }
       console.log(`Score Now API is running at http://localhost:${port}`);
     });
   } catch (error) {
