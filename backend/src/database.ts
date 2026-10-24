@@ -1,6 +1,7 @@
 import { createCipheriv, createDecipheriv, createHash, randomBytes, randomInt } from "node:crypto";
 import { Pool } from "pg";
-import type { Applicant, Bureau, ReportMetrics } from "./bureaus.js";
+import type { Applicant, Bureau } from "./bureaus.js";
+import { normalizeReport, PARSER_VERSION, type NormalizedReport } from "./reportParser.js";
 
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
@@ -45,6 +46,8 @@ export const initializeDatabase = async () => {
   await pool.query(`ALTER TABLE credit_report_requests ADD COLUMN IF NOT EXISTS payment_id UUID REFERENCES payments(id)`);
   await pool.query(`ALTER TABLE credit_reports ADD COLUMN IF NOT EXISTS report_url TEXT`);
   await pool.query(`ALTER TABLE credit_reports ADD COLUMN IF NOT EXISTS raw_report JSONB`);
+  await pool.query(`ALTER TABLE credit_reports ADD COLUMN IF NOT EXISTS normalized_report JSONB`);
+  await pool.query(`ALTER TABLE credit_report_requests ADD COLUMN IF NOT EXISTS provider_response JSONB`);
 };
 
 const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
@@ -269,7 +272,12 @@ type ReportSummary = {
   active_accounts: number | null;
   overdue_accounts: number | null;
   enquiries_last_6_months: number | null;
+  total_outstanding: string | null;
+  is_demo: boolean;
 };
+
+// Demo requests have no payment; they only exist when REPORTS_DEMO_MODE is on outside production.
+const VISIBLE_REQUEST = `(r.payment_id IS NOT NULL OR r.provider = 'demo')`;
 
 export const getDashboardStatus = async (userId: string) => {
   const [profileResult, reportResult] = await Promise.all([
@@ -279,12 +287,12 @@ export const getDashboardStatus = async (userId: string) => {
     ),
     pool.query<ReportSummary>(
       `SELECT DISTINCT ON (r.bureau)
-         r.id AS request_id, r.bureau, r.status, r.failure_reason, r.requested_at,
+         r.id AS request_id, r.bureau, r.status, r.failure_reason, r.requested_at, r.provider = 'demo' AS is_demo,
          c.credit_score, c.score_band, to_char(c.report_date, 'YYYY-MM-DD') AS report_date, c.report_url,
-         c.total_accounts, c.active_accounts, c.overdue_accounts, c.enquiries_last_6_months
+         c.total_accounts, c.active_accounts, c.overdue_accounts, c.enquiries_last_6_months, c.total_outstanding
        FROM credit_report_requests r
        LEFT JOIN credit_reports c ON c.request_id = r.id
-       WHERE r.user_id = $1 AND r.payment_id IS NOT NULL
+       WHERE r.user_id = $1 AND ${VISIBLE_REQUEST}
        ORDER BY r.bureau, r.requested_at DESC`,
       [userId],
     ),
@@ -369,10 +377,24 @@ export const markPaymentPaidAndCreateRequest = async ({
   }
 };
 
+export const createDemoReportRequest = async (userId: string, bureau: Bureau) => {
+  const consent = await pool.query<{ id: string }>(
+    `INSERT INTO user_consents (user_id, consent_type, consent_text_version, granted)
+     VALUES ($1, 'credit_report_pull', 'demo-report-v1', TRUE) RETURNING id`,
+    [userId],
+  );
+  const { rows } = await pool.query<{ id: string }>(
+    `INSERT INTO credit_report_requests (user_id, consent_id, bureau, provider, status)
+     VALUES ($1, $2, $3, 'demo', 'processing') RETURNING id`,
+    [userId, consent.rows[0].id, bureau],
+  );
+  return rows[0].id;
+};
+
 export const findReportRequest = async (userId: string, requestId: string) => {
   const { rows } = await pool.query<{ id: string; bureau: Bureau; status: string }>(
-    `SELECT id, bureau, status FROM credit_report_requests
-     WHERE id::text = $1 AND user_id = $2 AND payment_id IS NOT NULL`,
+    `SELECT r.id, r.bureau, r.status FROM credit_report_requests r
+     WHERE r.id::text = $1 AND r.user_id = $2 AND ${VISIBLE_REQUEST}`,
     [requestId, userId],
   );
   return rows[0] ?? null;
@@ -387,36 +409,36 @@ export const completeReportRequest = async ({
   requestId,
   bureau,
   providerTxnId,
-  score,
   band,
   reportUrl,
-  metrics,
+  report,
   raw,
 }: {
   userId: string;
   requestId: string;
   bureau: Bureau;
   providerTxnId: string | null;
-  score: number | null;
   band: string | null;
   reportUrl: string | null;
-  metrics: ReportMetrics;
+  report: NormalizedReport;
   raw: unknown;
 }) => {
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
     await client.query(
-      `UPDATE credit_report_requests SET status = 'completed', provider_request_id = $2, completed_at = NOW(), failure_reason = NULL
+      `UPDATE credit_report_requests SET status = 'completed', provider_request_id = $2, completed_at = NOW(), failure_reason = NULL,
+         provider_response = $3
        WHERE id = $1`,
-      [requestId, providerTxnId],
+      [requestId, providerTxnId, JSON.stringify(raw)],
     );
     await client.query(
-      `INSERT INTO credit_reports (user_id, request_id, bureau, credit_score, score_band, report_date, report_url, raw_report,
-         total_accounts, active_accounts, overdue_accounts, enquiries_last_6_months)
-       VALUES ($1, $2, $3, $4, $5, CURRENT_DATE, $6, $7, $8, $9, $10, $11)`,
-      [userId, requestId, bureau, score, band, reportUrl, JSON.stringify(raw),
-        metrics.totalAccounts, metrics.activeAccounts, metrics.overdueAccounts, metrics.enquiriesLast6Months],
+      `INSERT INTO credit_reports (user_id, request_id, bureau, credit_score, score_band, report_date, report_url, raw_report, normalized_report,
+         total_accounts, active_accounts, overdue_accounts, enquiries_last_6_months, total_outstanding)
+       VALUES ($1, $2, $3, $4, $5, COALESCE($6::date, CURRENT_DATE), $7, $8, $9, $10, $11, $12, $13, $14)`,
+      [userId, requestId, bureau, report.score, band, report.reportDate, reportUrl, JSON.stringify(raw), JSON.stringify(report),
+        report.summary.totalAccounts, report.summary.activeAccounts, report.summary.overdueAccounts, report.summary.enquiriesLast6Months,
+        report.summary.totalBalance],
     );
     await client.query("COMMIT");
   } catch (error) {
@@ -427,11 +449,31 @@ export const completeReportRequest = async ({
   }
 };
 
-export const failReportRequest = async (requestId: string, reason: string) => {
+export const failReportRequest = async (requestId: string, reason: string, raw: unknown = null) => {
   await pool.query(
-    `UPDATE credit_report_requests SET status = 'failed', failure_reason = $2 WHERE id = $1`,
-    [requestId, reason.slice(0, 500)],
+    `UPDATE credit_report_requests SET status = 'failed', failure_reason = $2, provider_response = $3 WHERE id = $1`,
+    [requestId, reason.slice(0, 500), raw === null ? null : JSON.stringify(raw)],
   );
+};
+
+// Returns the parsed report, re-parsing the saved raw response when the parser has been improved since it was stored.
+export const getReportDetail = async (userId: string, requestId: string) => {
+  const { rows } = await pool.query<{
+    id: string; bureau: Bureau; report_url: string | null; report_date: string; raw_report: unknown; normalized_report: NormalizedReport | null; is_demo: boolean;
+  }>(
+    `SELECT c.id, c.bureau, c.report_url, to_char(c.report_date, 'YYYY-MM-DD') AS report_date, c.raw_report, c.normalized_report, r.provider = 'demo' AS is_demo
+     FROM credit_reports c JOIN credit_report_requests r ON r.id = c.request_id
+     WHERE c.request_id::text = $1 AND c.user_id = $2 AND ${VISIBLE_REQUEST}`,
+    [requestId, userId],
+  );
+  const row = rows[0];
+  if (!row) return null;
+  let report = row.normalized_report;
+  if (!report || report.parserVersion !== PARSER_VERSION) {
+    report = normalizeReport(row.bureau, row.raw_report);
+    await pool.query(`UPDATE credit_reports SET normalized_report = $2 WHERE id = $1`, [row.id, JSON.stringify(report)]);
+  }
+  return { ...report, reportDate: report.reportDate ?? row.report_date, reportUrl: row.report_url, isDemo: row.is_demo };
 };
 
 export const saveKycProfile = async ({

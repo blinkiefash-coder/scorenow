@@ -68,6 +68,50 @@
   a.dashboard-primary-action { display: flex; align-items: center; justify-content: center; gap: 8px; text-decoration: none; }
   a.dashboard-score-cta { text-decoration: none; }
   .learning-only { grid-template-columns: 1fr !important; }
+  .report-loading { display: flex; align-items: center; gap: 8px; margin-top: 12px; color: var(--muted); font-size: 13px; }
+  .report-loading svg { width: 16px; animation: spin 1s linear infinite; }
+  .report-detail { display: grid; gap: 12px; margin: 12px 0; }
+  .report-detail .dashboard-notice { margin: 0; }
+  .report-detail .dashboard-card-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+  .report-detail .dashboard-card-heading strong { display: inline-flex; align-items: center; gap: 7px; }
+  .report-detail .dashboard-card-heading strong svg { width: 18px; color: var(--blue); }
+  .report-detail .dashboard-card-heading small { color: var(--muted); font-size: 12px; font-weight: 700; }
+  .report-summary-strip { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 8px; }
+  .report-summary-strip > div { display: grid; gap: 4px; padding: 13px; border: 1px solid #dce8f5; border-radius: 10px; background: white; }
+  .report-summary-strip small { color: var(--muted); font-size: 11px; font-weight: 700; }
+  .report-summary-strip strong { color: var(--navy); font-size: 19px; }
+  .report-summary-strip .is-bad strong, .is-bad { color: #c62f43 !important; }
+  .report-detail-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .report-personal dl { display: grid; grid-template-columns: 120px 1fr; gap: 9px 12px; margin: 0; font-size: 13px; }
+  .report-personal dt { color: var(--muted); font-weight: 700; }
+  .report-personal dd { margin: 0; color: var(--navy); font-weight: 700; overflow-wrap: anywhere; }
+  .report-enquiries ul { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
+  .report-enquiries li { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 12px; border-radius: 9px; background: #f6f9fd; }
+  .report-enquiries li div { display: grid; gap: 2px; }
+  .report-enquiries li strong { color: var(--navy); font-size: 13px; }
+  .report-enquiries li small, .report-enquiries time { color: var(--muted); font-size: 12px; }
+  .report-empty { margin: 0; color: var(--muted); font-size: 13px; }
+  .report-account-list { display: grid; gap: 10px; }
+  .report-account { display: grid; gap: 10px; padding: 14px; border: 1px solid #dce8f5; border-radius: 11px; background: #fbfdff; }
+  .report-account.closed { opacity: .78; }
+  .report-account-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+  .report-account-head div { display: grid; gap: 3px; }
+  .report-account-head strong { color: var(--navy); font-size: 14px; }
+  .report-account-head small { color: var(--muted); font-size: 12px; }
+  .account-chip { padding: 4px 9px; border-radius: 99px; font-size: 11px; font-weight: 800; }
+  .account-chip.active { background: #e8fbf0; color: #086841; }
+  .account-chip.closed { background: #eef2f7; color: #5b6b82; }
+  .account-chip.overdue { background: #fff0f1; color: #a32235; }
+  .report-account-figures { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; margin: 0; }
+  .report-account-figures dt { color: var(--muted); font-size: 11px; font-weight: 700; }
+  .report-account-figures dd { margin: 2px 0 0; color: var(--navy); font-size: 13px; font-weight: 800; }
+  .payment-history { display: flex; flex-wrap: wrap; gap: 4px; }
+  .payment-history span { width: 22px; height: 22px; display: grid; place-items: center; border-radius: 5px; font-size: 9px; font-weight: 800; color: white; }
+  .payment-history .ontime { background: #2fb36d; }
+  .payment-history .late { background: #d64550; }
+  .payment-history .unknown { background: #d5dde8; }
+  @media (max-width: 1100px) { .report-summary-strip { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
+  @media (max-width: 760px) { .report-detail-grid { grid-template-columns: 1fr; } .report-summary-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); } .report-account-figures { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
   @media (max-width: 760px) { .bureau-grid { grid-template-columns: 1fr; } }
 
   /* Dashboard readability pass */

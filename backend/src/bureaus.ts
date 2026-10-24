@@ -94,42 +94,6 @@ export const missingApplicantFields = (bureau: Bureau, applicant: Applicant) => 
   return missing;
 };
 
-const findNumber = (value: unknown, keys: RegExp, isValid: (n: number) => boolean, depth = 0): number | null => {
-  if (!value || typeof value !== "object" || depth > 14) return null;
-  for (const [key, child] of Object.entries(value as Record<string, unknown>)) {
-    if (keys.test(key) && (typeof child === "number" || typeof child === "string") && child !== "") {
-      const number = Number(child);
-      if (Number.isFinite(number) && isValid(number)) return number;
-    }
-  }
-  for (const child of Object.values(value as Record<string, unknown>)) {
-    const nested = findNumber(child, keys, isValid, depth + 1);
-    if (nested !== null) return nested;
-  }
-  return null;
-};
-
-const findScore = (value: unknown) =>
-  findNumber(value, /^(riskScore|creditScore|credit_score|score|scoreValue)$/i, (n) => Number.isInteger(n) && n >= 300 && n <= 900);
-
-const countField = (value: unknown, keys: RegExp) =>
-  findNumber(value, keys, (n) => Number.isInteger(n) && n >= 0 && n < 10000);
-
-export type ReportMetrics = {
-  totalAccounts: number | null;
-  activeAccounts: number | null;
-  overdueAccounts: number | null;
-  enquiriesLast6Months: number | null;
-};
-
-// Field names from the Experian (CAIS/CAPS) and Equifax (CCR) report formats.
-const extractMetrics = (report: unknown): ReportMetrics => ({
-  totalAccounts: countField(report, /^(CreditAccountTotal|NoOfAccounts)$/),
-  activeAccounts: countField(report, /^(CreditAccountActive|NoOfActiveAccounts)$/),
-  overdueAccounts: countField(report, /^(NoOfPastDueAccounts|CreditAccountDefault)$/),
-  enquiriesLast6Months: countField(report, /^(TotalCAPSLast180Days|Past6Months)$/),
-});
-
 export const scoreBand = (score: number | null) => {
   if (score === null) return null;
   if (score >= 750) return "Excellent";
@@ -139,7 +103,7 @@ export const scoreBand = (score: number | null) => {
 };
 
 export type BureauResult =
-  | { ok: true; providerTxnId: string | null; reportUrl: string | null; score: number | null; metrics: ReportMetrics; raw: unknown }
+  | { ok: true; providerTxnId: string | null; reportUrl: string | null; raw: unknown }
   | { ok: false; message: string; raw: unknown };
 
 const buildPayload = (bureau: Bureau, token: string, applicant: Applicant) => {
@@ -217,8 +181,6 @@ export const fetchBureauReport = async (bureau: Bureau, applicant: Applicant): P
     ok: true,
     providerTxnId: body.txn_id ?? null,
     reportUrl: body.data?.data?.htmlUrl ?? null,
-    score: findScore(body.data),
-    metrics: extractMetrics(body.data),
     raw: body,
   };
 };

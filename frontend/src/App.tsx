@@ -1291,6 +1291,109 @@ type BureauReport = {
   active_accounts: number | null
   overdue_accounts: number | null
   enquiries_last_6_months: number | null
+  total_outstanding: string | null
+  is_demo: boolean
+}
+
+type ReportDetail = {
+  bureau: BureauId
+  score: number | null
+  reportDate: string | null
+  reportUrl: string | null
+  isDemo: boolean
+  personal: { name: string | null; pan: string | null; dateOfBirth: string | null; gender: string | null; phones: string[]; emails: string[]; addresses: string[] }
+  summary: { totalAccounts: number; activeAccounts: number; closedAccounts: number; overdueAccounts: number; totalSanctioned: number; totalBalance: number; totalOverdue: number; enquiriesLast6Months: number }
+  accounts: {
+    lender: string; type: string; accountNumber: string | null; status: 'active' | 'closed'; openedOn: string | null; closedOn: string | null
+    sanctionedAmount: number | null; creditLimit: number | null; currentBalance: number | null; overdueAmount: number | null; lastPaymentOn: string | null
+    paymentHistory: { month: string; daysPastDue: number | null }[]
+  }[]
+  enquiries: { lender: string; purpose: string | null; date: string | null; amount: number | null }[]
+}
+
+const rupees = new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 })
+const formatMoney = (value: number | null | undefined) => (value === null || value === undefined ? '—' : rupees.format(value))
+const formatDate = (value: string | null | undefined) => (value ? new Date(`${value}T00:00:00`).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : '—')
+const formatMonth = (value: string) => new Date(`${value}-01T00:00:00`).toLocaleDateString('en-IN', { month: 'short', year: '2-digit' })
+
+function ReportDetailView({ user, requestId }: { user: AuthUser; requestId: string }) {
+  const [detail, setDetail] = useState<ReportDetail | null>(null)
+  const [error, setError] = useState('')
+
+  useEffect(() => {
+    let cancelled = false
+    fetch(`${apiUrl}/api/reports/${requestId}`, { headers: authHeaders(user) })
+      .then(async (response) => {
+        const result = await response.json() as ReportDetail & { message?: string }
+        if (!response.ok) throw new Error(result.message || 'Unable to load this report.')
+        if (!cancelled) setDetail(result)
+      })
+      .catch((loadError: unknown) => { if (!cancelled) setError(loadError instanceof Error ? loadError.message : 'Unable to load this report.') })
+    return () => { cancelled = true }
+  }, [requestId, user])
+
+  if (error) return <p className="dashboard-notice error">{error}</p>
+  if (!detail) return <div className="dashboard-card report-loading"><RotateCcw /> Loading full report…</div>
+
+  const { summary, personal } = detail
+  return (
+    <section className="report-detail">
+      {detail.isDemo && <p className="dashboard-notice info">Demo report with sample data — not a real bureau report.</p>}
+      <div className="report-summary-strip">
+        <div><small>Total accounts</small><strong>{summary.totalAccounts}</strong></div>
+        <div><small>Active</small><strong>{summary.activeAccounts}</strong></div>
+        <div><small>Closed</small><strong>{summary.closedAccounts}</strong></div>
+        <div className={summary.overdueAccounts ? 'is-bad' : ''}><small>Overdue accounts</small><strong>{summary.overdueAccounts}</strong></div>
+        <div><small>Outstanding</small><strong>{formatMoney(summary.totalBalance)}</strong></div>
+        <div className={summary.totalOverdue ? 'is-bad' : ''}><small>Overdue amount</small><strong>{formatMoney(summary.totalOverdue)}</strong></div>
+        <div><small>Enquiries (6 months)</small><strong>{summary.enquiriesLast6Months}</strong></div>
+      </div>
+
+      <div className="report-detail-grid">
+        <article className="dashboard-card report-personal">
+          <div className="dashboard-card-heading"><strong><UserRound /> Personal Details</strong></div>
+          <dl>
+            <dt>Name</dt><dd>{personal.name || '—'}</dd>
+            <dt>PAN</dt><dd>{personal.pan || '—'}</dd>
+            <dt>Date of birth</dt><dd>{formatDate(personal.dateOfBirth)}</dd>
+            <dt>Gender</dt><dd>{personal.gender || '—'}</dd>
+            <dt>Phone</dt><dd>{personal.phones.join(', ') || '—'}</dd>
+            <dt>Email</dt><dd>{personal.emails.join(', ') || '—'}</dd>
+            <dt>Address</dt><dd>{personal.addresses[0] || '—'}</dd>
+            <dt>Report date</dt><dd>{formatDate(detail.reportDate)}</dd>
+          </dl>
+        </article>
+
+        <article className="dashboard-card report-enquiries">
+          <div className="dashboard-card-heading"><strong><Search /> Credit Enquiries</strong><small>{detail.enquiries.length} total</small></div>
+          {detail.enquiries.length ? <ul>{detail.enquiries.map((enquiry, index) => <li key={`${enquiry.lender}-${index}`}><div><strong>{enquiry.lender}</strong><small>{enquiry.purpose || 'Credit enquiry'}{enquiry.amount ? ` · ${formatMoney(enquiry.amount)}` : ''}</small></div><time>{formatDate(enquiry.date)}</time></li>)}</ul> : <p className="report-empty">No enquiries reported.</p>}
+        </article>
+      </div>
+
+      <article className="dashboard-card report-accounts">
+        <div className="dashboard-card-heading"><strong><WalletCards /> Credit Accounts</strong><small>{detail.accounts.length} accounts</small></div>
+        {detail.accounts.length ? <div className="report-account-list">{detail.accounts.map((account, index) => (
+          <div className={`report-account ${account.status}`} key={`${account.lender}-${account.accountNumber}-${index}`}>
+            <div className="report-account-head">
+              <div><strong>{account.lender}</strong><small>{account.type}{account.accountNumber ? ` · ${account.accountNumber}` : ''}</small></div>
+              <span className={`account-chip ${(account.overdueAmount ?? 0) > 0 ? 'overdue' : account.status}`}>{(account.overdueAmount ?? 0) > 0 ? 'Overdue' : account.status === 'active' ? 'Active' : 'Closed'}</span>
+            </div>
+            <dl className="report-account-figures">
+              <div><dt>{account.creditLimit ? 'Credit limit' : 'Sanctioned'}</dt><dd>{formatMoney(account.creditLimit ?? account.sanctionedAmount)}</dd></div>
+              <div><dt>Balance</dt><dd>{formatMoney(account.currentBalance)}</dd></div>
+              <div><dt>Overdue</dt><dd className={(account.overdueAmount ?? 0) > 0 ? 'is-bad' : ''}>{formatMoney(account.overdueAmount)}</dd></div>
+              <div><dt>Opened</dt><dd>{formatDate(account.openedOn)}</dd></div>
+              <div><dt>{account.closedOn ? 'Closed' : 'Last payment'}</dt><dd>{formatDate(account.closedOn ?? account.lastPaymentOn)}</dd></div>
+            </dl>
+            {account.paymentHistory.length > 0 && <div className="payment-history" aria-label="Payment history, most recent first">{account.paymentHistory.map((entry) => {
+              const late = (entry.daysPastDue ?? 0) > 0
+              return <span key={entry.month} className={entry.daysPastDue === null ? 'unknown' : late ? 'late' : 'ontime'} title={`${formatMonth(entry.month)}: ${entry.daysPastDue === null ? 'Not reported' : late ? `${entry.daysPastDue} days late` : 'On time'}`}>{late ? entry.daysPastDue : ''}</span>
+            })}</div>}
+          </div>
+        ))}</div> : <p className="report-empty">No accounts found in this report.</p>}
+      </article>
+    </section>
+  )
 }
 
 type DashboardStatus = {
@@ -1298,7 +1401,7 @@ type DashboardStatus = {
   reports: BureauReport[]
 }
 
-type ReportOptions = { price: number; paymentsEnabled: boolean; bureaus: { id: BureauId; name: string; available: boolean }[] }
+type ReportOptions = { price: number; paymentsEnabled: boolean; demoMode: boolean; bureaus: { id: BureauId; name: string; available: boolean }[] }
 
 const bureauCatalog: { id: BureauId; name: string; logo: string }[] = [
   { id: 'cibil', name: 'TransUnion CIBIL', logo: '/logo-cibil.png' },
@@ -1503,6 +1606,25 @@ function DashboardPage({ user, onLogout }: { user: AuthUser; onLogout: () => voi
   }
 
   const metric = (value: number | null | undefined) => value ?? '—'
+
+  const loadDemoReport = async (bureau: BureauId) => {
+    setBusyBureau(bureau)
+    setNotice(null)
+    try {
+      const response = await fetch(`${apiUrl}/api/reports/demo`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...authHeaders(user) },
+        body: JSON.stringify({ bureau }),
+      })
+      const result = await response.json() as DashboardStatus & { message?: string }
+      if (!response.ok) throw new Error(result.message || 'Unable to load a demo report.')
+      applyReportResult(result, bureau)
+    } catch (error) {
+      setNotice({ tone: 'error', text: error instanceof Error ? error.message : 'Unable to load a demo report.' })
+    } finally {
+      setBusyBureau(null)
+    }
+  }
   const needleAngle = activeReport?.credit_score ? 180 + ((activeReport.credit_score - 300) / 600) * 180 : 180
 
   return (
@@ -1559,6 +1681,7 @@ function DashboardPage({ user, onLogout }: { user: AuthUser; onLogout: () => voi
                       {report?.status === 'failed'
                         ? <button type="button" className="button button-primary" disabled={Boolean(busyBureau)} onClick={() => void retryReport(report)}>{busy ? 'Fetching…' : <>Retry free <RotateCcw /></>}</button>
                         : <button type="button" className="button button-primary" disabled={!canBuy} onClick={() => void buyReport(bureau.id)}>{busy ? 'Processing…' : report?.status === 'completed' ? `Refresh · ₹${price}` : `Get report · ₹${price}`}</button>}
+                      {options?.demoMode && <button type="button" className="button button-outline" disabled={Boolean(busyBureau)} onClick={() => void loadDemoReport(bureau.id)}>Load demo</button>}
                     </div>
                   </article>
                 )
@@ -1578,6 +1701,8 @@ function DashboardPage({ user, onLogout }: { user: AuthUser; onLogout: () => voi
               <article className="dashboard-card quick-card"><div className="dashboard-card-heading"><strong>Your Reports</strong></div><div className="quick-actions">{completedReports.map((report) => <button type="button" key={report.bureau} onClick={() => setSelectedBureau(report.bureau)}><FileSearch /> {bureauName(report.bureau)} · {report.credit_score ?? '—'} <ArrowRight /></button>)}</div></article>
             </> : <article className="dashboard-card empty-report-card"><div className="empty-dashboard-state"><FileSearch /><strong>No credit data yet</strong><span>Choose CIBIL, Equifax, or Experian above. Your score, accounts, and enquiries will appear here once the report is fetched.</span></div></article>}
           </section>
+
+          {activeReport && <ReportDetailView key={activeReport.request_id} user={user} requestId={activeReport.request_id} />}
 
           <section className="dashboard-grid dashboard-grid-bottom learning-only">
             <article className="dashboard-card learning-card"><div className="dashboard-card-heading"><strong><BookOpen /> Credit Learning Hub</strong><button type="button">View All <ArrowRight /></button></div><div className="learning-list"><div><span>5 min</span><p><strong>5 Ways to Improve Your Credit Score</strong><small>Simple tips to build a stronger credit profile.</small></p><ArrowRight /></div><div><span>4 min</span><p><strong>What is a Good Credit Score?</strong><small>Understand score ranges and what they mean.</small></p><ArrowRight /></div><div><span>6 min</span><p><strong>How Credit Enquiries Affect Your Score</strong><small>Learn how to manage credit applications.</small></p><ArrowRight /></div></div></article>

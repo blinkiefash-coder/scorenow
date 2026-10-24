@@ -17,6 +17,7 @@ import {
 } from "./bureaus.js";
 import {
   completeReportRequest,
+  createDemoReportRequest,
   createOtp,
   createReportPayment,
   createSession,
@@ -27,6 +28,7 @@ import {
   findUserByEmail,
   getApplicant,
   getDashboardStatus,
+  getReportDetail,
   initializeDatabase,
   markEmailVerified,
   markPaymentFailed,
@@ -41,7 +43,9 @@ import {
   verifyOtp,
 } from "./database.js";
 import { verifyFirebasePhoneToken } from "./firebaseAdmin.js";
+import { demoReportResponses, isReportsDemoMode } from "./demoReports.js";
 import { createRazorpayOrder, isRazorpayConfigured, isValidPaymentSignature } from "./razorpay.js";
+import { normalizeReport } from "./reportParser.js";
 
 const app = express();
 const port = Number(process.env.PORT) || 3000;
@@ -299,6 +303,7 @@ app.get("/api/reports/options", (_request, response) => {
   response.json({
     price: REPORT_PRICE_RUPEES,
     paymentsEnabled: isRazorpayConfigured(),
+    demoMode: isReportsDemoMode(),
     bureaus: BUREAUS.map((id) => ({ id, name: bureauNames[id], available: isBureauAvailable(id) })),
   });
 });
@@ -311,21 +316,54 @@ const runReportFetch = async (userId: string, requestId: string, bureau: Bureau)
   }
   const result = await fetchBureauReport(bureau, applicant);
   if (!result.ok) {
-    await failReportRequest(requestId, result.message);
+    await failReportRequest(requestId, result.message, result.raw);
     return;
   }
+  const report = normalizeReport(bureau, result.raw);
   await completeReportRequest({
     userId,
     requestId,
     bureau,
     providerTxnId: result.providerTxnId,
-    score: result.score,
-    band: scoreBand(result.score),
+    band: scoreBand(report.score),
     reportUrl: result.reportUrl,
-    metrics: result.metrics,
+    report,
     raw: result.raw,
   });
 };
+
+app.get("/api/reports/:requestId", requireUser, async (request, response) => {
+  try {
+    const detail = await getReportDetail(sessionUser(response).id, String(request.params.requestId));
+    if (!detail) {
+      response.status(404).json({ message: "Report not found." });
+      return;
+    }
+    response.json(detail);
+  } catch (error) {
+    console.error("Report detail lookup failed", error);
+    response.status(500).json({ message: "Unable to load this report." });
+  }
+});
+
+app.post("/api/reports/demo", requireUser, async (request, response) => {
+  const bureau = request.body.bureau;
+  if (!isReportsDemoMode() || !isBureau(bureau)) {
+    response.status(404).json({ message: "Demo reports are not available." });
+    return;
+  }
+  try {
+    const userId = sessionUser(response).id;
+    const requestId = await createDemoReportRequest(userId, bureau);
+    const raw = demoReportResponses[bureau];
+    const report = normalizeReport(bureau, raw);
+    await completeReportRequest({ userId, requestId, bureau, providerTxnId: null, band: scoreBand(report.score), reportUrl: null, report, raw });
+    response.json(await getDashboardStatus(userId));
+  } catch (error) {
+    console.error("Demo report creation failed", error);
+    response.status(500).json({ message: "Unable to create a demo report." });
+  }
+});
 
 app.post("/api/reports/order", requireUser, async (request, response) => {
   const user = sessionUser(response);
