@@ -4,12 +4,30 @@ import express from "express";
 import multer from "multer";
 import nodemailer from "nodemailer";
 import path from "node:path";
-import { createOtp, createCreditReportRequest, findUserByEmail, getDashboardStatus, initializeDatabase, markEmailVerified, saveAssessment, saveWebsiteInquiry, saveKycProfile, upsertUserByMobile, verifyOtp, } from "./database.js";
+import { BUREAUS, bureauNames, fetchBureauReport, isBureau, isBureauAvailable, missingApplicantFields, scoreBand, stateCodes, } from "./bureaus.js";
+import { completeReportRequest, createDemoReportRequest, createOtp, createReportPayment, createSession, failReportRequest, findReportPayment, findReportRequest, findSessionUser, findUserByEmail, getApplicant, getDashboardStatus, getReportDetail, initializeDatabase, markEmailVerified, markPaymentFailed, markPaymentPaidAndCreateRequest, markReportProcessing, revokeSession, saveAssessment, saveWebsiteInquiry, saveKycProfile, setUserEmailIfMissing, upsertUserByMobile, verifyOtp, } from "./database.js";
 import { verifyFirebasePhoneToken } from "./firebaseAdmin.js";
+import { demoReportResponses, isReportsDemoMode } from "./demoReports.js";
+import { createRazorpayOrder, isRazorpayConfigured, isSimulatedPayments, isValidPaymentSignature, simulatedId } from "./razorpay.js";
+import { normalizeReport } from "./reportParser.js";
 const app = express();
 const port = Number(process.env.PORT) || 3000;
 app.use(cors());
 app.use(express.json());
+const bearerToken = (request) => (request.get("authorization") || "").replace(/^Bearer\s+/i, "").trim();
+const requireUser = async (request, response, next) => {
+    const user = await findSessionUser(bearerToken(request)).catch(() => null);
+    if (!user) {
+        response.status(401).json({ message: "Please log in or sign up to continue." });
+        return;
+    }
+    response.locals.user = user;
+    next();
+};
+const sessionUser = (response) => response.locals.user;
+const startSession = (request, userId) => createSession({ userId, ipAddress: request.ip, userAgent: request.get("user-agent") });
+const REPORT_PRICE_RUPEES = 99;
+const REPORT_GST_RUPEES = Math.round((REPORT_PRICE_RUPEES - REPORT_PRICE_RUPEES / 1.18) * 100) / 100;
 const allowedReportTypes = new Set(["application/pdf", "image/jpeg", "image/png"]);
 const upload = multer({
     storage: multer.memoryStorage(),
@@ -131,7 +149,7 @@ app.post("/api/auth/otp/verify", async (request, response) => {
             const mobile = value.replace(/\D/g, "");
             await verifyOtp({ mobile, code, purpose: "login" });
             const user = await upsertUserByMobile({ mobile, fullName, email: email || undefined });
-            response.json({ message: "Verified successfully.", user });
+            response.json({ message: "Verified successfully.", user, token: await startSession(request, user.id) });
             return;
         }
         const lookupEmail = value.toLowerCase();
@@ -142,7 +160,7 @@ app.post("/api/auth/otp/verify", async (request, response) => {
         }
         await verifyOtp({ mobile: user.mobile, code, purpose: "login" });
         const updatedUser = await markEmailVerified(user.id);
-        response.json({ message: "Verified successfully.", user: updatedUser });
+        response.json({ message: "Verified successfully.", user: updatedUser, token: await startSession(request, updatedUser.id) });
     }
     catch (error) {
         response.status(400).json({ message: error instanceof Error ? error.message : "Verification failed." });
@@ -162,61 +180,237 @@ app.post("/api/auth/firebase-session", async (request, response) => {
         if (mobile.length !== 10)
             throw new Error("Use an Indian mobile number for this account.");
         const user = await upsertUserByMobile({ mobile, fullName, email: email || undefined });
-        response.json({ message: "Phone verified successfully.", user });
+        response.json({ message: "Phone verified successfully.", user, token: await startSession(request, user.id) });
     }
     catch (error) {
         console.error("Firebase phone session verification failed", error);
         response.status(503).json({ message: error instanceof Error ? error.message : "Unable to verify your mobile sign-in." });
     }
 });
-app.get("/api/dashboard/:userId", async (request, response) => {
+app.post("/api/auth/logout", async (request, response) => {
+    const token = bearerToken(request);
+    if (token)
+        await revokeSession(token).catch(() => undefined);
+    response.json({ message: "Logged out." });
+});
+app.get("/api/dashboard", requireUser, async (_request, response) => {
     try {
-        response.json(await getDashboardStatus(request.params.userId));
+        response.json(await getDashboardStatus(sessionUser(response).id));
     }
     catch (error) {
         console.error("Dashboard status lookup failed", error);
         response.status(500).json({ message: "Unable to load your credit dashboard." });
     }
 });
-app.post("/api/profile/:userId", async (request, response) => {
+app.post("/api/profile", requireUser, async (request, response) => {
+    const user = sessionUser(response);
     const nameAsPerPan = String(request.body.nameAsPerPan || "").trim();
     const pan = String(request.body.pan || "").trim();
     const dateOfBirth = String(request.body.dateOfBirth || "").trim();
+    const gender = String(request.body.gender || "").trim().toLowerCase();
+    const addressLine1 = String(request.body.addressLine1 || "").trim();
+    const city = String(request.body.city || "").trim();
+    const state = String(request.body.state || "").trim();
+    const pincode = String(request.body.pincode || "").trim();
+    const email = String(request.body.email || "").trim().toLowerCase();
     const panPattern = /^[A-Z]{5}[0-9]{4}[A-Z]$/i;
     if (nameAsPerPan.length < 2 || !panPattern.test(pan) || !/^\d{4}-\d{2}-\d{2}$/.test(dateOfBirth)) {
         response.status(400).json({ message: "Enter a valid PAN, name, and date of birth." });
         return;
     }
+    if (!addressLine1 || !city || !stateCodes[state] || !/^\d{6}$/.test(pincode) || !["male", "female", "other"].includes(gender)) {
+        response.status(400).json({ message: "Enter your gender, address, city, state, and 6-digit PIN code." });
+        return;
+    }
+    if (!user.email && !/^\S+@\S+\.\S+$/.test(email)) {
+        response.status(400).json({ message: "Enter a valid email address." });
+        return;
+    }
     try {
-        const profile = await saveKycProfile({
-            userId: request.params.userId,
-            nameAsPerPan,
-            pan,
-            dateOfBirth,
-            gender: String(request.body.gender || "").trim(),
-            addressLine1: String(request.body.addressLine1 || "").trim(),
-            city: String(request.body.city || "").trim(),
-            state: String(request.body.state || "").trim(),
-            pincode: String(request.body.pincode || "").trim(),
-        });
-        response.status(201).json({ message: "Profile saved. You can now request your credit score.", profile });
+        if (!user.email)
+            await setUserEmailIfMissing(user.id, email);
+        const profile = await saveKycProfile({ userId: user.id, nameAsPerPan, pan, dateOfBirth, gender, addressLine1, city, state, pincode });
+        response.status(201).json({ message: "Profile saved. You can now get your credit report.", profile });
     }
     catch (error) {
         console.error("KYC profile save failed", error);
-        response.status(400).json({ message: "We could not save those details. Please check them and try again." });
+        const message = error instanceof Error && error.message.includes("email") ? error.message : "We could not save those details. Please check them and try again.";
+        response.status(400).json({ message });
     }
 });
-app.post("/api/credit-score/request", async (request, response) => {
+app.get("/api/reports/options", (_request, response) => {
+    response.json({
+        price: REPORT_PRICE_RUPEES,
+        paymentsEnabled: isSimulatedPayments() || isRazorpayConfigured(),
+        paymentsMode: isSimulatedPayments() ? "simulated" : "razorpay",
+        demoMode: isReportsDemoMode(),
+        bureaus: BUREAUS.map((id) => ({ id, name: bureauNames[id], available: isBureauAvailable(id) })),
+    });
+});
+const runReportFetch = async (userId, requestId, bureau) => {
+    const applicant = await getApplicant(userId);
+    if (!applicant) {
+        await failReportRequest(requestId, "Complete your profile before fetching a report.");
+        return;
+    }
+    const result = await fetchBureauReport(bureau, applicant);
+    if (!result.ok) {
+        await failReportRequest(requestId, result.message, result.raw);
+        return;
+    }
+    const report = normalizeReport(bureau, result.raw);
+    await completeReportRequest({
+        userId,
+        requestId,
+        bureau,
+        providerTxnId: result.providerTxnId,
+        band: scoreBand(report.score),
+        reportUrl: result.reportUrl,
+        report,
+        raw: result.raw,
+    });
+};
+app.get("/api/reports/:requestId", requireUser, async (request, response) => {
     try {
-        const requestRecord = await createCreditReportRequest(String(request.body.userId || ""));
+        const detail = await getReportDetail(sessionUser(response).id, String(request.params.requestId));
+        if (!detail) {
+            response.status(404).json({ message: "Report not found." });
+            return;
+        }
+        response.json(detail);
+    }
+    catch (error) {
+        console.error("Report detail lookup failed", error);
+        response.status(500).json({ message: "Unable to load this report." });
+    }
+});
+app.post("/api/reports/demo", requireUser, async (request, response) => {
+    const bureau = request.body.bureau;
+    if (!isReportsDemoMode() || !isBureau(bureau)) {
+        response.status(404).json({ message: "Demo reports are not available." });
+        return;
+    }
+    try {
+        const userId = sessionUser(response).id;
+        const requestId = await createDemoReportRequest(userId, bureau);
+        const raw = demoReportResponses[bureau];
+        const report = normalizeReport(bureau, raw);
+        await completeReportRequest({ userId, requestId, bureau, providerTxnId: null, band: scoreBand(report.score), reportUrl: null, report, raw });
+        response.json(await getDashboardStatus(userId));
+    }
+    catch (error) {
+        console.error("Demo report creation failed", error);
+        response.status(500).json({ message: "Unable to create a demo report." });
+    }
+});
+app.post("/api/reports/order", requireUser, async (request, response) => {
+    const user = sessionUser(response);
+    const bureau = request.body.bureau;
+    if (!isBureau(bureau)) {
+        response.status(400).json({ message: "Choose CIBIL, Equifax, or Experian." });
+        return;
+    }
+    if (!isBureauAvailable(bureau)) {
+        response.status(503).json({ message: `${bureauNames[bureau]} reports are not available yet.` });
+        return;
+    }
+    if (!isSimulatedPayments() && !isRazorpayConfigured()) {
+        response.status(503).json({ message: "Online payments are not configured yet. Please try again later." });
+        return;
+    }
+    try {
+        const applicant = await getApplicant(user.id);
+        if (!applicant) {
+            response.status(400).json({ message: "Complete your profile before buying a report." });
+            return;
+        }
+        const missing = missingApplicantFields(bureau, applicant);
+        if (missing.length) {
+            response.status(400).json({ message: `Add your ${missing.join(", ")} to your profile to get a ${bureauNames[bureau]} report.` });
+            return;
+        }
+        const simulated = isSimulatedPayments();
+        const order = simulated
+            ? { id: simulatedId("order"), amount: REPORT_PRICE_RUPEES * 100, currency: "INR" }
+            : await createRazorpayOrder({
+                amountPaise: REPORT_PRICE_RUPEES * 100,
+                receipt: `rpt_${bureau}_${Date.now()}`,
+                notes: { userId: user.id, bureau },
+            });
+        await createReportPayment({
+            userId: user.id, bureau, orderId: order.id, amount: REPORT_PRICE_RUPEES, gstAmount: REPORT_GST_RUPEES,
+            gateway: simulated ? "simulated" : "razorpay",
+        });
         response.status(201).json({
-            message: "Your score request is queued. The live bureau API will populate the report when connected.",
-            request: requestRecord,
+            simulated,
+            orderId: order.id,
+            amount: order.amount,
+            currency: order.currency,
+            keyId: simulated ? undefined : process.env.RAZORPAY_KEY_ID,
+            bureau,
+            bureauName: bureauNames[bureau],
+            prefill: { name: user.full_name, email: user.email ?? undefined, contact: `+91${user.mobile}` },
         });
     }
     catch (error) {
-        console.error("Credit score request failed", error);
-        response.status(400).json({ message: "Complete your profile before requesting a credit score." });
+        console.error("Report order creation failed", error);
+        response.status(502).json({ message: "Unable to start the payment. Please try again." });
+    }
+});
+app.post("/api/reports/verify", requireUser, async (request, response) => {
+    const user = sessionUser(response);
+    const orderId = String(request.body.orderId || "");
+    let paymentId = String(request.body.paymentId || "");
+    const signature = String(request.body.signature || "");
+    const payment = orderId ? await findReportPayment(user.id, orderId) : null;
+    if (!payment || !isBureau(payment.report_bureau)) {
+        response.status(404).json({ message: "We could not find that payment." });
+        return;
+    }
+    if (payment.gateway === "simulated") {
+        if (!isSimulatedPayments()) {
+            await markPaymentFailed(payment.id);
+            response.status(400).json({ message: "Simulated payments are no longer accepted. Please pay again." });
+            return;
+        }
+        paymentId = simulatedId("pay");
+    }
+    else if (!paymentId || !signature || !isValidPaymentSignature(orderId, paymentId, signature)) {
+        await markPaymentFailed(payment.id);
+        response.status(400).json({ message: "Payment verification failed. If money was deducted, it will be refunded by Razorpay." });
+        return;
+    }
+    try {
+        const bureau = payment.report_bureau;
+        const requestId = await markPaymentPaidAndCreateRequest({ userId: user.id, paymentDbId: payment.id, gatewayPaymentId: paymentId, bureau });
+        if (!requestId) {
+            response.status(409).json({ message: "This payment was already processed." });
+            return;
+        }
+        await runReportFetch(user.id, requestId, bureau);
+        response.json(await getDashboardStatus(user.id));
+    }
+    catch (error) {
+        console.error("Report payment verification failed", error);
+        response.status(500).json({ message: "Payment received, but we could not fetch the report yet. Use Retry on your dashboard." });
+    }
+});
+// Lets a paying user retry a failed bureau fetch without paying again.
+app.post("/api/reports/:requestId/retry", requireUser, async (request, response) => {
+    const user = sessionUser(response);
+    const reportRequest = await findReportRequest(user.id, String(request.params.requestId));
+    if (!reportRequest || reportRequest.status !== "failed") {
+        response.status(400).json({ message: "This report cannot be retried." });
+        return;
+    }
+    try {
+        await markReportProcessing(reportRequest.id);
+        await runReportFetch(user.id, reportRequest.id, reportRequest.bureau);
+        response.json(await getDashboardStatus(user.id));
+    }
+    catch (error) {
+        console.error("Report retry failed", error);
+        response.status(500).json({ message: "Unable to fetch the report right now. Please try again." });
     }
 });
 const isCreditScorePinValid = (value) => String(value || "") === (process.env.CIBIL_PAGE_PIN || "00998877");
@@ -288,7 +482,8 @@ app.post("/api/cibil-report", async (request, response) => {
         response.status(502).json({ message: "Unable to reach the CIBIL report provider. Please try again." });
     }
 });
-app.post("/api/inquiries", async (request, response) => {
+app.post("/api/inquiries", requireUser, async (request, response) => {
+    const user = sessionUser(response);
     const fullName = String(request.body.fullName || "").trim();
     const mobile = String(request.body.mobile || "").replace(/\D/g, "");
     const concern = String(request.body.concern || "").trim();
@@ -306,7 +501,7 @@ app.post("/api/inquiries", async (request, response) => {
         return;
     }
     try {
-        await saveWebsiteInquiry({ fullName, mobile, concern, scoreRange });
+        await saveWebsiteInquiry({ userId: user.id, fullName, mobile, concern, scoreRange });
         response.status(201).json({ message: "Your callback request was saved." });
     }
     catch (error) {
@@ -314,8 +509,9 @@ app.post("/api/inquiries", async (request, response) => {
         response.status(503).json({ message: "We could not save your callback request. Please contact us on WhatsApp instead." });
     }
 });
-app.post("/api/assessments", upload.single("report"), async (request, response) => {
+app.post("/api/assessments", requireUser, upload.single("report"), async (request, response) => {
     const assessmentType = request.body.assessmentType === "business" ? "business" : "individual";
+    const user = sessionUser(response);
     const requiredFields = assessmentType === "business"
         ? ["businessName", "fullName", "mobile", "email", "businessType"]
         : ["fullName", "mobile", "email", "city", "goal"];
@@ -347,6 +543,7 @@ app.post("/api/assessments", upload.single("report"), async (request, response) 
     const htmlRows = rows.map(({ label, value }) => `<tr><td style="padding:10px 12px;color:#65708a;border-bottom:1px solid #e5edf6">${escapeHtml(label)}</td><td style="padding:10px 12px;color:#081446;font-weight:700;border-bottom:1px solid #e5edf6">${escapeHtml(value)}</td></tr>`).join("");
     try {
         await saveAssessment({
+            userId: user.id,
             assessmentType,
             fields: formData,
             report: request.file,
@@ -403,8 +600,14 @@ app.use((error, _request, response, _next) => {
 const startServer = async () => {
     try {
         await initializeDatabase();
-        app.listen(port, () => {
+        app.listen(port, (error) => {
+            if (error) {
+                console.error(`Unable to start Score Now API on port ${port}`, error);
+                process.exit(1);
+            }
             console.log(`Score Now API is running at http://localhost:${port}`);
+            if (isSimulatedPayments())
+                console.warn("PAYMENTS_MODE=simulated: report payments are auto-approved and NOT charged.");
         });
     }
     catch (error) {
