@@ -155,8 +155,7 @@ const buildPayload = (bureau: Bureau, token: string, applicant: Applicant) => {
   if (bureau === "equifax") {
     return {
       token,
-      first_name: firstName,
-      last_name: lastName,
+      name: applicant.fullName.trim(),
       id_type: "pan",
       id_number: applicant.pan,
       phone: applicant.mobile,
