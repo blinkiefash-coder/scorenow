@@ -204,7 +204,7 @@ const buildPayload = (bureau: Bureau, token: string, applicant: Applicant, conse
   const lastName = nameParts.length > 1 ? nameParts[nameParts.length - 1] : nameParts[0];
 
   if (bureau === "equifax") {
-    const consentTimestamp = new Date().toISOString();
+    const consentTimestamp = Math.floor(Date.now() / 1000);
     return {
       token,
       name: applicant.fullName,
