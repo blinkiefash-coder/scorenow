@@ -177,6 +177,10 @@ export const fetchBureauReport = async (bureau, applicant) => {
     if (!url || !token)
         return { ok: false, message: `${bureauNames[bureau]} API is not configured.`, raw: null, diagnostics: null };
     const payload = buildPayload(bureau, token, applicant);
+    console.log(`[${bureau.toUpperCase()}] Sending payload to ${url}`, {
+        hasToken: 'token' in payload && !!payload.token,
+        keys: Object.keys(payload),
+    });
     const diagnostics = {
         request: Object.fromEntries(Object.entries(payload).filter(([key]) => key !== "token")),
         response: { httpStatus: null, body: null },
