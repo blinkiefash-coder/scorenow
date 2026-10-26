@@ -269,9 +269,18 @@ const runReportFetch = async (userId, requestId, bureau) => {
         report,
         raw: result.raw,
     });
-    const pdf = await downloadReportPdf(livePdfUrl(result.raw));
-    if (pdf)
+    const pdfUrl = livePdfUrl(result.raw);
+    console.log(`PDF URL for ${bureau} report:`, pdfUrl ? "found" : "not found", {
+        hasData: !!(result.raw?.data?.data),
+        hasPdfUrl: !!(result.raw?.data?.data?.pdf_report_url),
+    });
+    const pdf = await downloadReportPdf(pdfUrl);
+    if (pdf) {
         await saveReportPdf(requestId, pdf).catch((error) => console.error("Report PDF save failed", error));
+    }
+    else {
+        console.warn(`Failed to download PDF for ${bureau} report ${requestId}`);
+    }
     return result.diagnostics;
 };
 app.get("/api/reports/:requestId/pdf", requireUser, async (request, response) => {

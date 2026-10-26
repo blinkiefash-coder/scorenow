@@ -106,17 +106,22 @@ const MAX_PDF_BYTES = 20 * 1024 * 1024;
 
 // The bureau PDF is a pre-signed S3 link that expires (24h), so it must be stored on completion.
 export const livePdfUrl = (raw: unknown): string | null => {
-  const value = (raw as { data?: { data?: { pdf_report_url?: unknown } } } | null)?.data?.data?.pdf_report_url;
-  if (typeof value !== "string") return null;
+  const data = (raw as { data?: { data?: unknown } } | null)?.data?.data;
+  if (!data) return null;
+  
+  // Try different field names used by different bureaus
+  const pdfUrl = (data as any)?.pdf_report_url || (data as any)?.htmlUrl;
+  
+  if (typeof pdfUrl !== "string") return null;
   try {
-    const url = new URL(value);
+    const url = new URL(pdfUrl);
     const signedAt = url.searchParams.get("X-Amz-Date");
     const expiresIn = Number(url.searchParams.get("X-Amz-Expires"));
     if (signedAt && expiresIn) {
       const iso = signedAt.replace(/^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})Z$/, "$1-$2-$3T$4:$5:$6Z");
       if (Date.parse(iso) + expiresIn * 1000 < Date.now()) return null;
     }
-    return value;
+    return pdfUrl;
   } catch {
     return null;
   }
