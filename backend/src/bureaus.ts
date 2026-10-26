@@ -72,6 +72,45 @@ export const stateCodes: Record<string, string> = {
   "Ladakh": "38",
 };
 
+export const equifaxStateCodes: Record<string, string> = {
+  "Andaman and Nicobar Islands": "AN",
+  "Andhra Pradesh": "AP",
+  "Arunachal Pradesh": "AR",
+  "Assam": "AS",
+  "Bihar": "BR",
+  "Chandigarh": "CH",
+  "Chhattisgarh": "CG",
+  "Dadra and Nagar Haveli": "DN",
+  "Daman and Diu": "DD",
+  "Delhi": "DL",
+  "Goa": "GA",
+  "Gujarat": "GJ",
+  "Haryana": "HR",
+  "Himachal Pradesh": "HP",
+  "Jammu and Kashmir": "JK",
+  "Jharkhand": "JH",
+  "Karnataka": "KA",
+  "Kerala": "KL",
+  "Lakshadweep": "LD",
+  "Madhya Pradesh": "MP",
+  "Maharashtra": "MH",
+  "Manipur": "MN",
+  "Meghalaya": "ML",
+  "Mizoram": "MZ",
+  "Nagaland": "NL",
+  "Odisha": "OR",
+  "Puducherry": "PY",
+  "Punjab": "PB",
+  "Rajasthan": "RJ",
+  "Sikkim": "SK",
+  "Tamil Nadu": "TN",
+  "Telangana": "TG",
+  "Tripura": "TR",
+  "Uttar Pradesh": "UP",
+  "Uttarakhand": "UL",
+  "West Bengal": "WB",
+};
+
 export type Applicant = {
   fullName: string;
   pan: string;
@@ -91,7 +130,7 @@ export const missingApplicantFields = (bureau: Bureau, applicant: Applicant) => 
   if (bureau === "experian" || bureau === "crif") return missing;
   if (!applicant.addressLine1) missing.push("address");
   if (!applicant.city) missing.push("city");
-  if (!applicant.state) missing.push("state");
+  if (!applicant.state || (bureau === "equifax" && !equifaxStateCodes[applicant.state])) missing.push("state");
   if (!applicant.pincode || !/^\d{6}$/.test(applicant.pincode)) missing.push("PIN code");
   if (!applicant.dateOfBirth) missing.push("date of birth");
   if (bureau === "cibil") {
@@ -173,7 +212,7 @@ const buildPayload = (bureau: Bureau, token: string, applicant: Applicant, conse
       id_number: applicant.pan,
       phone: applicant.mobile,
       dob: applicant.dateOfBirth,
-      state: applicant.state,
+      state: equifaxStateCodes[applicant.state || ""],
       address: applicant.addressLine1,
       pincode: applicant.pincode,
       consent_text: "I approve TransBnk to capture and process user data based on user consent",

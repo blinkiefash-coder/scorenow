@@ -63,6 +63,44 @@ export const stateCodes = {
     "Telangana": "36",
     "Ladakh": "38",
 };
+export const equifaxStateCodes = {
+    "Andaman and Nicobar Islands": "AN",
+    "Andhra Pradesh": "AP",
+    "Arunachal Pradesh": "AR",
+    "Assam": "AS",
+    "Bihar": "BR",
+    "Chandigarh": "CH",
+    "Chhattisgarh": "CG",
+    "Dadra and Nagar Haveli": "DN",
+    "Daman and Diu": "DD",
+    "Delhi": "DL",
+    "Goa": "GA",
+    "Gujarat": "GJ",
+    "Haryana": "HR",
+    "Himachal Pradesh": "HP",
+    "Jammu and Kashmir": "JK",
+    "Jharkhand": "JH",
+    "Karnataka": "KA",
+    "Kerala": "KL",
+    "Lakshadweep": "LD",
+    "Madhya Pradesh": "MP",
+    "Maharashtra": "MH",
+    "Manipur": "MN",
+    "Meghalaya": "ML",
+    "Mizoram": "MZ",
+    "Nagaland": "NL",
+    "Odisha": "OR",
+    "Puducherry": "PY",
+    "Punjab": "PB",
+    "Rajasthan": "RJ",
+    "Sikkim": "SK",
+    "Tamil Nadu": "TN",
+    "Telangana": "TG",
+    "Tripura": "TR",
+    "Uttar Pradesh": "UP",
+    "Uttarakhand": "UL",
+    "West Bengal": "WB",
+};
 // Equifax and CIBIL need address, email, DOB; Experian only needs name, PAN and mobile.
 export const missingApplicantFields = (bureau, applicant) => {
     const missing = [];
@@ -72,7 +110,7 @@ export const missingApplicantFields = (bureau, applicant) => {
         missing.push("address");
     if (!applicant.city)
         missing.push("city");
-    if (!applicant.state)
+    if (!applicant.state || (bureau === "equifax" && !equifaxStateCodes[applicant.state]))
         missing.push("state");
     if (!applicant.pincode || !/^\d{6}$/.test(applicant.pincode))
         missing.push("PIN code");
@@ -155,7 +193,7 @@ const buildPayload = (bureau, token, applicant, consentIpAddress) => {
             id_number: applicant.pan,
             phone: applicant.mobile,
             dob: applicant.dateOfBirth,
-            state: applicant.state,
+            state: equifaxStateCodes[applicant.state || ""],
             address: applicant.addressLine1,
             pincode: applicant.pincode,
             consent_text: "I approve TransBnk to capture and process user data based on user consent",
