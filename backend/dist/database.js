@@ -1,5 +1,6 @@
 import { createCipheriv, createDecipheriv, createHash, randomBytes, randomInt } from "node:crypto";
 import { Pool } from "pg";
+import { livePdfUrl } from "./bureaus.js";
 import { normalizeReport, PARSER_VERSION } from "./reportParser.js";
 const pool = new Pool({
     connectionString: process.env.DATABASE_URL,
@@ -40,6 +41,7 @@ export const initializeDatabase = async () => {
     await pool.query(`ALTER TABLE credit_reports ADD COLUMN IF NOT EXISTS raw_report JSONB`);
     await pool.query(`ALTER TABLE credit_reports ADD COLUMN IF NOT EXISTS normalized_report JSONB`);
     await pool.query(`ALTER TABLE credit_report_requests ADD COLUMN IF NOT EXISTS provider_response JSONB`);
+    await pool.query(`ALTER TABLE credit_reports ADD COLUMN IF NOT EXISTS report_pdf BYTEA`);
 };
 const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 const hashToken = (token) => createHash("sha256").update(token).digest("hex");
@@ -267,7 +269,8 @@ export const failReportRequest = async (requestId, reason, raw = null) => {
 };
 // Returns the parsed report, re-parsing the saved raw response when the parser has been improved since it was stored.
 export const getReportDetail = async (userId, requestId) => {
-    const { rows } = await pool.query(`SELECT c.id, c.bureau, c.report_url, to_char(c.report_date, 'YYYY-MM-DD') AS report_date, c.raw_report, c.normalized_report, r.provider = 'demo' AS is_demo
+    const { rows } = await pool.query(`SELECT c.id, c.bureau, c.report_url, to_char(c.report_date, 'YYYY-MM-DD') AS report_date, c.raw_report, c.normalized_report, r.provider = 'demo' AS is_demo,
+            c.report_pdf IS NOT NULL AS has_pdf
      FROM credit_reports c JOIN credit_report_requests r ON r.id = c.request_id
      WHERE c.request_id::text = $1 AND c.user_id = $2 AND ${VISIBLE_REQUEST}`, [requestId, userId]);
     const row = rows[0];
@@ -278,7 +281,24 @@ export const getReportDetail = async (userId, requestId) => {
         report = normalizeReport(row.bureau, row.raw_report);
         await pool.query(`UPDATE credit_reports SET normalized_report = $2 WHERE id = $1`, [row.id, JSON.stringify(report)]);
     }
-    return { ...report, reportDate: report.reportDate ?? row.report_date, reportUrl: row.report_url, isDemo: row.is_demo };
+    return {
+        ...report,
+        reportDate: report.reportDate ?? row.report_date,
+        reportUrl: row.report_url,
+        isDemo: row.is_demo,
+        pdfAvailable: row.has_pdf || Boolean(livePdfUrl(row.raw_report)),
+    };
+};
+export const getReportPdf = async (userId, requestId) => {
+    const { rows } = await pool.query(`SELECT c.request_id, c.bureau, to_char(c.report_date, 'YYYY-MM-DD') AS report_date, c.report_pdf,
+            CASE WHEN c.report_pdf IS NULL THEN c.raw_report END AS raw_report
+     FROM credit_reports c JOIN credit_report_requests r ON r.id = c.request_id
+     WHERE c.request_id::text = $1 AND c.user_id = $2 AND ${VISIBLE_REQUEST}`, [requestId, userId]);
+    const row = rows[0];
+    return row ? { requestId: row.request_id, bureau: row.bureau, reportDate: row.report_date, pdf: row.report_pdf, raw: row.raw_report } : null;
+};
+export const saveReportPdf = async (requestId, pdf) => {
+    await pool.query(`UPDATE credit_reports SET report_pdf = $2 WHERE request_id = $1`, [requestId, pdf]);
 };
 export const saveKycProfile = async ({ userId, nameAsPerPan, pan, dateOfBirth, gender, addressLine1, city, state, pincode, }) => {
     const normalizedPan = pan.toUpperCase().replace(/\s/g, "");

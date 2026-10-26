@@ -4,8 +4,8 @@ import express from "express";
 import multer from "multer";
 import nodemailer from "nodemailer";
 import path from "node:path";
-import { BUREAUS, bureauNames, fetchBureauReport, isBureau, isBureauAvailable, missingApplicantFields, scoreBand, stateCodes, } from "./bureaus.js";
-import { completeReportRequest, createDemoReportRequest, createOtp, createReportPayment, createSession, failReportRequest, findReportPayment, findReportRequest, findSessionUser, findUserByEmail, getApplicant, getDashboardStatus, getReportDetail, initializeDatabase, markEmailVerified, markPaymentFailed, markPaymentPaidAndCreateRequest, markReportProcessing, revokeSession, saveAssessment, saveWebsiteInquiry, saveKycProfile, setUserEmailIfMissing, upsertUserByMobile, verifyOtp, } from "./database.js";
+import { BUREAUS, bureauNames, fetchBureauReport, downloadReportPdf, isBureau, isBureauAvailable, livePdfUrl, missingApplicantFields, scoreBand, stateCodes, } from "./bureaus.js";
+import { completeReportRequest, createDemoReportRequest, createOtp, createReportPayment, createSession, failReportRequest, findReportPayment, findReportRequest, findSessionUser, findUserByEmail, getApplicant, getDashboardStatus, getReportDetail, getReportPdf, initializeDatabase, markEmailVerified, markPaymentFailed, markPaymentPaidAndCreateRequest, markReportProcessing, revokeSession, saveAssessment, saveReportPdf, saveWebsiteInquiry, saveKycProfile, setUserEmailIfMissing, upsertUserByMobile, verifyOtp, } from "./database.js";
 import { verifyFirebasePhoneToken } from "./firebaseAdmin.js";
 import { demoReportResponses, isReportsDemoMode } from "./demoReports.js";
 import { createRazorpayOrder, isRazorpayConfigured, isSimulatedPayments, isValidPaymentSignature, simulatedId } from "./razorpay.js";
@@ -269,8 +269,39 @@ const runReportFetch = async (userId, requestId, bureau) => {
         report,
         raw: result.raw,
     });
+    const pdf = await downloadReportPdf(livePdfUrl(result.raw));
+    if (pdf)
+        await saveReportPdf(requestId, pdf).catch((error) => console.error("Report PDF save failed", error));
     return result.diagnostics;
 };
+app.get("/api/reports/:requestId/pdf", requireUser, async (request, response) => {
+    try {
+        const record = await getReportPdf(sessionUser(response).id, String(request.params.requestId));
+        if (!record) {
+            response.status(404).json({ message: "Report not found." });
+            return;
+        }
+        let pdf = record.pdf;
+        if (!pdf) {
+            pdf = await downloadReportPdf(livePdfUrl(record.raw));
+            if (pdf)
+                await saveReportPdf(record.requestId, pdf);
+        }
+        if (!pdf) {
+            response.status(404).json({ message: "A PDF is not available for this report." });
+            return;
+        }
+        response.set({
+            "Content-Type": "application/pdf",
+            "Content-Disposition": `attachment; filename="ScoreNow-${record.bureau}-report-${record.reportDate}.pdf"`,
+            "Cache-Control": "private, no-store",
+        }).send(pdf);
+    }
+    catch (error) {
+        console.error("Report PDF lookup failed", error);
+        response.status(500).json({ message: "Unable to download the PDF right now." });
+    }
+});
 app.get("/api/reports/:requestId", requireUser, async (request, response) => {
     try {
         const detail = await getReportDetail(sessionUser(response).id, String(request.params.requestId));

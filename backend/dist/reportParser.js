@@ -1,5 +1,5 @@
 // Bump when parsing changes so stored raw reports get re-normalized on next view.
-export const PARSER_VERSION = 1;
+export const PARSER_VERSION = 2;
 const isObject = (value) => Boolean(value) && typeof value === "object" && !Array.isArray(value);
 const get = (value, path) => path.split(".").reduce((current, key) => {
     if (Array.isArray(current))
@@ -62,12 +62,14 @@ const validScore = (value) => {
     return score !== null && Number.isInteger(score) && score >= 300 && score <= 900 ? score : null;
 };
 const accountTypeNames = {
+    "00": "Other",
     "01": "Auto Loan", "02": "Housing Loan", "03": "Property Loan", "04": "Loan Against Shares",
     "05": "Personal Loan", "06": "Consumer Loan", "07": "Gold Loan", "08": "Education Loan",
     "09": "Loan to Professional", "10": "Credit Card", "11": "Leasing", "12": "Overdraft",
     "13": "Two-Wheeler Loan", "15": "Loan Against Fixed Deposit", "17": "Commercial Vehicle Loan",
     "31": "Secured Credit Card", "32": "Used Car Loan", "33": "Construction Equipment Loan",
     "35": "Corporate Credit Card", "36": "Kisan Credit Card", "51": "Business Loan", "61": "Business Loan (Priority Sector)",
+    "69": "Short Term Personal Loan",
 };
 const accountType = (value) => {
     const raw = text(value);
@@ -90,6 +92,7 @@ const buildSummary = (accounts, enquiries, reportDate, overrides) => {
         totalBalance: active.reduce((sum, account) => sum + Math.max(account.currentBalance ?? 0, 0), 0),
         totalOverdue: accounts.reduce((sum, account) => sum + (account.overdueAmount ?? 0), 0),
         enquiriesLast6Months: enquiries.filter((enquiry) => enquiry.date && new Date(enquiry.date) >= sixMonthsAgo).length,
+        writtenOffAccounts: accounts.filter((account) => (account.writtenOffAmount ?? 0) > 0 || (account.settlementAmount ?? 0) > 0).length,
     };
     // Bureau-provided totals win when the account list is empty or truncated.
     const merged = { ...computed };
@@ -219,27 +222,55 @@ const parseEquifax = (raw) => {
         enquiries,
     };
 };
+// CIBIL sends -1 for values the lender did not report.
+const reported = (value) => {
+    const number = amount(value);
+    return number !== null && number >= 0 ? number : null;
+};
+// Factor text is "<generic intro>. <what happened>. <how to improve>."; split it into the finding and the tip.
+const cibilScoreFactors = (borrower) => {
+    const seen = new Set();
+    return asArray(get(borrower, "CreditScore.CreditScoreFactor")).filter(isObject).flatMap((factor) => {
+        const texts = asArray(factor.FactorText).map(text).filter((value) => Boolean(value));
+        const body = (texts.find((value) => value.startsWith("explain:")) ?? texts[0])?.replace(/^\w+:\s*/, "");
+        if (!body || seen.has(body))
+            return [];
+        seen.add(body);
+        const sentences = (body.match(/[^.]+\.?/g) ?? []).map((sentence) => sentence.trim()).filter(Boolean);
+        const tipStart = sentences.findIndex((sentence) => /^(One way|To maintain|To improve)/i.test(sentence));
+        const finding = sentences.slice(1, tipStart === -1 ? undefined : tipStart).join(" ") || body;
+        return [{
+                impact: /negative/i.test(finding) ? "negative" : "positive",
+                text: finding,
+                tip: tipStart === -1 ? null : sentences.slice(tipStart).join(" "),
+            }];
+    });
+};
 const parseCibil = (raw) => {
     const data = firstOf(raw, "data.data", "data") ?? {};
     const report = firstOf(data, "cibilData.GetCustomerAssetsResponse.GetCustomerAssetsSuccess.Asset.TrueLinkCreditReport", "cibilData.TrueLinkCreditReport");
     const borrower = get(report, "Borrower");
-    const reportDate = isoDate(firstOf(report, "SB.reportDate", "reportDate")) ?? new Date().toISOString().slice(0, 10);
+    const reportDate = isoDate(firstOf(report, "SB.reportDate", "reportDate", "Sources.Source.InquiryDate")) ?? new Date().toISOString().slice(0, 10);
     const accounts = asArray(get(report, "TradeLinePartition")).flatMap((partition) => asArray(isObject(partition) ? partition.Tradeline ?? partition : partition))
         .filter(isObject).map((trade) => {
         const granted = isObject(trade.GrantedTrade) ? trade.GrantedTrade : {};
         const openClosed = text(get(trade, "OpenClosed.symbol")) ?? text(trade.OpenClosed);
         return {
             lender: text(trade.creditorName) ?? "Unknown lender",
-            type: text(get(trade, "AccountType.description")) ?? accountType(get(trade, "AccountType.symbol") ?? trade.accountTypeSymbol),
+            type: text(get(trade, "AccountType.description")) ?? accountType(get(granted, "AccountType.symbol") ?? get(trade, "AccountType.symbol") ?? trade.accountTypeSymbol),
             accountNumber: maskAccount(trade.accountNumber),
             status: openClosed === "C" || Boolean(text(trade.dateClosed)) ? "closed" : "active",
             openedOn: isoDate(trade.dateOpened),
             closedOn: isoDate(trade.dateClosed),
-            sanctionedAmount: amount(trade.highBalance),
-            creditLimit: amount(granted.CreditLimit),
-            currentBalance: amount(trade.currentBalance),
-            overdueAmount: amount(granted.amountPastDue),
+            sanctionedAmount: reported(trade.highBalance),
+            creditLimit: reported(granted.CreditLimit),
+            currentBalance: reported(trade.currentBalance),
+            overdueAmount: reported(granted.amountPastDue),
             lastPaymentOn: isoDate(granted.dateLastPayment),
+            emiAmount: reported(granted.EMIAmount),
+            interestRate: reported(granted.interestRate),
+            writtenOffAmount: reported(trade.writtenOffAmtTotal),
+            settlementAmount: reported(trade.settlementAmount),
             paymentHistory: asArray(get(granted, "PayStatusHistory.MonthlyPayStatus")).filter(isObject).map((entry) => ({
                 month: (isoDate(entry.date) ?? "").slice(0, 7),
                 daysPastDue: /^\d+$/.test(text(entry.status) ?? "") ? Number(entry.status) : null,
@@ -249,9 +280,9 @@ const parseCibil = (raw) => {
     const enquiries = asArray(get(report, "InquiryPartition")).flatMap((partition) => asArray(isObject(partition) ? partition.Inquiry ?? partition : partition))
         .filter(isObject).map((enquiry) => ({
         lender: text(enquiry.subscriberName) ?? "Unknown lender",
-        purpose: text(enquiry.inquiryType) ?? text(get(enquiry, "Purpose.description")),
+        purpose: text(enquiry.inquiryType) ? accountType(enquiry.inquiryType) : text(get(enquiry, "Purpose.description")),
         date: isoDate(enquiry.inquiryDate),
-        amount: amount(enquiry.amount),
+        amount: reported(enquiry.amount),
     }));
     const name = [text(get(borrower, "BorrowerName.Name.Forename")), text(get(borrower, "BorrowerName.Name.Surname"))].filter(Boolean).join(" ");
     return {
@@ -267,6 +298,7 @@ const parseCibil = (raw) => {
             addresses: asArray(get(borrower, "BorrowerAddress")).filter(isObject).map((address) => [get(address, "CreditAddress.StreetAddress"), get(address, "CreditAddress.City"), get(address, "CreditAddress.PostalCode")].map(text).filter(Boolean).join(", ")).filter(Boolean),
         },
         summary: buildSummary(accounts, enquiries, reportDate, {}),
+        scoreFactors: cibilScoreFactors(borrower),
         accounts,
         enquiries,
     };

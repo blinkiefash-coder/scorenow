@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type CSSProperties, type FormEvent } from 'react'
 import {
   AlertTriangle, ArrowLeft, ArrowRight, BadgeIndianRupee, BarChart3, BookOpen,
-  Building2, CalendarDays, Check, ChevronDown, CircleHelp, Clock3, CreditCard,
+  Building2, CalendarDays, Check, ChevronDown, CircleHelp, Clock3, CreditCard, Download, ExternalLink,
   Eye, EyeOff, FileCheck2, FileSearch, Gift, Handshake, Headphones,
   House, Lightbulb, LockKeyhole, Mail, MapPin, Menu, MessageCircle, Pause,
   Phone, Play, RotateCcw, Search, Settings, ShieldCheck, Smartphone, Sparkles, Star,
@@ -1306,11 +1306,14 @@ type ReportDetail = {
   reportDate: string | null
   reportUrl: string | null
   isDemo: boolean
+  pdfAvailable: boolean
   personal: { name: string | null; pan: string | null; dateOfBirth: string | null; gender: string | null; phones: string[]; emails: string[]; addresses: string[] }
-  summary: { totalAccounts: number; activeAccounts: number; closedAccounts: number; overdueAccounts: number; totalSanctioned: number; totalBalance: number; totalOverdue: number; enquiriesLast6Months: number }
+  summary: { totalAccounts: number; activeAccounts: number; closedAccounts: number; overdueAccounts: number; totalSanctioned: number; totalBalance: number; totalOverdue: number; enquiriesLast6Months: number; writtenOffAccounts?: number }
+  scoreFactors?: { impact: 'positive' | 'negative'; text: string; tip: string | null }[]
   accounts: {
     lender: string; type: string; accountNumber: string | null; status: 'active' | 'closed'; openedOn: string | null; closedOn: string | null
     sanctionedAmount: number | null; creditLimit: number | null; currentBalance: number | null; overdueAmount: number | null; lastPaymentOn: string | null
+    emiAmount?: number | null; interestRate?: number | null; writtenOffAmount?: number | null; settlementAmount?: number | null
     paymentHistory: { month: string; daysPastDue: number | null }[]
   }[]
   enquiries: { lender: string; purpose: string | null; date: string | null; amount: number | null }[]
@@ -1321,9 +1324,32 @@ const formatMoney = (value: number | null | undefined) => (value === null || val
 const formatDate = (value: string | null | undefined) => (value ? new Date(`${value}T00:00:00`).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : '—')
 const formatMonth = (value: string) => new Date(`${value}-01T00:00:00`).toLocaleDateString('en-IN', { month: 'short', year: '2-digit' })
 
+type ReportAccount = ReportDetail['accounts'][number]
+type AccountFilter = 'all' | 'attention' | 'active' | 'closed'
+
+const needsAttention = (account: ReportAccount) =>
+  (account.overdueAmount ?? 0) > 0 || (account.writtenOffAmount ?? 0) > 0 || (account.settlementAmount ?? 0) > 0
+
+const accountFlag = (account: ReportAccount) => {
+  if ((account.writtenOffAmount ?? 0) > 0) return { label: 'Written off', tone: 'overdue' }
+  if ((account.settlementAmount ?? 0) > 0) return { label: 'Settled', tone: 'overdue' }
+  if ((account.overdueAmount ?? 0) > 0) return { label: 'Overdue', tone: 'overdue' }
+  return account.status === 'active' ? { label: 'Active', tone: 'active' } : { label: 'Closed', tone: 'closed' }
+}
+
+const accountFilters: { id: AccountFilter; label: string; matches: (account: ReportAccount) => boolean }[] = [
+  { id: 'all', label: 'All', matches: () => true },
+  { id: 'attention', label: 'Needs attention', matches: needsAttention },
+  { id: 'active', label: 'Active', matches: (account) => account.status === 'active' },
+  { id: 'closed', label: 'Closed', matches: (account) => account.status === 'closed' },
+]
+
 function ReportDetailView({ user, requestId }: { user: AuthUser; requestId: string }) {
   const [detail, setDetail] = useState<ReportDetail | null>(null)
   const [error, setError] = useState('')
+  const [accountFilter, setAccountFilter] = useState<AccountFilter>('all')
+  const [downloading, setDownloading] = useState(false)
+  const [downloadError, setDownloadError] = useState('')
 
   useEffect(() => {
     let cancelled = false
@@ -1341,9 +1367,45 @@ function ReportDetailView({ user, requestId }: { user: AuthUser; requestId: stri
   if (!detail) return <div className="dashboard-card report-loading"><RotateCcw /> Loading full report…</div>
 
   const { summary, personal } = detail
+  const bureauLabel = bureauCatalog.find((item) => item.id === detail.bureau)?.name ?? detail.bureau
+  const visibleAccounts = detail.accounts.filter(accountFilters.find((item) => item.id === accountFilter)!.matches)
+
+  const downloadPdf = async () => {
+    setDownloading(true)
+    setDownloadError('')
+    try {
+      const response = await fetch(`${apiUrl}/api/reports/${requestId}/pdf`, { headers: authHeaders(user) })
+      if (!response.ok) {
+        const result = await response.json().catch(() => null) as { message?: string } | null
+        throw new Error(result?.message || 'Unable to download the PDF.')
+      }
+      const url = URL.createObjectURL(await response.blob())
+      const link = document.createElement('a')
+      link.href = url
+      link.download = `ScoreNow-${detail.bureau}-report-${detail.reportDate ?? 'latest'}.pdf`
+      link.click()
+      window.setTimeout(() => URL.revokeObjectURL(url), 1000)
+    } catch (downloadFailure) {
+      setDownloadError(downloadFailure instanceof Error ? downloadFailure.message : 'Unable to download the PDF.')
+    } finally {
+      setDownloading(false)
+    }
+  }
+
   return (
     <section className="report-detail">
       {detail.isDemo && <p className="dashboard-notice info">Demo report with sample data — not a real bureau report.</p>}
+      <article className="dashboard-card report-toolbar">
+        <div className="report-toolbar-title">
+          <span><FileCheck2 /></span>
+          <div><strong>{bureauLabel} credit report</strong><small>Generated {formatDate(detail.reportDate)}{personal.name ? ` · ${personal.name}` : ''}</small></div>
+        </div>
+        <div className="report-toolbar-actions">
+          {detail.reportUrl && <a className="button button-outline" href={detail.reportUrl} target="_blank" rel="noreferrer"><ExternalLink /> View online</a>}
+          {detail.pdfAvailable && <button type="button" className="button button-primary" disabled={downloading} onClick={() => void downloadPdf()}><Download /> {downloading ? 'Preparing…' : 'Download PDF'}</button>}
+        </div>
+      </article>
+      {downloadError && <p className="dashboard-notice error" role="alert">{downloadError}</p>}
       <div className="report-summary-strip">
         <div><small>Total accounts</small><strong>{summary.totalAccounts}</strong></div>
         <div><small>Active</small><strong>{summary.activeAccounts}</strong></div>
@@ -1352,7 +1414,18 @@ function ReportDetailView({ user, requestId }: { user: AuthUser; requestId: stri
         <div><small>Outstanding</small><strong>{formatMoney(summary.totalBalance)}</strong></div>
         <div className={summary.totalOverdue ? 'is-bad' : ''}><small>Overdue amount</small><strong>{formatMoney(summary.totalOverdue)}</strong></div>
         <div><small>Enquiries (6 months)</small><strong>{summary.enquiriesLast6Months}</strong></div>
+        {(summary.writtenOffAccounts ?? 0) > 0 && <div className="is-bad"><small>Written off / settled</small><strong>{summary.writtenOffAccounts}</strong></div>}
       </div>
+
+      {detail.scoreFactors && detail.scoreFactors.length > 0 && <article className="dashboard-card report-factors">
+        <div className="dashboard-card-heading"><strong><Lightbulb /> What&apos;s affecting your score</strong><small>From {bureauLabel}</small></div>
+        <ul>{detail.scoreFactors.map((factor) => (
+          <li key={factor.text} className={factor.impact}>
+            <span className="factor-icon">{factor.impact === 'negative' ? <AlertTriangle /> : <Check />}</span>
+            <div><strong>{factor.impact === 'negative' ? 'Hurting your score' : 'Helping your score'}</strong><p>{factor.text}</p>{factor.tip && <small><TrendingUp /> {factor.tip}</small>}</div>
+          </li>
+        ))}</ul>
+      </article>}
 
       <div className="report-detail-grid">
         <article className="dashboard-card report-personal">
@@ -1377,16 +1450,26 @@ function ReportDetailView({ user, requestId }: { user: AuthUser; requestId: stri
 
       <article className="dashboard-card report-accounts">
         <div className="dashboard-card-heading"><strong><WalletCards /> Credit Accounts</strong><small>{detail.accounts.length} accounts</small></div>
-        {detail.accounts.length ? <div className="report-account-list">{detail.accounts.map((account, index) => (
+        <div className="report-account-toolbar">
+          <div className="report-account-filters" role="tablist" aria-label="Filter accounts">{accountFilters.map((filter) => {
+            const count = detail.accounts.filter(filter.matches).length
+            return <button type="button" role="tab" aria-selected={accountFilter === filter.id} className={accountFilter === filter.id ? 'active' : ''} key={filter.id} onClick={() => setAccountFilter(filter.id)}>{filter.label} <b>{count}</b></button>
+          })}</div>
+          <div className="payment-legend" aria-hidden="true"><span><i className="ontime" /> On time</span><span><i className="late" /> Days late</span><span><i className="unknown" /> Not reported</span></div>
+        </div>
+        {visibleAccounts.length ? <div className="report-account-list">{visibleAccounts.map((account, index) => (
           <div className={`report-account ${account.status}`} key={`${account.lender}-${account.accountNumber}-${index}`}>
             <div className="report-account-head">
               <div><strong>{account.lender}</strong><small>{account.type}{account.accountNumber ? ` · ${account.accountNumber}` : ''}</small></div>
-              <span className={`account-chip ${(account.overdueAmount ?? 0) > 0 ? 'overdue' : account.status}`}>{(account.overdueAmount ?? 0) > 0 ? 'Overdue' : account.status === 'active' ? 'Active' : 'Closed'}</span>
+              <span className={`account-chip ${accountFlag(account).tone}`}>{accountFlag(account).label}</span>
             </div>
+            {((account.writtenOffAmount ?? 0) > 0 || (account.settlementAmount ?? 0) > 0) && <p className="account-alert"><AlertTriangle /> {(account.writtenOffAmount ?? 0) > 0 ? `Lender wrote off ${formatMoney(account.writtenOffAmount)}` : `Settled for ${formatMoney(account.settlementAmount)}`}. This has a strong negative effect on your score until resolved.</p>}
             <dl className="report-account-figures">
               <div><dt>{account.creditLimit ? 'Credit limit' : 'Sanctioned'}</dt><dd>{formatMoney(account.creditLimit ?? account.sanctionedAmount)}</dd></div>
               <div><dt>Balance</dt><dd>{formatMoney(account.currentBalance)}</dd></div>
               <div><dt>Overdue</dt><dd className={(account.overdueAmount ?? 0) > 0 ? 'is-bad' : ''}>{formatMoney(account.overdueAmount)}</dd></div>
+              {account.emiAmount ? <div><dt>EMI</dt><dd>{formatMoney(account.emiAmount)}</dd></div> : null}
+              {account.interestRate ? <div><dt>Interest</dt><dd>{account.interestRate}%</dd></div> : null}
               <div><dt>Opened</dt><dd>{formatDate(account.openedOn)}</dd></div>
               <div><dt>{account.closedOn ? 'Closed' : 'Last payment'}</dt><dd>{formatDate(account.closedOn ?? account.lastPaymentOn)}</dd></div>
             </dl>
@@ -1395,7 +1478,7 @@ function ReportDetailView({ user, requestId }: { user: AuthUser; requestId: stri
               return <span key={entry.month} className={entry.daysPastDue === null ? 'unknown' : late ? 'late' : 'ontime'} title={`${formatMonth(entry.month)}: ${entry.daysPastDue === null ? 'Not reported' : late ? `${entry.daysPastDue} days late` : 'On time'}`}>{late ? entry.daysPastDue : ''}</span>
             })}</div>}
           </div>
-        ))}</div> : <p className="report-empty">No accounts found in this report.</p>}
+        ))}</div> : <p className="report-empty">{detail.accounts.length ? 'No accounts match this filter.' : 'No accounts found in this report.'}</p>}
       </article>
     </section>
   )

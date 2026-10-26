@@ -107,7 +107,7 @@
   .report-detail .dashboard-card-heading strong { display: inline-flex; align-items: center; gap: 7px; }
   .report-detail .dashboard-card-heading strong svg { width: 18px; color: var(--blue); }
   .report-detail .dashboard-card-heading small { color: var(--muted); font-size: 12px; font-weight: 700; }
-  .report-summary-strip { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 8px; }
+  .report-summary-strip { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 8px; }
   .report-summary-strip > div { display: grid; gap: 4px; padding: 13px; border: 1px solid #dce8f5; border-radius: 10px; background: white; }
   .report-summary-strip small { color: var(--muted); font-size: 11px; font-weight: 700; }
   .report-summary-strip strong { color: var(--navy); font-size: 19px; }
@@ -133,7 +133,7 @@
   .account-chip.active { background: #e8fbf0; color: #086841; }
   .account-chip.closed { background: #eef2f7; color: #5b6b82; }
   .account-chip.overdue { background: #fff0f1; color: #a32235; }
-  .report-account-figures { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; margin: 0; }
+  .report-account-figures { display: grid; grid-template-columns: repeat(auto-fit, minmax(105px, 1fr)); gap: 8px; margin: 0; }
   .report-account-figures dt { color: var(--muted); font-size: 11px; font-weight: 700; }
   .report-account-figures dd { margin: 2px 0 0; color: var(--navy); font-size: 13px; font-weight: 800; }
   .payment-history { display: flex; flex-wrap: wrap; gap: 4px; }
@@ -141,8 +141,46 @@
   .payment-history .ontime { background: #2fb36d; }
   .payment-history .late { background: #d64550; }
   .payment-history .unknown { background: #d5dde8; }
-  @media (max-width: 1100px) { .report-summary-strip { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
-  @media (max-width: 760px) { .report-detail-grid { grid-template-columns: 1fr; } .report-summary-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); } .report-account-figures { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+  .report-toolbar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; }
+  .report-toolbar-title { display: flex; align-items: center; gap: 12px; min-width: 0; }
+  .report-toolbar-title > span { width: 42px; height: 42px; display: grid; place-items: center; flex-shrink: 0; border-radius: 11px; background: #e8f3ff; color: var(--blue); }
+  .report-toolbar-title > span svg { width: 21px; }
+  .report-toolbar-title div { display: grid; gap: 3px; min-width: 0; }
+  .report-toolbar-title strong { color: var(--navy); font-size: 16px; }
+  .report-toolbar-title small { color: var(--muted); font-size: 12px; font-weight: 700; }
+  .report-toolbar-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+  .report-toolbar-actions .button { min-height: 40px; display: inline-flex; align-items: center; gap: 7px; padding: 0 16px; font-size: 13px; text-decoration: none; }
+  .report-toolbar-actions .button svg { width: 16px; }
+  .report-toolbar-actions .button:disabled { opacity: .6; cursor: progress; }
+  .report-factors ul { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 10px; margin: 0; padding: 0; list-style: none; }
+  .report-factors li { display: flex; gap: 11px; padding: 13px; border: 1px solid #dce8f5; border-radius: 11px; background: #fbfdff; }
+  .report-factors li.negative { border-color: #f6d0d5; background: #fff8f9; }
+  .report-factors li.positive { border-color: #c8eed9; background: #f5fcf8; }
+  .factor-icon { width: 30px; height: 30px; display: grid; place-items: center; flex-shrink: 0; border-radius: 50%; }
+  .factor-icon svg { width: 16px; }
+  .report-factors .negative .factor-icon { background: #ffe3e7; color: #c62f43; }
+  .report-factors .positive .factor-icon { background: #dcf6e8; color: #086841; }
+  .report-factors li div { display: grid; gap: 5px; }
+  .report-factors li strong { color: var(--navy); font-size: 13px; }
+  .report-factors li p { margin: 0; color: #344660; font-size: 12px; line-height: 1.55; }
+  .report-factors li small { display: flex; gap: 6px; color: var(--muted); font-size: 11px; line-height: 1.5; }
+  .report-factors li small svg { width: 13px; flex-shrink: 0; margin-top: 2px; color: var(--blue); }
+  .report-account-toolbar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 12px; }
+  .report-account-filters { display: flex; flex-wrap: wrap; gap: 6px; }
+  .report-account-filters button { display: inline-flex; align-items: center; gap: 6px; min-height: 32px; padding: 0 12px; border: 1px solid #dce8f5; border-radius: 99px; background: white; color: #344660; font: inherit; font-size: 12px; font-weight: 700; cursor: pointer; }
+  .report-account-filters button b { padding: 1px 7px; border-radius: 99px; background: #eef2f7; font-size: 11px; }
+  .report-account-filters button.active { border-color: var(--blue); background: var(--blue); color: white; }
+  .report-account-filters button.active b { background: rgba(255,255,255,.22); }
+  .payment-legend { display: flex; flex-wrap: wrap; gap: 12px; color: var(--muted); font-size: 11px; font-weight: 700; }
+  .payment-legend span { display: inline-flex; align-items: center; gap: 5px; }
+  .payment-legend i { width: 11px; height: 11px; border-radius: 3px; }
+  .payment-legend .ontime { background: #2fb36d; }
+  .payment-legend .late { background: #d64550; }
+  .payment-legend .unknown { background: #d5dde8; }
+  .account-alert { display: flex; align-items: flex-start; gap: 7px; margin: 0; padding: 9px 11px; border-radius: 8px; background: #fff0f1; color: #a32235; font-size: 12px; font-weight: 700; line-height: 1.45; }
+  .account-alert svg { width: 15px; flex-shrink: 0; margin-top: 1px; }
+  @media (max-width: 1100px) { .report-summary-strip { grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); } }
+  @media (max-width: 760px) { .report-detail-grid { grid-template-columns: 1fr; } .report-summary-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); } .report-account-figures { grid-template-columns: repeat(2, minmax(0, 1fr)); } .report-toolbar-actions, .report-toolbar-actions .button { width: 100%; justify-content: center; } }
   @media (max-width: 760px) { .bureau-grid { grid-template-columns: 1fr; } }
 
   /* Dashboard readability pass */

@@ -89,6 +89,47 @@ export const scoreBand = (score) => {
         return "Fair";
     return "Needs attention";
 };
+const MAX_PDF_BYTES = 20 * 1024 * 1024;
+// The bureau PDF is a pre-signed S3 link that expires (24h), so it must be stored on completion.
+export const livePdfUrl = (raw) => {
+    const value = raw?.data?.data?.pdf_report_url;
+    if (typeof value !== "string")
+        return null;
+    try {
+        const url = new URL(value);
+        const signedAt = url.searchParams.get("X-Amz-Date");
+        const expiresIn = Number(url.searchParams.get("X-Amz-Expires"));
+        if (signedAt && expiresIn) {
+            const iso = signedAt.replace(/^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})Z$/, "$1-$2-$3T$4:$5:$6Z");
+            if (Date.parse(iso) + expiresIn * 1000 < Date.now())
+                return null;
+        }
+        return value;
+    }
+    catch {
+        return null;
+    }
+};
+export const downloadReportPdf = async (url) => {
+    if (!url)
+        return null;
+    const parsed = new URL(url);
+    if (parsed.protocol !== "https:" || !/\.amazonaws\.com$/i.test(parsed.hostname))
+        return null;
+    try {
+        const response = await fetch(parsed, { signal: AbortSignal.timeout(30000) });
+        if (!response.ok || Number(response.headers.get("content-length")) > MAX_PDF_BYTES)
+            return null;
+        const pdf = Buffer.from(await response.arrayBuffer());
+        if (pdf.length > MAX_PDF_BYTES || pdf.subarray(0, 5).toString("latin1") !== "%PDF-")
+            return null;
+        return pdf;
+    }
+    catch (error) {
+        console.error("Report PDF download failed", error);
+        return null;
+    }
+};
 const buildPayload = (bureau, token, applicant) => {
     const nameParts = applicant.fullName.trim().split(/\s+/);
     const firstName = nameParts.length > 1 ? nameParts.slice(0, -1).join(" ") : nameParts[0];
