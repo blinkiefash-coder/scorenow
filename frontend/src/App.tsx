@@ -1749,6 +1749,15 @@ function DashboardPage({ user, onLogout }: { user: AuthUser; onLogout: () => voi
   }
 
   const metric = (value: number | null | undefined) => value ?? '—'
+  const scoreBandTone = (band: string | null) => {
+    switch (band?.toLowerCase()) {
+      case 'excellent': return 'excellent'
+      case 'good': return 'good'
+      case 'fair': return 'fair'
+      case 'needs attention': return 'attention'
+      default: return 'neutral'
+    }
+  }
 
   const loadDemoReport = async (bureau: BureauId) => {
     setBusyBureau(bureau)
@@ -1798,7 +1807,7 @@ function DashboardPage({ user, onLogout }: { user: AuthUser; onLogout: () => voi
 
         <div className="dashboard-content">
           <div className="dashboard-welcome">
-            <div><h1>{greeting}, {firstName}! <span>👋</span></h1><p>{completedReports.length ? "Here's your credit health at a glance." : 'Choose a credit bureau below to fetch your first report.'}</p></div>
+            <div><span className="dashboard-kicker">YOUR CREDIT AT A GLANCE</span><h1>{greeting}, {firstName}! <span>👋</span></h1><p>{completedReports.length ? "Here's your credit health at a glance." : 'Choose a credit bureau below to fetch your first report.'}</p></div>
           </div>
 
           {notice && <p className={`dashboard-notice ${notice.tone}`} role="status">{notice.text}</p>}
@@ -1816,7 +1825,7 @@ function DashboardPage({ user, onLogout }: { user: AuthUser; onLogout: () => voi
                   <article className={`bureau-card${activeBureau === bureau.id ? ' selected' : ''}`} key={bureau.id}>
                     <img src={bureau.logo} alt={bureau.name} />
                     <strong>{bureau.name}</strong>
-                    {report?.status === 'completed' ? <span className="bureau-status ready"><Check /> Score {report.credit_score ?? 'in full report'} · {report.report_date}</span>
+                    {report?.status === 'completed' ? <span className="bureau-status ready"><Check /> Score {report.credit_score ?? 'in full report'} · {formatDate(report.report_date)}</span>
                       : report?.status === 'processing' ? <span className="bureau-status pending"><Clock3 /> Fetching report…</span>
                         : report?.status === 'failed' ? <span className="bureau-status failed"><AlertTriangle /> {report.failure_reason || 'Fetch failed'}</span>
                           : <span className="bureau-status">{available ? 'Not fetched yet' : 'Coming soon'}</span>}
@@ -1846,7 +1855,7 @@ function DashboardPage({ user, onLogout }: { user: AuthUser; onLogout: () => voi
             {activeReport ? <>
               <article className="dashboard-card score-card">
                 <div className="dashboard-card-heading"><strong>{bureauName(activeReport.bureau)} Score</strong><CircleHelp /></div>
-                <div className="dashboard-score-area"><div className="dashboard-gauge"><div className="dashboard-gauge-track" /><div className="dashboard-gauge-needle" style={{ transform: `rotate(${needleAngle}deg)` }} /><strong>{activeReport.credit_score ?? '—'}</strong><small>{activeReport.score_band || 'See full report'}</small><span className="gauge-min">300</span><span className="gauge-max">900</span></div><div className="dashboard-score-copy"><small>Report date: {activeReport.report_date}</small><strong><ShieldCheck /> {bureauName(activeReport.bureau)}</strong><p>{activeReport.credit_score ? 'Your latest score from this bureau.' : 'Your score is available in the full report.'}</p></div></div>
+                <div className="dashboard-score-area"><div className={`dashboard-gauge score-band-${scoreBandTone(activeReport.score_band)}`}><div className="dashboard-gauge-track" /><div className="dashboard-gauge-needle" style={{ transform: `rotate(${needleAngle}deg)` }} /><strong>{activeReport.credit_score ?? '—'}</strong><small>{activeReport.score_band || 'See full report'}</small><span className="gauge-min">300</span><span className="gauge-max">900</span></div><div className="dashboard-score-copy"><small>Report date: {formatDate(activeReport.report_date)}</small><strong><ShieldCheck /> {bureauName(activeReport.bureau)}</strong><p>{activeReport.credit_score ? 'Your latest score from this bureau.' : 'Your score is available in the full report.'}</p></div></div>
                 {activeReport.report_url && <a className="dashboard-primary-action" href={activeReport.report_url} target="_blank" rel="noreferrer">View Full Report <ArrowRight /></a>}
               </article>
               <article className="dashboard-card highlights-card"><div className="dashboard-card-heading"><strong>Key Highlights</strong></div><div className="highlight-grid"><div><span className="metric-icon blue"><WalletCards /></span><strong>{metric(activeReport.total_accounts)}</strong><small>Total Accounts</small></div><div><span className="metric-icon blue"><CreditCard /></span><strong>{metric(activeReport.active_accounts)}</strong><small>Active Accounts</small></div><div><span className="metric-icon red"><AlertTriangle /></span><strong>{metric(activeReport.overdue_accounts)}</strong><small>Overdue Accounts</small></div><div><span className="metric-icon violet"><Search /></span><strong>{metric(activeReport.enquiries_last_6_months)}</strong><small>Enquiries<br />(last 6 months)</small></div></div></article>
