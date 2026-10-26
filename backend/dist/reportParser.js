@@ -309,7 +309,51 @@ const parseCibil = (raw) => {
         enquiries,
     };
 };
+const parseCrif = (raw) => {
+    const data = get(raw, "data.data") ?? {};
+    const requestData = (get(data, "request") ?? {});
+    const reportData = get(data, "credit_report") ?? {};
+    const score = validScore(get(data, "credit_score"));
+    const reportDate = isoDate(get(data, "reportDate"));
+    const accounts = asArray(get(reportData, "accounts")).filter(isObject).map((account) => ({
+        lender: text(account.lender) ?? "Unknown lender",
+        type: text(account.account_type) ?? "Loan",
+        accountNumber: maskAccount(get(account, "account_number")),
+        status: text(account.status)?.toLowerCase() === "closed" ? "closed" : "active",
+        openedOn: null,
+        closedOn: null,
+        sanctionedAmount: amount(get(account, "limit")),
+        creditLimit: amount(get(account, "limit")),
+        currentBalance: amount(get(account, "balance")),
+        overdueAmount: amount(get(account, "overdue")),
+        lastPaymentOn: null,
+        paymentHistory: [],
+    }));
+    const enquiries = asArray(get(reportData, "inquiries")).filter(isObject).map((enquiry) => ({
+        lender: text(enquiry.lender) ?? "Unknown lender",
+        purpose: text(enquiry.type),
+        date: isoDate(enquiry.date),
+        amount: amount(enquiry.amount),
+    }));
+    return {
+        score,
+        reportDate,
+        personal: {
+            name: text(requestData.NAME),
+            pan: maskPan(requestData.PAN),
+            dateOfBirth: isoDate(requestData.DOB),
+            gender: null,
+            phones: text(requestData.PHONE) ? [text(requestData.PHONE) ?? ""] : [],
+            emails: text(requestData.EMAIL) ? [text(requestData.EMAIL) ?? ""] : [],
+            addresses: text(requestData.ADDRESS) ? [text(requestData.ADDRESS) ?? ""] : [],
+        },
+        summary: buildSummary(accounts, enquiries, reportDate, {}),
+        scoreFactors: [],
+        accounts,
+        enquiries,
+    };
+};
 export const normalizeReport = (bureau, raw) => {
-    const parsed = bureau === "experian" ? parseExperian(raw) : bureau === "equifax" ? parseEquifax(raw) : parseCibil(raw);
+    const parsed = bureau === "experian" ? parseExperian(raw) : bureau === "equifax" ? parseEquifax(raw) : bureau === "crif" ? parseCrif(raw) : parseCibil(raw);
     return { parserVersion: PARSER_VERSION, bureau, ...parsed };
 };

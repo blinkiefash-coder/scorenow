@@ -1,8 +1,9 @@
-export const BUREAUS = ["cibil", "equifax", "experian"];
+export const BUREAUS = ["cibil", "equifax", "experian", "crif"];
 export const bureauNames = {
     cibil: "TransUnion CIBIL",
     equifax: "Equifax",
     experian: "Experian",
+    crif: "CRIF",
 };
 export const isBureau = (value) => typeof value === "string" && BUREAUS.includes(value);
 const payprimeToken = () => process.env.PAYPRIME_API_TOKEN || process.env.CIBIL_API_TOKEN;
@@ -13,7 +14,10 @@ const providerConfig = (bureau) => {
     if (bureau === "equifax") {
         return { url: process.env.EQUIFAX_API_URL || "https://b2b.payprime.in/api/equifax-ccr", token: process.env.EQUIFAX_API_TOKEN || payprimeToken() };
     }
-    return { url: process.env.EXPERIAN_API_URL || "https://b2b.payprime.in/api/experian-report", token: process.env.EXPERIAN_API_TOKEN || payprimeToken() };
+    if (bureau === "experian") {
+        return { url: process.env.EXPERIAN_API_URL || "https://b2b.payprime.in/api/experian-report", token: process.env.EXPERIAN_API_TOKEN || payprimeToken() };
+    }
+    return { url: process.env.CRIF_API_URL || "https://b2b.payprime.in/api/crif-report", token: process.env.CRIF_API_TOKEN || payprimeToken() };
 };
 export const isBureauAvailable = (bureau) => {
     const { url, token } = providerConfig(bureau);
@@ -152,6 +156,15 @@ const buildPayload = (bureau, token, applicant) => {
     }
     if (bureau === "experian") {
         return { token, first_name: firstName, last_name: lastName, pan: applicant.pan, phone: applicant.mobile, consent: "Y" };
+    }
+    if (bureau === "crif") {
+        return {
+            token,
+            first_name: firstName,
+            last_name: lastName,
+            phone: applicant.mobile,
+            consent: true,
+        };
     }
     return {
         token,

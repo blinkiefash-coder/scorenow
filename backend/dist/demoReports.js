@@ -131,5 +131,40 @@ const cibil = {
         },
     },
 };
-export const demoReportResponses = { cibil, equifax, experian };
+const crif = {
+    status: true,
+    txn_id: "DEMO-CRIF-0001",
+    txn_status: "success",
+    message: "Generate CRIF Report",
+    data: {
+        status: "success",
+        requestId: "demo-crif-req-001",
+        type: "point",
+        serviceStatusCode: 200,
+        data: {
+            request: {
+                NAME: "Demo User",
+                DOB: "12-05-1994",
+                PAN: "ABCDE1234F",
+                UID: "",
+                EMAIL: "demo@example.com",
+                ADDRESS: "12, MG Road, Bengaluru, Karnataka 560001",
+                PHONE: "9999999999",
+            },
+            credit_score: 720,
+            credit_report: {
+                accounts: [
+                    { account_type: "Loan", lender: "HDFC Bank", account_number: "4567123498761234", status: "Active", balance: 32500, limit: 150000, overdue: 0 },
+                    { account_type: "Credit Card", lender: "ICICI Bank", account_number: "LN00998877", status: "Active", balance: 280000, limit: 500000, overdue: 4500 },
+                    { account_type: "Credit Card", lender: "Axis Bank", account_number: "AL11223344", status: "Closed", balance: 0, limit: 400000, overdue: 0 },
+                ],
+                inquiries: [
+                    { lender: "Kotak Mahindra Bank", date: today, type: "Personal Loan", amount: "300000" },
+                    { lender: "SBI Card", date: today, type: "Credit Card", amount: "0" },
+                ],
+            },
+        },
+    },
+};
+export const demoReportResponses = { cibil, equifax, experian, crif };
 export const isReportsDemoMode = () => process.env.REPORTS_DEMO_MODE === "true" && process.env.NODE_ENV !== "production";

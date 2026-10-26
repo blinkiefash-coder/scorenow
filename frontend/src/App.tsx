@@ -1283,7 +1283,7 @@ function ChatAssistant({ requireLogin }: { requireLogin: RequireLogin }) {
   )
 }
 
-type BureauId = 'cibil' | 'equifax' | 'experian'
+type BureauId = 'cibil' | 'equifax' | 'experian' | 'crif'
 
 type BureauReport = {
   request_id: string
@@ -1503,6 +1503,7 @@ const bureauCatalog: { id: BureauId; name: string; logo: string }[] = [
   { id: 'cibil', name: 'TransUnion CIBIL', logo: '/logo-cibil.png' },
   { id: 'equifax', name: 'Equifax', logo: '/logo-equifax.svg' },
   { id: 'experian', name: 'Experian', logo: '/logo-experian-new.svg' },
+  { id: 'crif', name: 'CRIF', logo: '/logo-crif.png' },
 ]
 
 const indianStates = [
