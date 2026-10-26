@@ -147,9 +147,9 @@ const crif = {
                 DOB: "12-05-1994",
                 PAN: "ABCDE1234F",
                 UID: "",
-                EMAIL: "demo@example.com",
-                ADDRESS: "12, MG Road, Bengaluru, Karnataka 560001",
-                PHONE: "9999999999",
+                "EMAIL-1": "demo@example.com",
+                "ADDRESS-1": "12, MG Road, Bengaluru, Karnataka 560001",
+                "PHONE-1": "9999999999",
             },
             credit_score: 720,
             credit_report: {

@@ -1,5 +1,5 @@
 // Bump when parsing changes so stored raw reports get re-normalized on next view.
-export const PARSER_VERSION = 3;
+export const PARSER_VERSION = 4;
 const isObject = (value) => Boolean(value) && typeof value === "object" && !Array.isArray(value);
 const get = (value, path) => path.split(".").reduce((current, key) => {
     if (Array.isArray(current))
@@ -343,9 +343,9 @@ const parseCrif = (raw) => {
             pan: maskPan(requestData.PAN),
             dateOfBirth: isoDate(requestData.DOB),
             gender: null,
-            phones: text(requestData.PHONE) ? [text(requestData.PHONE) ?? ""] : [],
-            emails: text(requestData.EMAIL) ? [text(requestData.EMAIL) ?? ""] : [],
-            addresses: text(requestData.ADDRESS) ? [text(requestData.ADDRESS) ?? ""] : [],
+            phones: ["PHONE-1", "PHONE"].map((key) => text(requestData[key])).filter((value) => Boolean(value)),
+            emails: ["EMAIL-1", "EMAIL"].map((key) => text(requestData[key])).filter((value) => Boolean(value)),
+            addresses: ["ADDRESS-1", "ADDRESS-2", "ADDRESS-3", "ADDRESS"].map((key) => text(requestData[key])).filter((value) => Boolean(value)),
         },
         summary: buildSummary(accounts, enquiries, reportDate, {}),
         scoreFactors: [],
