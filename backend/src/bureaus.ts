@@ -209,10 +209,16 @@ export const fetchBureauReport = async (bureau: Bureau, applicant: Applicant): P
 
   let response: Response;
   try {
+    const jsonBody = JSON.stringify(payload);
+    // Verify token was actually serialized into the JSON
+    if (!jsonBody.includes('"token"')) {
+      throw new Error("Token field missing from request payload");
+    }
+    console.log(`[${bureau.toUpperCase()}] Sending request to ${url}, payload size: ${jsonBody.length} bytes`);
     response = await fetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
+      body: jsonBody,
       signal: AbortSignal.timeout(90000),
     });
   } catch (error) {
