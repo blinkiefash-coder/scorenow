@@ -142,13 +142,12 @@ export const downloadReportPdf = async (url) => {
         return null;
     }
 };
-const buildPayload = (bureau, token, applicant) => {
+const buildPayload = (bureau, token, applicant, consentIpAddress) => {
     const nameParts = applicant.fullName.trim().split(/\s+/);
     const firstName = nameParts.length > 1 ? nameParts.slice(0, -1).join(" ") : nameParts[0];
     const lastName = nameParts.length > 1 ? nameParts[nameParts.length - 1] : nameParts[0];
     if (bureau === "equifax") {
         const consentTimestamp = new Date().toISOString();
-        const consentIpAddress = "0.0.0.0";
         return {
             token,
             name: applicant.fullName,
@@ -199,11 +198,11 @@ const buildPayload = (bureau, token, applicant) => {
         user_consent_data_share: true,
     };
 };
-export const fetchBureauReport = async (bureau, applicant) => {
+export const fetchBureauReport = async (bureau, applicant, consentIpAddress) => {
     const { url, token } = providerConfig(bureau);
     if (!url || !token)
         return { ok: false, message: `${bureauNames[bureau]} API is not configured.`, raw: null, diagnostics: null };
-    const payload = buildPayload(bureau, token, applicant);
+    const payload = buildPayload(bureau, token, applicant, consentIpAddress);
     console.log(`[${bureau.toUpperCase()}] Sending payload to ${url}`, {
         hasToken: 'token' in payload && !!payload.token,
         keys: Object.keys(payload),

@@ -159,14 +159,13 @@ export type ProviderDiagnostics = {
   response: { httpStatus: number | null; body: Record<string, unknown> | null };
 };
 
-const buildPayload = (bureau: Bureau, token: string, applicant: Applicant) => {
+const buildPayload = (bureau: Bureau, token: string, applicant: Applicant, consentIpAddress: string) => {
   const nameParts = applicant.fullName.trim().split(/\s+/);
   const firstName = nameParts.length > 1 ? nameParts.slice(0, -1).join(" ") : nameParts[0];
   const lastName = nameParts.length > 1 ? nameParts[nameParts.length - 1] : nameParts[0];
 
   if (bureau === "equifax") {
     const consentTimestamp = new Date().toISOString();
-    const consentIpAddress = "0.0.0.0";
     return {
       token,
       name: applicant.fullName,
@@ -218,11 +217,11 @@ const buildPayload = (bureau: Bureau, token: string, applicant: Applicant) => {
   };
 };
 
-export const fetchBureauReport = async (bureau: Bureau, applicant: Applicant): Promise<BureauResult> => {
+export const fetchBureauReport = async (bureau: Bureau, applicant: Applicant, consentIpAddress: string): Promise<BureauResult> => {
   const { url, token } = providerConfig(bureau);
   if (!url || !token) return { ok: false, message: `${bureauNames[bureau]} API is not configured.`, raw: null, diagnostics: null };
 
-  const payload = buildPayload(bureau, token, applicant);
+  const payload = buildPayload(bureau, token, applicant, consentIpAddress);
   console.log(`[${bureau.toUpperCase()}] Sending payload to ${url}`, {
     hasToken: 'token' in payload && !!payload.token,
     keys: Object.keys(payload),

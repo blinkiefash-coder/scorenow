@@ -55,12 +55,14 @@ import { normalizeReport } from "./reportParser.js";
 const app = express();
 const port = Number(process.env.PORT) || 3000;
 
+app.set("trust proxy", 1);
 app.use(cors());
 app.use(express.json());
 
 type SessionUser = NonNullable<Awaited<ReturnType<typeof findSessionUser>>>;
 
 const bearerToken = (request: Request) => (request.get("authorization") || "").replace(/^Bearer\s+/i, "").trim();
+const requestIpAddress = (request: Request) => request.ip || request.socket.remoteAddress || "0.0.0.0";
 
 const requireUser = async (request: Request, response: Response, next: NextFunction) => {
   const user = await findSessionUser(bearerToken(request)).catch(() => null);
@@ -314,13 +316,13 @@ app.get("/api/reports/options", (_request, response) => {
   });
 });
 
-const runReportFetch = async (userId: string, requestId: string, bureau: Bureau): Promise<ProviderDiagnostics | null> => {
+const runReportFetch = async (userId: string, requestId: string, bureau: Bureau, consentIpAddress: string): Promise<ProviderDiagnostics | null> => {
   const applicant = await getApplicant(userId);
   if (!applicant) {
     await failReportRequest(requestId, "Complete your profile before fetching a report.");
     return null;
   }
-  const result = await fetchBureauReport(bureau, applicant);
+  const result = await fetchBureauReport(bureau, applicant, consentIpAddress);
   if (!result.ok) {
     await failReportRequest(requestId, result.message, result.raw);
     return result.diagnostics;
@@ -497,7 +499,7 @@ app.post("/api/reports/verify", requireUser, async (request, response) => {
       response.status(409).json({ message: "This payment was already processed." });
       return;
     }
-    const providerDiagnostics = await runReportFetch(user.id, requestId, bureau);
+    const providerDiagnostics = await runReportFetch(user.id, requestId, bureau, requestIpAddress(request));
     response.json({ ...(await getDashboardStatus(user.id)), providerDiagnostics });
   } catch (error) {
     console.error("Report payment verification failed", error);
@@ -515,7 +517,7 @@ app.post("/api/reports/:requestId/retry", requireUser, async (request, response)
   }
   try {
     await markReportProcessing(reportRequest.id);
-    const providerDiagnostics = await runReportFetch(user.id, reportRequest.id, reportRequest.bureau);
+    const providerDiagnostics = await runReportFetch(user.id, reportRequest.id, reportRequest.bureau, requestIpAddress(request));
     response.json({ ...(await getDashboardStatus(user.id)), providerDiagnostics });
   } catch (error) {
     console.error("Report retry failed", error);
@@ -618,7 +620,7 @@ app.post("/api/equifax-report", requireUser, async (request, response) => {
       return;
     }
 
-    const result = await fetchBureauReport("equifax", applicant);
+    const result = await fetchBureauReport("equifax", applicant, requestIpAddress(request));
     if (!result.ok) {
       response.status(400).json({ message: result.message, diagnostics: result.diagnostics });
       return;
@@ -654,7 +656,7 @@ app.post("/api/crif-report", requireUser, async (request, response) => {
       return;
     }
 
-    const result = await fetchBureauReport("crif", applicant);
+    const result = await fetchBureauReport("crif", applicant, requestIpAddress(request));
     if (!result.ok) {
       response.status(400).json({ message: result.message, diagnostics: result.diagnostics });
       return;
