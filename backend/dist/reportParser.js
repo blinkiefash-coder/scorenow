@@ -1,5 +1,5 @@
 // Bump when parsing changes so stored raw reports get re-normalized on next view.
-export const PARSER_VERSION = 4;
+export const PARSER_VERSION = 5;
 const isObject = (value) => Boolean(value) && typeof value === "object" && !Array.isArray(value);
 const get = (value, path) => path.split(".").reduce((current, key) => {
     if (Array.isArray(current))
@@ -161,7 +161,7 @@ const parseExperian = (raw) => {
 };
 const parseEquifax = (raw) => {
     const data = firstOf(raw, "data.data", "data") ?? {};
-    const report = get(data, "credit_report") ?? data;
+    const report = firstOf(data, "equifaxReport", "credit_report") ?? data;
     const cir = firstOf(report, "CCRResponse.CIRReportDataLst.CIRReportData", "CIRReportDataLst.CIRReportData", "CIRReportData") ?? report;
     const personal = get(cir, "IDAndContactInfo");
     const reportDate = isoDate(firstOf(report, "InquiryResponseHeader.Date", "CCRResponse.InquiryResponseHeader.Date"));
@@ -312,29 +312,47 @@ const parseCibil = (raw) => {
 const parseCrif = (raw) => {
     const data = get(raw, "data.data") ?? {};
     const requestData = (get(data, "request") ?? {});
-    const reportData = get(data, "credit_report") ?? {};
-    const score = validScore(get(data, "credit_score"));
+    const actualAccounts = asArray(get(data, "responses.RESPONSE"))
+        .map((response) => get(response, "LOAN-DETAILS"))
+        .filter(isObject);
+    const legacyAccounts = asArray(get(data, "credit_report.accounts")).filter(isObject);
+    const accounts = (actualAccounts.length ? actualAccounts : legacyAccounts).map((account) => {
+        const isPayprimeAccount = "ACCT-NUMBER" in account;
+        const closed = Boolean(text(isPayprimeAccount ? account["CLOSED-DATE"] : account.closed_date)) ||
+            /closed|settled|written.?off/i.test(text(isPayprimeAccount ? account["ACCOUNT-STATUS"] : account.status) ?? "");
+        return {
+            lender: text(isPayprimeAccount ? account["CREDIT-GRANTOR"] : account.lender) ?? "Unknown lender",
+            type: accountType(isPayprimeAccount ? account["ACCT-TYPE"] : account.account_type),
+            accountNumber: maskAccount(isPayprimeAccount ? account["ACCT-NUMBER"] : account.account_number),
+            status: closed ? "closed" : "active",
+            openedOn: isoDate(isPayprimeAccount ? account["DISBURSED-DT"] : account.opened_on),
+            closedOn: isoDate(isPayprimeAccount ? account["CLOSED-DATE"] : account.closed_date),
+            sanctionedAmount: amount(isPayprimeAccount ? account["DISBURSED-AMT"] : account.limit),
+            creditLimit: amount(isPayprimeAccount ? account["CREDIT-LIMIT"] : account.credit_limit),
+            currentBalance: amount(isPayprimeAccount ? account["CURRENT-BAL"] : account.balance),
+            overdueAmount: amount(isPayprimeAccount ? account["OVERDUE-AMT"] : account.overdue),
+            lastPaymentOn: isoDate(isPayprimeAccount ? account["LAST-PAYMENT-DATE"] : account.last_payment_date),
+            writtenOffAmount: amount(isPayprimeAccount ? account["WRITE-OFF-AMT"] : account.written_off_amount),
+            paymentHistory: [],
+        };
+    });
+    const actualEnquiries = asArray(get(data, "inquiryHistory.HISTORY")).filter(isObject);
+    const legacyEnquiries = asArray(get(data, "credit_report.inquiries")).filter(isObject);
+    const enquiries = (actualEnquiries.length ? actualEnquiries : legacyEnquiries).map((enquiry) => {
+        const isPayprimeEnquiry = "MEMBER-NAME" in enquiry;
+        return {
+            lender: text(isPayprimeEnquiry ? enquiry["MEMBER-NAME"] : enquiry.lender) ?? "Unknown lender",
+            purpose: text(isPayprimeEnquiry ? enquiry.PURPOSE : enquiry.type),
+            date: isoDate(isPayprimeEnquiry ? enquiry["INQUIRY-DATE"] : enquiry.date),
+            amount: amount(isPayprimeEnquiry ? enquiry.AMOUNT : enquiry.amount),
+        };
+    });
+    const summaryValue = (...paths) => {
+        const values = paths.map((path) => amount(get(data, path))).filter((value) => value !== null);
+        return values.length ? values.reduce((sum, value) => sum + value, 0) : undefined;
+    };
+    const score = validScore(firstOf(data, "credit_score", "scores.SCORE.SCORE-VALUE"));
     const reportDate = isoDate(get(data, "reportDate"));
-    const accounts = asArray(get(reportData, "accounts")).filter(isObject).map((account) => ({
-        lender: text(account.lender) ?? "Unknown lender",
-        type: text(account.account_type) ?? "Loan",
-        accountNumber: maskAccount(get(account, "account_number")),
-        status: text(account.status)?.toLowerCase() === "closed" ? "closed" : "active",
-        openedOn: null,
-        closedOn: null,
-        sanctionedAmount: amount(get(account, "limit")),
-        creditLimit: amount(get(account, "limit")),
-        currentBalance: amount(get(account, "balance")),
-        overdueAmount: amount(get(account, "overdue")),
-        lastPaymentOn: null,
-        paymentHistory: [],
-    }));
-    const enquiries = asArray(get(reportData, "inquiries")).filter(isObject).map((enquiry) => ({
-        lender: text(enquiry.lender) ?? "Unknown lender",
-        purpose: text(enquiry.type),
-        date: isoDate(enquiry.date),
-        amount: amount(enquiry.amount),
-    }));
     return {
         score,
         reportDate,
@@ -347,7 +365,15 @@ const parseCrif = (raw) => {
             emails: ["EMAIL-1", "EMAIL"].map((key) => text(requestData[key])).filter((value) => Boolean(value)),
             addresses: ["ADDRESS-1", "ADDRESS-2", "ADDRESS-3", "ADDRESS"].map((key) => text(requestData[key])).filter((value) => Boolean(value)),
         },
-        summary: buildSummary(accounts, enquiries, reportDate, {}),
+        summary: buildSummary(accounts, enquiries, reportDate, {
+            totalAccounts: summaryValue("accountsSummary.PRIMARY-ACCOUNTS-SUMMARY.PRIMARY-NUMBER-OF-ACCOUNTS", "accountsSummary.SECONDARY-ACCOUNTS-SUMMARY.SECONDARY-NUMBER-OF-ACCOUNTS"),
+            activeAccounts: summaryValue("accountsSummary.PRIMARY-ACCOUNTS-SUMMARY.PRIMARY-ACTIVE-NUMBER-OF-ACCOUNTS", "accountsSummary.SECONDARY-ACCOUNTS-SUMMARY.SECONDARY-ACTIVE-NUMBER-OF-ACCOUNTS"),
+            overdueAccounts: summaryValue("accountsSummary.PRIMARY-ACCOUNTS-SUMMARY.PRIMARY-OVERDUE-NUMBER-OF-ACCOUNTS", "accountsSummary.SECONDARY-ACCOUNTS-SUMMARY.SECONDARY-OVERDUE-NUMBER-OF-ACCOUNTS"),
+            totalSanctioned: summaryValue("accountsSummary.PRIMARY-ACCOUNTS-SUMMARY.PRIMARY-SANCTIONED-AMOUNT", "accountsSummary.SECONDARY-ACCOUNTS-SUMMARY.SECONDARY-SANCTIONED-AMOUNT"),
+            totalBalance: summaryValue("accountsSummary.PRIMARY-ACCOUNTS-SUMMARY.PRIMARY-CURRENT-BALANCE", "accountsSummary.SECONDARY-ACCOUNTS-SUMMARY.SECONDARY-CURRENT-BALANCE"),
+            totalOverdue: summaryValue("accountsSummary.PRIMARY-ACCOUNTS-SUMMARY.PRIMARY-OVERDUE-AMOUNT", "accountsSummary.SECONDARY-ACCOUNTS-SUMMARY.SECONDARY-OVERDUE-AMOUNT"),
+            enquiriesLast6Months: amount(get(data, "accountsSummary.DERIVED-ATTRIBUTES.INQURIES-IN-LAST-SIX-MONTHS")) ?? undefined,
+        }),
         scoreFactors: [],
         accounts,
         enquiries,

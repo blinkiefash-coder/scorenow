@@ -1,6 +1,6 @@
 import { createCipheriv, createDecipheriv, createHash, randomBytes, randomInt } from "node:crypto";
 import { Pool } from "pg";
-import { livePdfUrl } from "./bureaus.js";
+import { livePdfUrl, scoreBand } from "./bureaus.js";
 import { normalizeReport, PARSER_VERSION } from "./reportParser.js";
 const pool = new Pool({
     connectionString: process.env.DATABASE_URL,
@@ -173,6 +173,14 @@ export const setUserEmailIfMissing = async (userId, email) => {
         throw new Error("That email is already linked to another account.");
     }
 };
+const persistNormalizedReport = async (reportId, report) => {
+    await pool.query(`UPDATE credit_reports SET normalized_report = $2, credit_score = $3, score_band = $4,
+       total_accounts = $5, active_accounts = $6, overdue_accounts = $7,
+       enquiries_last_6_months = $8, total_outstanding = $9
+     WHERE id = $1`, [reportId, JSON.stringify(report), report.score, scoreBand(report.score), report.summary.totalAccounts,
+        report.summary.activeAccounts, report.summary.overdueAccounts, report.summary.enquiriesLast6Months,
+        report.summary.totalBalance]);
+};
 // Demo requests have no payment; they only exist when REPORTS_DEMO_MODE is on outside production.
 const VISIBLE_REQUEST = `(r.payment_id IS NOT NULL OR r.provider = 'demo')`;
 export const getDashboardStatus = async (userId) => {
@@ -182,13 +190,31 @@ export const getDashboardStatus = async (userId) => {
         pool.query(`SELECT DISTINCT ON (r.bureau)
          r.id AS request_id, r.bureau, r.status, r.failure_reason, r.requested_at, r.provider = 'demo' AS is_demo,
          c.credit_score, c.score_band, to_char(c.report_date, 'YYYY-MM-DD') AS report_date, c.report_url,
-         c.total_accounts, c.active_accounts, c.overdue_accounts, c.enquiries_last_6_months, c.total_outstanding
+         c.total_accounts, c.active_accounts, c.overdue_accounts, c.enquiries_last_6_months, c.total_outstanding,
+         c.id AS credit_report_id, c.raw_report, c.normalized_report
        FROM credit_report_requests r
        LEFT JOIN credit_reports c ON c.request_id = r.id
        WHERE r.user_id = $1 AND ${VISIBLE_REQUEST}
        ORDER BY r.bureau, r.requested_at DESC`, [userId]),
     ]);
-    return { profile: profileResult.rows[0] ?? null, reports: reportResult.rows };
+    const reports = await Promise.all(reportResult.rows.map(async (row) => {
+        const { credit_report_id, raw_report, normalized_report, ...dashboardRow } = row;
+        if (!credit_report_id || !raw_report || normalized_report?.parserVersion === PARSER_VERSION)
+            return dashboardRow;
+        const report = normalizeReport(row.bureau, raw_report);
+        await persistNormalizedReport(credit_report_id, report);
+        return {
+            ...dashboardRow,
+            credit_score: report.score,
+            score_band: scoreBand(report.score),
+            total_accounts: report.summary.totalAccounts,
+            active_accounts: report.summary.activeAccounts,
+            overdue_accounts: report.summary.overdueAccounts,
+            enquiries_last_6_months: report.summary.enquiriesLast6Months,
+            total_outstanding: String(report.summary.totalBalance),
+        };
+    }));
+    return { profile: profileResult.rows[0] ?? null, reports };
 };
 export const createReportPayment = async ({ userId, bureau, orderId, amount, gstAmount, gateway, }) => {
     await pool.query(`INSERT INTO payments (user_id, gateway, gateway_order_id, amount, gst_amount, status, report_bureau)
@@ -280,7 +306,7 @@ export const getReportDetail = async (userId, requestId) => {
     let report = row.normalized_report;
     if (!report || report.parserVersion !== PARSER_VERSION) {
         report = normalizeReport(row.bureau, row.raw_report);
-        await pool.query(`UPDATE credit_reports SET normalized_report = $2 WHERE id = $1`, [row.id, JSON.stringify(report)]);
+        await persistNormalizedReport(row.id, report);
     }
     return {
         ...report,
