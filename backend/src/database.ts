@@ -282,8 +282,9 @@ const VISIBLE_REQUEST = `(r.payment_id IS NOT NULL OR r.provider = 'demo')`;
 
 export const getDashboardStatus = async (userId: string) => {
   const [profileResult, reportResult] = await Promise.all([
-    pool.query<{ id: string; name_as_per_pan: string; date_of_birth: string; city: string | null; kyc_status: string }>(
-      `SELECT id, name_as_per_pan, date_of_birth, city, kyc_status FROM kyc_profiles WHERE user_id = $1 ORDER BY created_at DESC LIMIT 1`,
+    pool.query<{ id: string; name_as_per_pan: string; date_of_birth: string; city: string | null; state: string | null; pan_last4: string | null; kyc_status: string }>(
+      `SELECT id, name_as_per_pan, to_char(date_of_birth, 'YYYY-MM-DD') AS date_of_birth, city, state, pan_last4, kyc_status
+       FROM kyc_profiles WHERE user_id = $1 ORDER BY created_at DESC LIMIT 1`,
       [userId],
     ),
     pool.query<ReportSummary>(

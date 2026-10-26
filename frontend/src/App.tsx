@@ -275,11 +275,11 @@ function useAuthUser() {
 }
 
 // Opens the auth popup once per browser session, shortly after the visitor starts scrolling.
-function useScrollAuthPrompt() {
+function useScrollAuthPrompt(enabled = true) {
   const [open, setOpen] = useState(false)
 
   useEffect(() => {
-    if (sessionStorage.getItem('scorenow-auth-prompted')) return
+    if (!enabled || sessionStorage.getItem('scorenow-auth-prompted')) return
 
     const onScroll = () => {
       if (window.scrollY < 220) return
@@ -290,7 +290,7 @@ function useScrollAuthPrompt() {
 
     window.addEventListener('scroll', onScroll, { passive: true })
     return () => window.removeEventListener('scroll', onScroll)
-  }, [])
+  }, [enabled])
 
   return [open, setOpen] as const
 }
@@ -298,8 +298,8 @@ function useScrollAuthPrompt() {
 type RequireLogin = (notice: string, action: (user: AuthUser) => void) => void
 
 // Runs an action immediately for signed-in users, otherwise opens the auth popup and runs it after login.
-function useLoginGate({ redirectAfterLogin }: { redirectAfterLogin?: string } = {}) {
-  const [authOpen, setAuthOpen] = useScrollAuthPrompt()
+function useLoginGate({ redirectAfterLogin, promptOnScroll = true }: { redirectAfterLogin?: string; promptOnScroll?: boolean } = {}) {
+  const [authOpen, setAuthOpen] = useScrollAuthPrompt(promptOnScroll)
   const { user, login, logout } = useAuthUser()
   const [authNotice, setAuthNotice] = useState('')
   const pendingActionRef = useRef<((user: AuthUser) => void) | null>(null)
@@ -1135,6 +1135,8 @@ function CreditScoreEstimator() {
   )
 }
 
+const openChatEvent = 'scorenow:open-chat'
+
 function ChatAssistant({ requireLogin }: { requireLogin: RequireLogin }) {
   const [isOpen, setIsOpen] = useState(false)
   const [step, setStep] = useState(0)
@@ -1201,6 +1203,12 @@ function ChatAssistant({ requireLogin }: { requireLogin: RequireLogin }) {
     setPhoneError('')
     setStep((currentStep) => Math.max(0, currentStep - 1))
   }
+
+  useEffect(() => {
+    const open = () => setIsOpen(true)
+    window.addEventListener(openChatEvent, open)
+    return () => window.removeEventListener(openChatEvent, open)
+  }, [])
 
   useEffect(() => {
     if (!isOpen) return
@@ -1417,7 +1425,7 @@ function ReportDetailView({ user, requestId }: { user: AuthUser; requestId: stri
         {(summary.writtenOffAccounts ?? 0) > 0 && <div className="is-bad"><small>Written off / settled</small><strong>{summary.writtenOffAccounts}</strong></div>}
       </div>
 
-      {detail.scoreFactors && detail.scoreFactors.length > 0 && <article className="dashboard-card report-factors">
+      {detail.scoreFactors && detail.scoreFactors.length > 0 && <article className="dashboard-card report-factors" id="score-insights">
         <div className="dashboard-card-heading"><strong><Lightbulb /> What&apos;s affecting your score</strong><small>From {bureauLabel}</small></div>
         <ul>{detail.scoreFactors.map((factor) => (
           <li key={factor.text} className={factor.impact}>
@@ -1428,7 +1436,7 @@ function ReportDetailView({ user, requestId }: { user: AuthUser; requestId: stri
       </article>}
 
       <div className="report-detail-grid">
-        <article className="dashboard-card report-personal">
+        <article className="dashboard-card report-personal" id="personal-details">
           <div className="dashboard-card-heading"><strong><UserRound /> Personal Details</strong></div>
           <dl>
             <dt>Name</dt><dd>{personal.name || '—'}</dd>
@@ -1448,7 +1456,7 @@ function ReportDetailView({ user, requestId }: { user: AuthUser; requestId: stri
         </article>
       </div>
 
-      <article className="dashboard-card report-accounts">
+      <article className="dashboard-card report-accounts" id="credit-accounts">
         <div className="dashboard-card-heading"><strong><WalletCards /> Credit Accounts</strong><small>{detail.accounts.length} accounts</small></div>
         <div className="report-account-toolbar">
           <div className="report-account-filters" role="tablist" aria-label="Filter accounts">{accountFilters.map((filter) => {
@@ -1485,7 +1493,7 @@ function ReportDetailView({ user, requestId }: { user: AuthUser; requestId: stri
 }
 
 type DashboardStatus = {
-  profile: { id: string; name_as_per_pan: string; date_of_birth: string; city: string | null; kyc_status: string } | null
+  profile: { id: string; name_as_per_pan: string; date_of_birth: string; city: string | null; state?: string | null; pan_last4?: string | null; kyc_status: string } | null
   reports: BureauReport[]
 }
 
@@ -1605,22 +1613,12 @@ function DashboardPage({ user, onLogout }: { user: AuthUser; onLogout: () => voi
   const [loading, setLoading] = useState(true)
   const [busyBureau, setBusyBureau] = useState<BureauId | null>(null)
   const [selectedBureau, setSelectedBureau] = useState<BureauId | null>(null)
+  const [activeNav, setActiveNav] = useState('#dashboard-overview')
   const [notice, setNotice] = useState<{ tone: 'info' | 'success' | 'error'; text: string } | null>(null)
   const [simCheckout, setSimCheckout] = useState<SimulatedCheckoutState | null>(null)
   const firstName = user.full_name.trim().split(' ')[0] || 'there'
   const hour = new Date().getHours()
   const greeting = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening'
-  const sidebarItems = [
-    { icon: House, label: 'Home', active: true },
-    { icon: FileSearch, label: 'My Report' },
-    { icon: TrendingUp, label: 'Improve' },
-    { icon: Gift, label: 'Offers' },
-    { icon: CreditCard, label: 'Payments' },
-    { icon: UserRound, label: 'My Profile' },
-    { icon: Settings, label: 'Settings' },
-    { icon: CircleHelp, label: 'Help & Support' },
-  ]
-
   const loadStatus = async () => {
     setLoading(true)
     try {
@@ -1653,6 +1651,16 @@ function DashboardPage({ user, onLogout }: { user: AuthUser; onLogout: () => voi
   const activeBureau = selectedBureau && reportFor(selectedBureau)?.status === 'completed' ? selectedBureau : completedReports[0]?.bureau ?? null
   const activeReport = activeBureau ? reportFor(activeBureau) : undefined
   const price = options?.price ?? 99
+  const sidebarItems: { icon: typeof House; label: string; href: string; external?: boolean }[] = [
+    { icon: House, label: 'Overview', href: '#dashboard-overview' },
+    { icon: FileSearch, label: 'Credit reports', href: '#credit-reports' },
+    ...(activeReport ? [{ icon: FileCheck2, label: 'My report', href: '#my-report' }] : []),
+    { icon: TrendingUp, label: 'Improve score', href: '#credit-learning' },
+    { icon: Gift, label: 'Offers', href: '/#plans', external: true },
+    { icon: UserRound, label: 'My profile', href: '#my-profile' },
+    { icon: Settings, label: 'Settings', href: '#settings' },
+    { icon: CircleHelp, label: 'Help & support', href: '#help-support' },
+  ]
 
   const applyReportResult = (result: DashboardStatus, bureau: BureauId) => {
     setStatus(result)
@@ -1748,7 +1756,6 @@ function DashboardPage({ user, onLogout }: { user: AuthUser; onLogout: () => voi
     }
   }
 
-  const metric = (value: number | null | undefined) => value ?? '—'
   const scoreBandTone = (band: string | null) => {
     switch (band?.toLowerCase()) {
       case 'excellent': return 'excellent'
@@ -1784,33 +1791,44 @@ function DashboardPage({ user, onLogout }: { user: AuthUser; onLogout: () => voi
       <aside className="dashboard-sidebar">
         <Brand href="/" />
         <nav aria-label="Dashboard navigation">
-          {sidebarItems.map(({ icon: Icon, label, active }) => (
-            <button key={label} className={active ? 'active' : ''} type="button"><Icon /><span>{label}</span>{active && <ArrowRight />}</button>
+          {sidebarItems.map(({ icon: Icon, label, href, external }) => (
+            <a key={label} href={href} className={activeNav === href ? 'active' : ''} onClick={() => setActiveNav(href)}><Icon /><span>{label}</span>{!external && <ArrowRight />}</a>
           ))}
         </nav>
         <div className="dashboard-support">
           <span><MessageCircle /></span>
           <strong>Have questions?</strong>
           <p>Get expert support for your credit report, disputes, or loan options.</p>
-          <button type="button">Contact Support <ArrowRight /></button>
+          <a href="#help-support" onClick={() => setActiveNav('#help-support')}>Contact Support <ArrowRight /></a>
         </div>
       </aside>
 
       <main className="dashboard-main">
         <header className="dashboard-topbar">
-          <div className="dashboard-search"><Search /><input aria-label="Search dashboard" placeholder="Search for loans, credit cards, or learn about credit..." /></div>
+          <div className="dashboard-page-heading"><span>Score Now <b>/</b> Credit workspace</span><strong>Your dashboard</strong></div>
           <div className="dashboard-top-actions">
-            <a className="dashboard-score-cta" href="#credit-reports">Get My Credit Report <ArrowRight /></a>
+            <a className="dashboard-score-cta" href="#credit-reports">Get a credit report <ArrowRight /></a>
             <AuthAvatarButton user={user} onClick={() => undefined} onLogout={onLogout} />
           </div>
         </header>
 
         <div className="dashboard-content">
+          <div id="dashboard-overview" className="dashboard-anchor" />
           <div className="dashboard-welcome">
-            <div><span className="dashboard-kicker">YOUR CREDIT AT A GLANCE</span><h1>{greeting}, {firstName}! <span>👋</span></h1><p>{completedReports.length ? "Here's your credit health at a glance." : 'Choose a credit bureau below to fetch your first report.'}</p></div>
+            <div><span className="dashboard-kicker">CREDIT DASHBOARD</span><h1>{greeting}, {firstName}! <span>👋</span></h1><p>{completedReports.length ? 'Your credit profile, all in one place.' : 'Choose a bureau to get started with your credit report.'}</p></div>
           </div>
 
           {notice && <p className={`dashboard-notice ${notice.tone}`} role="status">{notice.text}</p>}
+
+          <section className="dashboard-grid dashboard-overview-grid" id="dashboard-overview">
+            {activeReport ? <>
+              <article className="dashboard-card score-card">
+                <div className="dashboard-card-heading"><strong>Your credit score</strong></div>
+                <div className="dashboard-score-area"><div className={`dashboard-gauge score-band-${scoreBandTone(activeReport.score_band)}`}><div className="dashboard-gauge-track" /><div className="dashboard-gauge-needle" style={{ transform: `rotate(${needleAngle}deg)` }} /><strong>{activeReport.credit_score ?? '—'}</strong><small>{activeReport.score_band || 'See full report'}</small><span className="gauge-min">300</span><span className="gauge-max">900</span></div><div className="dashboard-score-copy"><strong><ShieldCheck /> {bureauName(activeReport.bureau)}</strong><p>{activeReport.credit_score ? 'Your latest score from this bureau.' : 'Your score is available in the full report.'}</p><span>Score range <b>300–900</b></span></div></div>
+                <a className="dashboard-primary-action" href="#credit-accounts">View account details <ArrowRight /></a>
+              </article>
+            </> : <article className="dashboard-card empty-report-card"><div className="empty-dashboard-state"><FileSearch /><strong>No credit data yet</strong><span>Choose CIBIL, Equifax, or Experian above. Your score, accounts, and enquiries will appear here once the report is fetched.</span></div></article>}
+          </section>
 
           <section className="dashboard-card bureau-section" id="credit-reports">
             <div className="dashboard-card-heading"><strong>Your Credit Reports</strong><small><LockKeyhole /> ₹{price} per report · secure payment by Razorpay</small></div>
@@ -1825,12 +1843,12 @@ function DashboardPage({ user, onLogout }: { user: AuthUser; onLogout: () => voi
                   <article className={`bureau-card${activeBureau === bureau.id ? ' selected' : ''}`} key={bureau.id}>
                     <img src={bureau.logo} alt={bureau.name} />
                     <strong>{bureau.name}</strong>
-                    {report?.status === 'completed' ? <span className="bureau-status ready"><Check /> Score {report.credit_score ?? 'in full report'} · {formatDate(report.report_date)}</span>
+                    {report?.status === 'completed' ? <span className="bureau-status ready"><Check /> Report ready · {formatDate(report.report_date)}</span>
                       : report?.status === 'processing' ? <span className="bureau-status pending"><Clock3 /> Fetching report…</span>
-                        : report?.status === 'failed' ? <span className="bureau-status failed"><AlertTriangle /> {report.failure_reason || 'Fetch failed'}</span>
+                        : report?.status === 'failed' ? <span className="bureau-status failed"><AlertTriangle /> Report unavailable · retry at no extra charge</span>
                           : <span className="bureau-status">{available ? 'Not fetched yet' : 'Coming soon'}</span>}
                     <div className="bureau-actions">
-                      {report?.status === 'completed' && <button type="button" className="button button-outline" onClick={() => setSelectedBureau(bureau.id)}>View</button>}
+                      {report?.status === 'completed' && activeBureau !== bureau.id && <button type="button" className="button button-outline" onClick={() => { setSelectedBureau(bureau.id); document.getElementById('dashboard-overview')?.scrollIntoView({ behavior: 'smooth', block: 'start' }) }}>View score</button>}
                       {report?.status === 'failed'
                         ? <button type="button" className="button button-primary" disabled={Boolean(busyBureau)} onClick={() => void retryReport(report)}>{busy ? 'Fetching…' : <>Retry free <RotateCcw /></>}</button>
                         : <button type="button" className="button button-primary" disabled={!canBuy} onClick={() => void buyReport(bureau.id)}>{busy ? 'Processing…' : report?.status === 'completed' ? `Refresh · ₹${price}` : `Get report · ₹${price}`}</button>}
@@ -1851,22 +1869,46 @@ function DashboardPage({ user, onLogout }: { user: AuthUser; onLogout: () => voi
             {options && !options.paymentsEnabled && <p className="bureau-note">Online payments are being set up. Please check back shortly.</p>}
           </section>
 
-          <section className="dashboard-grid dashboard-grid-top">
-            {activeReport ? <>
-              <article className="dashboard-card score-card">
-                <div className="dashboard-card-heading"><strong>{bureauName(activeReport.bureau)} Score</strong><CircleHelp /></div>
-                <div className="dashboard-score-area"><div className={`dashboard-gauge score-band-${scoreBandTone(activeReport.score_band)}`}><div className="dashboard-gauge-track" /><div className="dashboard-gauge-needle" style={{ transform: `rotate(${needleAngle}deg)` }} /><strong>{activeReport.credit_score ?? '—'}</strong><small>{activeReport.score_band || 'See full report'}</small><span className="gauge-min">300</span><span className="gauge-max">900</span></div><div className="dashboard-score-copy"><small>Report date: {formatDate(activeReport.report_date)}</small><strong><ShieldCheck /> {bureauName(activeReport.bureau)}</strong><p>{activeReport.credit_score ? 'Your latest score from this bureau.' : 'Your score is available in the full report.'}</p></div></div>
-                {activeReport.report_url && <a className="dashboard-primary-action" href={activeReport.report_url} target="_blank" rel="noreferrer">View Full Report <ArrowRight /></a>}
-              </article>
-              <article className="dashboard-card highlights-card"><div className="dashboard-card-heading"><strong>Key Highlights</strong></div><div className="highlight-grid"><div><span className="metric-icon blue"><WalletCards /></span><strong>{metric(activeReport.total_accounts)}</strong><small>Total Accounts</small></div><div><span className="metric-icon blue"><CreditCard /></span><strong>{metric(activeReport.active_accounts)}</strong><small>Active Accounts</small></div><div><span className="metric-icon red"><AlertTriangle /></span><strong>{metric(activeReport.overdue_accounts)}</strong><small>Overdue Accounts</small></div><div><span className="metric-icon violet"><Search /></span><strong>{metric(activeReport.enquiries_last_6_months)}</strong><small>Enquiries<br />(last 6 months)</small></div></div></article>
-              <article className="dashboard-card quick-card"><div className="dashboard-card-heading"><strong>Your Reports</strong></div><div className="quick-actions">{completedReports.map((report) => <button type="button" key={report.bureau} onClick={() => setSelectedBureau(report.bureau)}><FileSearch /> {bureauName(report.bureau)} · {report.credit_score ?? '—'} <ArrowRight /></button>)}</div></article>
-            </> : <article className="dashboard-card empty-report-card"><div className="empty-dashboard-state"><FileSearch /><strong>No credit data yet</strong><span>Choose CIBIL, Equifax, or Experian above. Your score, accounts, and enquiries will appear here once the report is fetched.</span></div></article>}
+          {activeReport && <div id="my-report" className="dashboard-report-anchor"><ReportDetailView key={activeReport.request_id} user={user} requestId={activeReport.request_id} /></div>}
+
+          <section className="dashboard-grid dashboard-grid-bottom learning-only" id="credit-learning">
+            <article className="dashboard-card learning-card"><div className="dashboard-card-heading"><strong><BookOpen /> Improve your credit</strong><span className="learning-count">3 quick guides</span></div><div className="learning-list"><div><span>5 min</span><p><strong>5 Ways to Improve Your Credit Score</strong><small>Simple tips to build a stronger credit profile.</small></p></div><div><span>4 min</span><p><strong>What is a Good Credit Score?</strong><small>Understand score ranges and what they mean.</small></p></div><div><span>6 min</span><p><strong>How Credit Enquiries Affect Your Score</strong><small>Learn how to manage credit applications.</small></p></div></div></article>
           </section>
 
-          {activeReport && <ReportDetailView key={activeReport.request_id} user={user} requestId={activeReport.request_id} />}
+          <section className="dashboard-account-grid">
+            <article className="dashboard-card account-card" id="my-profile">
+              <div className="dashboard-card-heading"><strong><UserRound /> My profile</strong><span className={`kyc-badge${status.profile.kyc_status === 'verified' ? ' verified' : ''}`}>{status.profile.kyc_status === 'verified' ? <><Check /> Verified</> : status.profile.kyc_status.replace(/_/g, ' ')}</span></div>
+              <dl className="account-details">
+                <dt>Account name</dt><dd>{user.full_name}</dd>
+                <dt>Name as per PAN</dt><dd>{status.profile.name_as_per_pan}</dd>
+                <dt>PAN</dt><dd>{status.profile.pan_last4 ? `••••••${status.profile.pan_last4}` : '—'}</dd>
+                <dt>Date of birth</dt><dd>{formatDate(status.profile.date_of_birth?.slice(0, 10))}</dd>
+                <dt>Location</dt><dd>{[status.profile.city, status.profile.state].filter(Boolean).join(', ') || '—'}</dd>
+                <dt>Mobile</dt><dd>{user.mobile ? `+91 ${user.mobile}` : '—'}</dd>
+                <dt>Email</dt><dd>{user.email || '—'}</dd>
+              </dl>
+              <p className="account-note"><ShieldCheck /> Your PAN is stored encrypted. Only the last four characters are shown.</p>
+            </article>
 
-          <section className="dashboard-grid dashboard-grid-bottom learning-only">
-            <article className="dashboard-card learning-card"><div className="dashboard-card-heading"><strong><BookOpen /> Credit Learning Hub</strong><button type="button">View All <ArrowRight /></button></div><div className="learning-list"><div><span>5 min</span><p><strong>5 Ways to Improve Your Credit Score</strong><small>Simple tips to build a stronger credit profile.</small></p><ArrowRight /></div><div><span>4 min</span><p><strong>What is a Good Credit Score?</strong><small>Understand score ranges and what they mean.</small></p><ArrowRight /></div><div><span>6 min</span><p><strong>How Credit Enquiries Affect Your Score</strong><small>Learn how to manage credit applications.</small></p><ArrowRight /></div></div></article>
+            <article className="dashboard-card account-card" id="settings">
+              <div className="dashboard-card-heading"><strong><Settings /> Settings</strong></div>
+              <ul className="settings-list">
+                <li><span><Smartphone /></span><div><strong>Sign-in method</strong><small>{user.mobile ? `Mobile OTP · +91 ${user.mobile}` : user.email ? `Email · ${user.email}` : 'Score Now account'}</small></div></li>
+                <li><span><FileCheck2 /></span><div><strong>Update profile details</strong><small>To correct your PAN, name, or date of birth, contact our support team so the change can be verified.</small></div><a href="mailto:info@scorenow.in?subject=Profile%20update%20request">Request <ArrowRight /></a></li>
+                <li><span><LockKeyhole /></span><div><strong>Data &amp; privacy</strong><small>Your details are shared only with the credit bureau you choose when fetching a report.</small></div></li>
+              </ul>
+              <button type="button" className="button button-outline account-logout" onClick={onLogout}>Log out <ArrowRight /></button>
+            </article>
+          </section>
+
+          <section className="dashboard-card help-card" id="help-support">
+            <div className="dashboard-card-heading"><strong><CircleHelp /> Help &amp; support</strong><small>Mon–Sat · 10 AM – 7 PM</small></div>
+            <div className="help-options">
+              <button type="button" className="help-option" onClick={() => window.dispatchEvent(new Event(openChatEvent))}><MessageCircle /><span><strong>Chat with Neha</strong><small>Get a quick suggested next step</small></span><ArrowRight /></button>
+              <a className="help-option" href="https://wa.me/919114141011?text=Hello%20Score%20Now%2C%20I%20need%20help%20with%20my%20credit%20report." target="_blank" rel="noreferrer"><MessageCircle /><span><strong>WhatsApp</strong><small>+91 91141 41011</small></span><ArrowRight /></a>
+              <a className="help-option" href="tel:+919114141011"><Phone /><span><strong>Call an expert</strong><small>+91 91141 41011</small></span><ArrowRight /></a>
+              <a className="help-option" href="mailto:info@scorenow.in"><Mail /><span><strong>Email us</strong><small>info@scorenow.in</small></span><ArrowRight /></a>
+            </div>
           </section>
         </div>
       </main>
@@ -2137,9 +2179,14 @@ function BusinessPage() {
 }
 
 function DashboardRoute() {
-  const { user, logout } = useAuthUser()
+  const { user, logout, requireLogin, authModal } = useLoginGate({ promptOnScroll: false })
   useEffect(() => { if (!user) window.location.replace('/') }, [user])
-  return user ? <DashboardPage user={user} onLogout={logout} /> : null
+  if (!user) return null
+  return <>
+    <DashboardPage user={user} onLogout={logout} />
+    <ChatAssistant requireLogin={requireLogin} />
+    {authModal}
+  </>
 }
 
 type CibilReportResponse = {
@@ -2151,6 +2198,7 @@ type CibilReportResponse = {
 }
 
 function CreditScorePage() {
+  const { requireLogin, authModal } = useLoginGate({ promptOnScroll: false })
   const [pin, setPin] = useState('')
   const [unlocked, setUnlocked] = useState(false)
   const [accessError, setAccessError] = useState('')
@@ -2268,6 +2316,8 @@ function CreditScorePage() {
         </section>}
       </div>
       <footer className="cibil-footer">Score Now <span>·</span> Handle credit and identity data responsibly.</footer>
+      <ChatAssistant requireLogin={requireLogin} />
+      {authModal}
     </main>
   )
 }

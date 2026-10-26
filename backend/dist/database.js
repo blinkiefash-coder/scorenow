@@ -177,7 +177,8 @@ export const setUserEmailIfMissing = async (userId, email) => {
 const VISIBLE_REQUEST = `(r.payment_id IS NOT NULL OR r.provider = 'demo')`;
 export const getDashboardStatus = async (userId) => {
     const [profileResult, reportResult] = await Promise.all([
-        pool.query(`SELECT id, name_as_per_pan, date_of_birth, city, kyc_status FROM kyc_profiles WHERE user_id = $1 ORDER BY created_at DESC LIMIT 1`, [userId]),
+        pool.query(`SELECT id, name_as_per_pan, to_char(date_of_birth, 'YYYY-MM-DD') AS date_of_birth, city, state, pan_last4, kyc_status
+       FROM kyc_profiles WHERE user_id = $1 ORDER BY created_at DESC LIMIT 1`, [userId]),
         pool.query(`SELECT DISTINCT ON (r.bureau)
          r.id AS request_id, r.bureau, r.status, r.failure_reason, r.requested_at, r.provider = 'demo' AS is_demo,
          c.credit_score, c.score_band, to_char(c.report_date, 'YYYY-MM-DD') AS report_date, c.report_url,

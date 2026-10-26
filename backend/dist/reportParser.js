@@ -1,5 +1,5 @@
 // Bump when parsing changes so stored raw reports get re-normalized on next view.
-export const PARSER_VERSION = 2;
+export const PARSER_VERSION = 3;
 const isObject = (value) => Boolean(value) && typeof value === "object" && !Array.isArray(value);
 const get = (value, path) => path.split(".").reduce((current, key) => {
     if (Array.isArray(current))
@@ -230,6 +230,7 @@ const reported = (value) => {
 // Factor text is "<generic intro>. <what happened>. <how to improve>."; split it into the finding and the tip.
 const cibilScoreFactors = (borrower) => {
     const seen = new Set();
+    const seenTips = new Set();
     return asArray(get(borrower, "CreditScore.CreditScoreFactor")).filter(isObject).flatMap((factor) => {
         const texts = asArray(factor.FactorText).map(text).filter((value) => Boolean(value));
         const body = (texts.find((value) => value.startsWith("explain:")) ?? texts[0])?.replace(/^\w+:\s*/, "");
@@ -239,10 +240,15 @@ const cibilScoreFactors = (borrower) => {
         const sentences = (body.match(/[^.]+\.?/g) ?? []).map((sentence) => sentence.trim()).filter(Boolean);
         const tipStart = sentences.findIndex((sentence) => /^(One way|To maintain|To improve)/i.test(sentence));
         const finding = sentences.slice(1, tipStart === -1 ? undefined : tipStart).join(" ") || body;
+        const tip = tipStart === -1 ? null : sentences.slice(tipStart).join(" ");
+        const tipKey = tip?.replace(/\s+/g, " ").trim().toLowerCase();
+        const uniqueTip = tipKey && !seenTips.has(tipKey) ? tip : null;
+        if (tipKey)
+            seenTips.add(tipKey);
         return [{
                 impact: /negative/i.test(finding) ? "negative" : "positive",
                 text: finding,
-                tip: tipStart === -1 ? null : sentences.slice(tipStart).join(" "),
+                tip: uniqueTip,
             }];
     });
 };
