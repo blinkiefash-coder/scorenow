@@ -14,6 +14,7 @@ import {
   scoreBand,
   stateCodes,
   type Bureau,
+  type ProviderDiagnostics,
 } from "./bureaus.js";
 import {
   completeReportRequest,
@@ -309,16 +310,16 @@ app.get("/api/reports/options", (_request, response) => {
   });
 });
 
-const runReportFetch = async (userId: string, requestId: string, bureau: Bureau) => {
+const runReportFetch = async (userId: string, requestId: string, bureau: Bureau): Promise<ProviderDiagnostics | null> => {
   const applicant = await getApplicant(userId);
   if (!applicant) {
     await failReportRequest(requestId, "Complete your profile before fetching a report.");
-    return;
+    return null;
   }
   const result = await fetchBureauReport(bureau, applicant);
   if (!result.ok) {
     await failReportRequest(requestId, result.message, result.raw);
-    return;
+    return result.diagnostics;
   }
   const report = normalizeReport(bureau, result.raw);
   await completeReportRequest({
@@ -331,6 +332,7 @@ const runReportFetch = async (userId: string, requestId: string, bureau: Bureau)
     report,
     raw: result.raw,
   });
+  return result.diagnostics;
 };
 
 app.get("/api/reports/:requestId", requireUser, async (request, response) => {
@@ -453,8 +455,8 @@ app.post("/api/reports/verify", requireUser, async (request, response) => {
       response.status(409).json({ message: "This payment was already processed." });
       return;
     }
-    await runReportFetch(user.id, requestId, bureau);
-    response.json(await getDashboardStatus(user.id));
+    const providerDiagnostics = await runReportFetch(user.id, requestId, bureau);
+    response.json({ ...(await getDashboardStatus(user.id)), providerDiagnostics });
   } catch (error) {
     console.error("Report payment verification failed", error);
     response.status(500).json({ message: "Payment received, but we could not fetch the report yet. Use Retry on your dashboard." });
@@ -471,8 +473,8 @@ app.post("/api/reports/:requestId/retry", requireUser, async (request, response)
   }
   try {
     await markReportProcessing(reportRequest.id);
-    await runReportFetch(user.id, reportRequest.id, reportRequest.bureau);
-    response.json(await getDashboardStatus(user.id));
+    const providerDiagnostics = await runReportFetch(user.id, reportRequest.id, reportRequest.bureau);
+    response.json({ ...(await getDashboardStatus(user.id)), providerDiagnostics });
   } catch (error) {
     console.error("Report retry failed", error);
     response.status(500).json({ message: "Unable to fetch the report right now. Please try again." });

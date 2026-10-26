@@ -1295,6 +1295,11 @@ type BureauReport = {
   is_demo: boolean
 }
 
+type ProviderDiagnostics = {
+  request: Record<string, unknown>
+  response: { httpStatus: number | null; body: Record<string, unknown> | null }
+}
+
 type ReportDetail = {
   bureau: BureauId
   score: number | null
@@ -1513,6 +1518,7 @@ function ProfileOnboarding({ user, onComplete, onLogout }: { user: AuthUser; onC
 function DashboardPage({ user, onLogout }: { user: AuthUser; onLogout: () => void }) {
   const [status, setStatus] = useState<DashboardStatus | null>(null)
   const [options, setOptions] = useState<ReportOptions | null>(null)
+  const [providerDiagnostics, setProviderDiagnostics] = useState<Partial<Record<BureauId, ProviderDiagnostics>>>({})
   const [loading, setLoading] = useState(true)
   const [busyBureau, setBusyBureau] = useState<BureauId | null>(null)
   const [selectedBureau, setSelectedBureau] = useState<BureauId | null>(null)
@@ -1584,8 +1590,11 @@ function DashboardPage({ user, onLogout }: { user: AuthUser; onLogout: () => voi
         headers: { 'Content-Type': 'application/json', ...authHeaders(user) },
         body: JSON.stringify({ orderId: payment.razorpay_order_id, paymentId: payment.razorpay_payment_id, signature: payment.razorpay_signature }),
       })
-      const result = await response.json() as DashboardStatus & { message?: string }
+      const result = await response.json() as DashboardStatus & { message?: string; providerDiagnostics?: ProviderDiagnostics | null }
       if (!response.ok) throw new Error(result.message || 'Payment verification failed.')
+      if (result.providerDiagnostics) {
+        setProviderDiagnostics((previous) => ({ ...previous, [bureau]: result.providerDiagnostics! }))
+      }
       applyReportResult(result, bureau)
     } catch (error) {
       setNotice({ tone: 'error', text: error instanceof Error ? error.message : 'Payment verification failed.' })
@@ -1643,8 +1652,11 @@ function DashboardPage({ user, onLogout }: { user: AuthUser; onLogout: () => voi
     setNotice({ tone: 'info', text: `Fetching your ${bureauName(report.bureau)} report…` })
     try {
       const response = await fetch(`${apiUrl}/api/reports/${report.request_id}/retry`, { method: 'POST', headers: authHeaders(user) })
-      const result = await response.json() as DashboardStatus & { message?: string }
+      const result = await response.json() as DashboardStatus & { message?: string; providerDiagnostics?: ProviderDiagnostics | null }
       if (!response.ok) throw new Error(result.message || 'Unable to fetch the report.')
+      if (result.providerDiagnostics) {
+        setProviderDiagnostics((previous) => ({ ...previous, [report.bureau]: result.providerDiagnostics! }))
+      }
       applyReportResult(result, report.bureau)
     } catch (error) {
       setNotice({ tone: 'error', text: error instanceof Error ? error.message : 'Unable to fetch the report.' })
@@ -1713,6 +1725,7 @@ function DashboardPage({ user, onLogout }: { user: AuthUser; onLogout: () => voi
             <div className="bureau-grid">
               {bureauCatalog.map((bureau) => {
                 const report = reportFor(bureau.id)
+                const diagnostics = providerDiagnostics[bureau.id]
                 const available = options?.bureaus.find((item) => item.id === bureau.id)?.available ?? false
                 const busy = busyBureau === bureau.id
                 const canBuy = available && Boolean(options?.paymentsEnabled) && !busyBureau && report?.status !== 'processing'
@@ -1731,6 +1744,14 @@ function DashboardPage({ user, onLogout }: { user: AuthUser; onLogout: () => voi
                         : <button type="button" className="button button-primary" disabled={!canBuy} onClick={() => void buyReport(bureau.id)}>{busy ? 'Processing…' : report?.status === 'completed' ? `Refresh · ₹${price}` : `Get report · ₹${price}`}</button>}
                       {options?.demoMode && <button type="button" className="button button-outline" disabled={Boolean(busyBureau)} onClick={() => void loadDemoReport(bureau.id)}>Load demo</button>}
                     </div>
+                    {diagnostics && <details className="bureau-diagnostics">
+                      <summary>View API request and response</summary>
+                      <p>Provider token is excluded. The request shows your report details.</p>
+                      <strong>Request sent</strong>
+                      <pre>{JSON.stringify(diagnostics.request, null, 2)}</pre>
+                      <strong>Provider response</strong>
+                      <pre>{JSON.stringify(diagnostics.response, null, 2)}</pre>
+                    </details>}
                   </article>
                 )
               })}

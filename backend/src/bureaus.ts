@@ -103,8 +103,13 @@ export const scoreBand = (score: number | null) => {
 };
 
 export type BureauResult =
-  | { ok: true; providerTxnId: string | null; reportUrl: string | null; raw: unknown }
-  | { ok: false; message: string; raw: unknown };
+  | { ok: true; providerTxnId: string | null; reportUrl: string | null; raw: unknown; diagnostics: ProviderDiagnostics }
+  | { ok: false; message: string; raw: unknown; diagnostics: ProviderDiagnostics | null };
+
+export type ProviderDiagnostics = {
+  request: Record<string, unknown>;
+  response: { httpStatus: number | null; body: Record<string, unknown> | null };
+};
 
 const buildPayload = (bureau: Bureau, token: string, applicant: Applicant) => {
   const nameParts = applicant.fullName.trim().split(/\s+/);
@@ -148,19 +153,26 @@ const buildPayload = (bureau: Bureau, token: string, applicant: Applicant) => {
 
 export const fetchBureauReport = async (bureau: Bureau, applicant: Applicant): Promise<BureauResult> => {
   const { url, token } = providerConfig(bureau);
-  if (!url || !token) return { ok: false, message: `${bureauNames[bureau]} API is not configured.`, raw: null };
+  if (!url || !token) return { ok: false, message: `${bureauNames[bureau]} API is not configured.`, raw: null, diagnostics: null };
+
+  const payload = buildPayload(bureau, token, applicant);
+  const diagnostics: ProviderDiagnostics = {
+    request: Object.fromEntries(Object.entries(payload).filter(([key]) => key !== "token")),
+    response: { httpStatus: null, body: null },
+  };
 
   let response: Response;
   try {
     response = await fetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(buildPayload(bureau, token, applicant)),
+      body: JSON.stringify(payload),
       signal: AbortSignal.timeout(90000),
     });
   } catch (error) {
     console.error(`${bureau} report request failed`, error);
-    return { ok: false, message: `Unable to reach the ${bureauNames[bureau]} report provider.`, raw: null };
+    diagnostics.response.body = { message: `Unable to reach the ${bureauNames[bureau]} report provider.` };
+    return { ok: false, message: `Unable to reach the ${bureauNames[bureau]} report provider.`, raw: null, diagnostics };
   }
 
   const body = await response.json().catch(() => null) as {
@@ -172,9 +184,16 @@ export const fetchBureauReport = async (bureau: Bureau, applicant: Applicant): P
     data?: { data?: { htmlUrl?: string } };
   } | null;
 
+  const safeResponseBody = body && Object.fromEntries(
+    ["status", "statuscode", "txn_id", "txn_status", "message", "error", "error_code"]
+      .filter((key) => key in body)
+      .map((key) => [key, body[key as keyof typeof body]]),
+  );
+  diagnostics.response = { httpStatus: response.status, body: safeResponseBody ?? null };
+
   // Payprime errors come back as HTTP 200 with `status` set to an error string, so only `status: true` counts as success.
   if (!response.ok || !body || body.status !== true || (body.txn_status && body.txn_status !== "success")) {
-    return { ok: false, message: body?.message || `The ${bureauNames[bureau]} provider could not generate your report.`, raw: body };
+    return { ok: false, message: body?.message || `The ${bureauNames[bureau]} provider could not generate your report.`, raw: body, diagnostics };
   }
 
   return {
@@ -182,5 +201,6 @@ export const fetchBureauReport = async (bureau: Bureau, applicant: Applicant): P
     providerTxnId: body.txn_id ?? null,
     reportUrl: body.data?.data?.htmlUrl ?? null,
     raw: body,
+    diagnostics,
   };
 };
