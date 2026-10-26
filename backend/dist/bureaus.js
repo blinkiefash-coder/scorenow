@@ -63,23 +63,27 @@ export const stateCodes = {
     "Telangana": "36",
     "Ladakh": "38",
 };
-// Equifax and Experian only need name, PAN and mobile; CIBIL also needs address, email, DOB and gender.
+// Equifax and CIBIL need address, email, DOB; Experian only needs name, PAN and mobile.
 export const missingApplicantFields = (bureau, applicant) => {
     const missing = [];
-    if (bureau !== "cibil")
+    if (bureau === "experian" || bureau === "crif")
         return missing;
     if (!applicant.addressLine1)
         missing.push("address");
     if (!applicant.city)
         missing.push("city");
-    if (!applicant.state || !stateCodes[applicant.state])
+    if (!applicant.state)
         missing.push("state");
     if (!applicant.pincode || !/^\d{6}$/.test(applicant.pincode))
         missing.push("PIN code");
-    if (!applicant.email)
-        missing.push("email");
-    if (applicant.gender !== "male" && applicant.gender !== "female")
-        missing.push("gender (male/female)");
+    if (!applicant.dateOfBirth)
+        missing.push("date of birth");
+    if (bureau === "cibil") {
+        if (!applicant.email)
+            missing.push("email");
+        if (applicant.gender !== "male" && applicant.gender !== "female")
+            missing.push("gender (male/female)");
+    }
     return missing;
 };
 export const scoreBand = (score) => {
@@ -143,15 +147,25 @@ const buildPayload = (bureau, token, applicant) => {
     const firstName = nameParts.length > 1 ? nameParts.slice(0, -1).join(" ") : nameParts[0];
     const lastName = nameParts.length > 1 ? nameParts[nameParts.length - 1] : nameParts[0];
     if (bureau === "equifax") {
+        const consentTimestamp = new Date().toISOString();
+        const consentIpAddress = "0.0.0.0";
         return {
             token,
-            first_name: firstName,
-            last_name: lastName,
+            name: applicant.fullName,
             id_type: "pan",
             id_number: applicant.pan,
             phone: applicant.mobile,
+            dob: applicant.dateOfBirth,
+            state: applicant.state,
+            address: applicant.addressLine1,
+            pincode: applicant.pincode,
             consent_text: "I approve TransBnk to capture and process user data based on user consent",
-            consent: true,
+            consent: {
+                consentFlag: true,
+                consentTimestamp,
+                consentIpAddress,
+                consentMessageId: "CM_1",
+            },
         };
     }
     if (bureau === "experian") {
