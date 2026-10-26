@@ -414,7 +414,7 @@ app.post("/api/reports/order", requireUser, async (request, response) => {
   const user = sessionUser(response);
   const bureau = request.body.bureau;
   if (!isBureau(bureau)) {
-    response.status(400).json({ message: "Choose CIBIL, Equifax, or Experian." });
+    response.status(400).json({ message: "Choose a valid credit bureau (CIBIL, Equifax, Experian, or CRIF)." });
     return;
   }
   if (!isBureauAvailable(bureau)) {
@@ -598,6 +598,78 @@ app.post("/api/cibil-report", async (request, response) => {
   } catch (error) {
     console.error("CIBIL report request failed", error);
     response.status(502).json({ message: "Unable to reach the CIBIL report provider. Please try again." });
+  }
+});
+
+// Equifax report endpoint
+app.post("/api/equifax-report", requireUser, async (request, response) => {
+  const user = sessionUser(response);
+
+  try {
+    const applicant = await getApplicant(user.id);
+    if (!applicant) {
+      response.status(400).json({ message: "Complete your profile before fetching a report." });
+      return;
+    }
+
+    const missing = missingApplicantFields("equifax", applicant);
+    if (missing.length) {
+      response.status(400).json({ message: `Add your ${missing.join(", ")} to your profile to get an Equifax report.` });
+      return;
+    }
+
+    const result = await fetchBureauReport("equifax", applicant);
+    if (!result.ok) {
+      response.status(400).json({ message: result.message, diagnostics: result.diagnostics });
+      return;
+    }
+
+    response.json({
+      ok: true,
+      message: "Equifax report fetched successfully",
+      data: result.raw,
+      reportUrl: result.reportUrl,
+      providerTxnId: result.providerTxnId,
+    });
+  } catch (error) {
+    console.error("Equifax report request failed", error);
+    response.status(502).json({ message: "Unable to reach the Equifax report provider. Please try again." });
+  }
+});
+
+// CRIF report endpoint
+app.post("/api/crif-report", requireUser, async (request, response) => {
+  const user = sessionUser(response);
+
+  try {
+    const applicant = await getApplicant(user.id);
+    if (!applicant) {
+      response.status(400).json({ message: "Complete your profile before fetching a report." });
+      return;
+    }
+
+    const missing = missingApplicantFields("crif", applicant);
+    if (missing.length) {
+      response.status(400).json({ message: `Add your ${missing.join(", ")} to your profile to get a CRIF report.` });
+      return;
+    }
+
+    const result = await fetchBureauReport("crif", applicant);
+    if (!result.ok) {
+      response.status(400).json({ message: result.message, diagnostics: result.diagnostics });
+      return;
+    }
+
+    response.json({
+      ok: true,
+      message: "CRIF report fetched successfully",
+      data: result.raw,
+      reportUrl: result.reportUrl,
+      providerTxnId: result.providerTxnId,
+    });
+  } catch (error) {
+    console.error("CRIF report request failed", error);
+    response.status(502).json({ message: "Unable to reach the CRIF report provider. Please try again." });
   }
 });
 
