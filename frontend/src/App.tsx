@@ -2323,23 +2323,186 @@ function CreditScorePage() {
   )
 }
 
+function AdminPage() {
+  const [token, setToken] = useState(() => sessionStorage.getItem('scorenow-admin-token') || '')
+  const [adminId, setAdminId] = useState('')
+  const [authState, setAuthState] = useState<'checking' | 'signed-out' | 'signed-in'>(token ? 'checking' : 'signed-out')
+  const [loginError, setLoginError] = useState('')
+  const [reportError, setReportError] = useState('')
+  const [loading, setLoading] = useState(false)
+  const [bureau, setBureau] = useState<BureauId>('cibil')
+  const [report, setReport] = useState<ReportDetail | null>(null)
+
+  useEffect(() => {
+    if (!token) return
+    let cancelled = false
+    fetch(`${apiUrl}/api/admin/session`, { headers: { Authorization: `Bearer ${token}` } })
+      .then(async (response) => {
+        const result = await response.json() as { adminId?: string }
+        if (!response.ok) throw new Error('Admin session expired. Sign in again.')
+        if (!cancelled) {
+          setAdminId(result.adminId || 'Admin')
+          setAuthState('signed-in')
+        }
+      })
+      .catch(() => {
+        sessionStorage.removeItem('scorenow-admin-token')
+        if (!cancelled) {
+          setToken('')
+          setAuthState('signed-out')
+        }
+      })
+    return () => { cancelled = true }
+  }, [token])
+
+  const signIn = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    setLoginError('')
+    setLoading(true)
+    const data = new FormData(event.currentTarget)
+    try {
+      const response = await fetch(`${apiUrl}/api/admin/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: data.get('id'), password: data.get('password'), pin: data.get('pin') }),
+      })
+      const result = await response.json() as { token?: string; adminId?: string; message?: string }
+      if (!response.ok || !result.token) throw new Error(result.message || 'Unable to sign in.')
+      sessionStorage.setItem('scorenow-admin-token', result.token)
+      setAdminId(result.adminId || 'Admin')
+      setToken(result.token)
+      setAuthState('signed-in')
+    } catch (error) {
+      setLoginError(error instanceof Error ? error.message : 'Unable to sign in.')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const signOut = async () => {
+    if (token) await fetch(`${apiUrl}/api/admin/logout`, { method: 'POST', headers: { Authorization: `Bearer ${token}` } }).catch(() => undefined)
+    sessionStorage.removeItem('scorenow-admin-token')
+    setToken('')
+    setAdminId('')
+    setReport(null)
+    setAuthState('signed-out')
+  }
+
+  const fetchReport = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    setReport(null)
+    setReportError('')
+    setLoading(true)
+    const data = new FormData(event.currentTarget)
+    try {
+      const response = await fetch(`${apiUrl}/api/admin/reports`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({
+          bureau,
+          fullName: data.get('fullName'),
+          pan: data.get('pan'),
+          dateOfBirth: data.get('dateOfBirth'),
+          gender: data.get('gender'),
+          mobile: data.get('mobile'),
+          email: data.get('email'),
+          addressLine1: data.get('addressLine1'),
+          city: data.get('city'),
+          state: data.get('state'),
+          pincode: data.get('pincode'),
+          consent: data.get('clientConsent') === 'on',
+        }),
+      })
+      const result = await response.json() as { report?: ReportDetail; message?: string }
+      if (response.status === 401) {
+        await signOut()
+        throw new Error('Admin session expired. Sign in again.')
+      }
+      if (!response.ok || !result.report) throw new Error(result.message || 'Unable to fetch this report.')
+      setReport(result.report)
+    } catch (error) {
+      setReportError(error instanceof Error ? error.message : 'Unable to fetch this report.')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  if (authState === 'checking') return <div className="admin-loading"><RotateCcw /> Verifying admin session…</div>
+
+  return (
+    <main className="admin-shell">
+      <header className="admin-header"><Brand href="/" /><div><span>SECURE OPERATIONS</span><strong>{authState === 'signed-in' ? adminId : 'Administrator access'}</strong></div>{authState === 'signed-in' && <button className="button button-outline" type="button" onClick={() => void signOut()}><LockKeyhole /> Sign out</button>}</header>
+      {authState === 'signed-out' ? <section className="admin-login-wrap">
+        <div className="admin-heading"><span>PRIVATE WORKSPACE</span><h1>Administrator sign in</h1><p>Use your configured administrator ID, password, and PIN.</p></div>
+        <form className="dashboard-card admin-login-form" onSubmit={signIn}>
+          <label>Administrator ID<input name="id" autoComplete="username" required /></label>
+          <label>Password<input name="password" type="password" autoComplete="current-password" required /></label>
+          <label>Security PIN<input name="pin" type="password" inputMode="numeric" pattern="[0-9]{6}" maxLength={6} autoComplete="one-time-code" required /></label>
+          {loginError && <p className="dashboard-notice error" role="alert">{loginError}</p>}
+          <button className="button button-primary" type="submit" disabled={loading}>{loading ? 'Signing in…' : <>Sign in <ArrowRight /></>}</button>
+        </form>
+      </section> : <div className="admin-content">
+        <div className="admin-heading"><span>CLIENT REPORTS</span><h1>Fetch a bureau report</h1><p>Only proceed with the client’s informed authorization. Bureau requests may incur provider charges.</p></div>
+        <form className="dashboard-card admin-report-form" onSubmit={(event) => void fetchReport(event)}>
+          <div className="admin-form-grid">
+            <label>Bureau<select value={bureau} onChange={(event) => setBureau(event.target.value as BureauId)}>{bureauCatalog.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
+            <label>Full name<input name="fullName" autoComplete="name" required /></label>
+            <label>PAN<input name="pan" autoCapitalize="characters" pattern="[A-Za-z]{5}[0-9]{4}[A-Za-z]" maxLength={10} required /></label>
+            <label>Date of birth<input name="dateOfBirth" type="date" required /></label>
+            <label>Mobile number<input name="mobile" type="tel" inputMode="numeric" pattern="[0-9]{10}" maxLength={10} autoComplete="tel-national" required /></label>
+            <label>Email<input name="email" type="email" autoComplete="email" /></label>
+            <label className="admin-field-wide">Address<input name="addressLine1" autoComplete="street-address" required /></label>
+            <label>City<input name="city" autoComplete="address-level2" required /></label>
+            <label>State<select name="state" required defaultValue=""><option value="" disabled>Select state</option>{indianStates.map((state) => <option key={state}>{state}</option>)}</select></label>
+            <label>PIN code<input name="pincode" inputMode="numeric" pattern="[0-9]{6}" maxLength={6} autoComplete="postal-code" required /></label>
+            <label>Gender<select name="gender" required defaultValue=""><option value="" disabled>Select</option><option value="female">Female</option><option value="male">Male</option><option value="other">Other</option></select></label>
+          </div>
+          <label className="admin-consent"><input type="checkbox" name="clientConsent" required /><span>I confirm the client has authorized Score Now to submit these details to the selected credit bureau for this report request.</span></label>
+          {reportError && <p className="dashboard-notice error" role="alert">{reportError}</p>}
+          <button className="button button-primary" type="submit" disabled={loading}>{loading ? 'Requesting report…' : <>Fetch {bureauCatalog.find((item) => item.id === bureau)?.name} report <ArrowRight /></>}</button>
+        </form>
+        {report && <section className="admin-report-result" aria-live="polite">
+          <div className="admin-result-heading"><div><span>{bureauCatalog.find((item) => item.id === report.bureau)?.name} REPORT</span><h2>{report.personal.name || 'Client report'}</h2></div><strong>{report.score ?? '—'}<small>{report.score ? 'Credit score' : 'Score unavailable'}</small></strong></div>
+          <div className="report-summary-strip">
+            <div><small>Total accounts</small><strong>{report.summary.totalAccounts}</strong></div>
+            <div><small>Active</small><strong>{report.summary.activeAccounts}</strong></div>
+            <div><small>Closed</small><strong>{report.summary.closedAccounts}</strong></div>
+            <div><small>Overdue accounts</small><strong>{report.summary.overdueAccounts}</strong></div>
+            <div><small>Outstanding</small><strong>{formatMoney(report.summary.totalBalance)}</strong></div>
+            <div><small>Overdue amount</small><strong>{formatMoney(report.summary.totalOverdue)}</strong></div>
+            <div><small>Enquiries (6 months)</small><strong>{report.summary.enquiriesLast6Months}</strong></div>
+          </div>
+          <article className="dashboard-card admin-report-personal"><div className="dashboard-card-heading"><strong>Client details</strong></div><dl><dt>PAN</dt><dd>{report.personal.pan || '—'}</dd><dt>Date of birth</dt><dd>{formatDate(report.personal.dateOfBirth)}</dd><dt>Phone</dt><dd>{report.personal.phones.join(', ') || '—'}</dd><dt>Email</dt><dd>{report.personal.emails.join(', ') || '—'}</dd><dt>Address</dt><dd>{report.personal.addresses.join('; ') || '—'}</dd></dl></article>
+          <article className="dashboard-card report-enquiries"><div className="dashboard-card-heading"><strong>Credit enquiries</strong><small>{report.enquiries.length} total</small></div>{report.enquiries.length ? <ul>{report.enquiries.map((item, index) => <li key={`${item.lender}-${index}`}><div><strong>{item.lender}</strong><small>{item.purpose || 'Credit enquiry'}{item.amount ? ` · ${formatMoney(item.amount)}` : ''}</small></div><time>{formatDate(item.date)}</time></li>)}</ul> : <p className="report-empty">No enquiries reported.</p>}</article>
+          <article className="dashboard-card report-accounts"><div className="dashboard-card-heading"><strong>Credit accounts</strong><small>{report.accounts.length} accounts</small></div>{report.accounts.length ? <div className="report-account-list">{report.accounts.map((account, index) => <div className={`report-account ${account.status}`} key={`${account.lender}-${account.accountNumber}-${index}`}><div className="report-account-head"><div><strong>{account.lender}</strong><small>{account.type}{account.accountNumber ? ` · ${account.accountNumber}` : ''}</small></div><span className={`account-chip ${needsAttention(account) ? 'overdue' : account.status}`}>{accountFlag(account).label}</span></div><dl className="report-account-figures"><div><dt>Balance</dt><dd>{formatMoney(account.currentBalance)}</dd></div><div><dt>Limit</dt><dd>{formatMoney(account.creditLimit)}</dd></div><div><dt>Overdue</dt><dd>{formatMoney(account.overdueAmount)}</dd></div><div><dt>Opened</dt><dd>{formatDate(account.openedOn)}</dd></div></dl></div>)}</div> : <p className="report-empty">No accounts returned by the bureau.</p>}</article>
+        </section>}
+      </div>}
+    </main>
+  )
+}
+
 function App() {
   const pathname = window.location.pathname.replace(/\/$/, '')
   useEffect(() => {
     const isBusinessPage = pathname === '/business'
     const isCreditScorePage = pathname === '/creditscore'
+    const isAdminPage = pathname === '/admin'
     const title = isCreditScorePage
       ? 'Credit Score Report Request | Score Now'
-      : isBusinessPage
+      : isAdminPage
+        ? 'Administrator | Score Now'
+        : isBusinessPage
         ? 'Business Credit Report & CMR Guidance | Score Now'
         : 'Credit Score Guidance & Report Help in India | Score Now'
     const description = isBusinessPage
       ? 'Understand your commercial credit report, identify CMR issues, and get practical business credit guidance from Score Now.'
-      : isCreditScorePage
+      : isAdminPage
+        ? 'Private Score Now administration workspace.'
+        : isCreditScorePage
         ? 'Securely request a CIBIL credit report through Score Now. This private report request page is restricted to authorised use.'
         : 'Get practical credit score and credit report guidance in India. Score Now helps you understand CIBIL reports, identify errors, and plan next steps.'
     const canonicalUrl = `https://scorenow.in${pathname || '/'}`
-    const robotsContent = isCreditScorePage ? 'noindex,nofollow,noarchive' : 'index,follow,max-image-preview:large'
+    const robotsContent = isCreditScorePage || isAdminPage ? 'noindex,nofollow,noarchive' : 'index,follow,max-image-preview:large'
 
     document.title = title
     const updateMeta = (selector: string, attribute: string, value: string) => {
@@ -2358,6 +2521,7 @@ function App() {
 
   if (pathname === '/creditscore') return <CreditScorePage />
   if (pathname === '/dashboard') return <DashboardRoute />
+  if (pathname === '/admin') return <AdminPage />
   return pathname === '/business' ? <BusinessPage /> : <HomePage />
 }
 

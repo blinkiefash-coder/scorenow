@@ -5,7 +5,9 @@
     { "source": "/creditscore", "destination": "/" },
     { "source": "/creditscore/", "destination": "/" },
     { "source": "/dashboard", "destination": "/" },
-    { "source": "/dashboard/", "destination": "/" }
+    { "source": "/dashboard/", "destination": "/" },
+    { "source": "/admin", "destination": "/" },
+    { "source": "/admin/", "destination": "/" }
   ],
   "headers": [
     {
@@ -14,6 +16,14 @@
     },
     {
       "source": "/creditscore/",
+      "headers": [{ "key": "X-Robots-Tag", "value": "noindex, nofollow, noarchive" }]
+    },
+    {
+      "source": "/admin",
+      "headers": [{ "key": "X-Robots-Tag", "value": "noindex, nofollow, noarchive" }]
+    },
+    {
+      "source": "/admin/",
       "headers": [{ "key": "X-Robots-Tag", "value": "noindex, nofollow, noarchive" }]
     }
   ]

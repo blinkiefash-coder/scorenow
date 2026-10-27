@@ -49,6 +49,38 @@ export const initializeDatabase = async () => {
   await pool.query(`ALTER TABLE credit_reports ADD COLUMN IF NOT EXISTS normalized_report JSONB`);
   await pool.query(`ALTER TABLE credit_report_requests ADD COLUMN IF NOT EXISTS provider_response JSONB`);
   await pool.query(`ALTER TABLE credit_reports ADD COLUMN IF NOT EXISTS report_pdf BYTEA`);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS admin_sessions (
+      token_hash TEXT PRIMARY KEY,
+      admin_id TEXT NOT NULL,
+      ip_address TEXT,
+      user_agent TEXT,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      expires_at TIMESTAMPTZ NOT NULL,
+      revoked_at TIMESTAMPTZ
+    )
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS admin_report_audit (
+      id BIGSERIAL PRIMARY KEY,
+      admin_id TEXT NOT NULL,
+      bureau TEXT NOT NULL,
+      pan_last4 TEXT NOT NULL,
+      mobile_last4 TEXT NOT NULL,
+      consent_granted BOOLEAN NOT NULL,
+      consent_text_version TEXT NOT NULL,
+      consent_ip_address TEXT,
+      status TEXT NOT NULL CHECK (status IN ('processing', 'completed', 'failed')),
+      provider_transaction_id TEXT,
+      credit_score INTEGER,
+      failure_reason TEXT,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      completed_at TIMESTAMPTZ
+    )
+  `);
+  await pool.query(`CREATE INDEX IF NOT EXISTS admin_report_audit_created_at_idx ON admin_report_audit (created_at DESC)`);
 };
 
 const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
@@ -78,6 +110,76 @@ export const findSessionUser = async (token: string) => {
 
 export const revokeSession = async (token: string) => {
   await pool.query(`UPDATE user_sessions SET revoked_at = NOW() WHERE token_hash = $1 AND revoked_at IS NULL`, [hashToken(token)]);
+};
+
+const ADMIN_SESSION_TTL_MS = 12 * 60 * 60 * 1000;
+
+export const createAdminSession = async ({ adminId, ipAddress, userAgent }: { adminId: string; ipAddress?: string; userAgent?: string }) => {
+  const token = randomBytes(32).toString("hex");
+  await pool.query(
+    `INSERT INTO admin_sessions (token_hash, admin_id, ip_address, user_agent, expires_at)
+     VALUES ($1, $2, $3, $4, $5)`,
+    [hashToken(token), adminId, ipAddress || null, userAgent?.slice(0, 500) || null, new Date(Date.now() + ADMIN_SESSION_TTL_MS)],
+  );
+  return token;
+};
+
+export const findAdminSession = async (token: string) => {
+  if (!/^[0-9a-f]{64}$/.test(token)) return null;
+  const { rows } = await pool.query<{ admin_id: string }>(
+    `SELECT admin_id FROM admin_sessions
+     WHERE token_hash = $1 AND revoked_at IS NULL AND expires_at > NOW()`,
+    [hashToken(token)],
+  );
+  return rows[0] ?? null;
+};
+
+export const revokeAdminSession = async (token: string) => {
+  await pool.query(`UPDATE admin_sessions SET revoked_at = NOW() WHERE token_hash = $1 AND revoked_at IS NULL`, [hashToken(token)]);
+};
+
+export const createAdminReportAudit = async ({
+  adminId,
+  bureau,
+  panLast4,
+  mobileLast4,
+  consentIpAddress,
+}: {
+  adminId: string;
+  bureau: Bureau;
+  panLast4: string;
+  mobileLast4: string;
+  consentIpAddress: string;
+}) => {
+  const { rows } = await pool.query<{ id: number }>(
+    `INSERT INTO admin_report_audit
+       (admin_id, bureau, pan_last4, mobile_last4, consent_granted, consent_text_version, consent_ip_address, status)
+     VALUES ($1, $2, $3, $4, TRUE, 'admin-client-consent-v1', $5, 'processing')
+     RETURNING id`,
+    [adminId, bureau, panLast4, mobileLast4, consentIpAddress],
+  );
+  return rows[0].id;
+};
+
+export const completeAdminReportAudit = async ({
+  auditId,
+  status,
+  providerTransactionId,
+  creditScore,
+  failureReason,
+}: {
+  auditId: number;
+  status: "completed" | "failed";
+  providerTransactionId: string | null;
+  creditScore: number | null;
+  failureReason: string | null;
+}) => {
+  await pool.query(
+    `UPDATE admin_report_audit SET status = $2, provider_transaction_id = $3, credit_score = $4,
+       failure_reason = $5, completed_at = NOW()
+     WHERE id = $1`,
+    [auditId, status, providerTransactionId, creditScore, failureReason?.slice(0, 500) ?? null],
+  );
 };
 
 const OTP_TTL_MS = 5 * 60 * 1000;

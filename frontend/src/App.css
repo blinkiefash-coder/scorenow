@@ -1099,6 +1099,27 @@ footer { background: #071238; color: #bac5dc; padding: 65px 0 22px; }.footer-gri
   .learning-card { padding: 18px; }
 }
 
+.admin-shell { min-height: 100vh; color: var(--navy); background: linear-gradient(135deg, #f3f7fc 0%, #fff 58%, #f5f8fc 100%); }
+.admin-header { min-height: 76px; display: flex; align-items: center; gap: 20px; padding: 10px clamp(18px, 5vw, 64px); border-bottom: 1px solid #e1e9f2; background: rgba(255,255,255,.92); }
+.admin-header .brand { margin-right: auto; }.admin-header .brand img { width: 148px; height: 50px; object-fit: contain; }
+.admin-header > div { display: grid; gap: 3px; }.admin-header > div span, .admin-heading > span, .admin-result-heading > div > span { color: #54708e; font-size: 10px; font-weight: 850; letter-spacing: .12em; }.admin-header > div strong { font-size: 12px; }
+.admin-header .button { min-height: 38px; display: inline-flex; align-items: center; gap: 7px; }.admin-header .button svg { width: 15px; }
+.admin-login-wrap { width: min(460px, calc(100% - 32px)); margin: 0 auto; padding: 64px 0; }
+.admin-content { width: min(1120px, calc(100% - 40px)); margin: 0 auto; padding: 38px 0 64px; }
+.admin-heading { margin: 0 0 22px; }.admin-heading h1 { margin: 8px 0; color: #10234e; font-family: 'Sora Variable', sans-serif; font-size: 28px; line-height: 1.2; }.admin-heading p { max-width: 700px; margin: 0; color: var(--muted); font-size: 13px; line-height: 1.55; }
+.admin-login-form { display: grid; gap: 14px; padding: 24px; }.admin-login-form label, .admin-form-grid label { display: grid; gap: 6px; color: #263a59; font-size: 11px; font-weight: 800; }
+.admin-login-form input, .admin-form-grid input, .admin-form-grid select { width: 100%; min-height: 42px; padding: 0 11px; border: 1px solid #d8e2ee; border-radius: 6px; outline: none; background: #fff; color: var(--navy); font-size: 13px; }
+.admin-login-form input:focus, .admin-form-grid :is(input,select):focus { border-color: #356bbb; box-shadow: 0 0 0 3px #eaf2ff; }
+.admin-login-form .button, .admin-report-form > .button { min-height: 44px; display: inline-flex; align-items: center; justify-content: center; gap: 8px; }.admin-login-form .button svg, .admin-report-form > .button svg { width: 16px; }
+.admin-report-form { padding: 24px; }.admin-form-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }.admin-form-grid .admin-field-wide { grid-column: span 2; }
+.admin-consent { display: flex; align-items: flex-start; gap: 9px; margin: 19px 0; color: #475b77; font-size: 12px; font-weight: 650; line-height: 1.5; }.admin-consent input { width: 16px; height: 16px; margin: 2px 0 0; accent-color: var(--blue); flex: none; }
+.admin-report-form > .dashboard-notice { margin-bottom: 14px; }.admin-report-result { display: grid; gap: 14px; margin-top: 24px; }
+.admin-result-heading { display: flex; align-items: center; justify-content: space-between; gap: 18px; padding: 20px 24px; border: 1px solid #dce6f2; border-radius: 8px; background: #fff; }.admin-result-heading h2 { margin: 5px 0 0; font-family: 'Sora Variable', sans-serif; font-size: 20px; }.admin-result-heading > strong { display: grid; justify-items: end; color: #0c8b59; font-family: 'Sora Variable', sans-serif; font-size: 28px; }.admin-result-heading > strong small { color: var(--muted); font: 700 10px 'Manrope Variable', sans-serif; }
+.admin-report-personal dl { display: grid; grid-template-columns: 150px minmax(0, 1fr); gap: 9px 14px; margin: 0; font-size: 12px; }.admin-report-personal dt { color: var(--muted); font-weight: 750; }.admin-report-personal dd { margin: 0; overflow-wrap: anywhere; color: var(--navy); font-weight: 700; }
+.admin-loading { min-height: 100vh; display: flex; align-items: center; justify-content: center; gap: 10px; color: var(--muted); font-size: 13px; }.admin-loading svg { width: 17px; animation: spin 1s linear infinite; }
+@media (max-width: 760px) { .admin-header { min-height: 66px; padding-inline: 16px; }.admin-header .brand img { width: 125px; }.admin-content { width: calc(100% - 28px); padding-top: 28px; }.admin-heading h1 { font-size: 24px; }.admin-form-grid { grid-template-columns: 1fr 1fr; }.admin-form-grid .admin-field-wide { grid-column: 1 / -1; }.admin-report-form { padding: 17px; }.admin-report-personal dl { grid-template-columns: 110px minmax(0, 1fr); } }
+@media (max-width: 480px) { .admin-header { gap: 10px; }.admin-header .brand img { width: 104px; }.admin-header > div { margin-right: 4px; }.admin-header > div span { font-size: 8px; }.admin-header .button { padding-inline: 9px; font-size: 10px; }.admin-form-grid { grid-template-columns: 1fr; }.admin-form-grid .admin-field-wide { grid-column: auto; }.admin-result-heading { padding: 16px; }.admin-result-heading h2 { font-size: 17px; }.admin-result-heading > strong { font-size: 23px; }.admin-report-result .report-summary-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); }.admin-report-personal dl { grid-template-columns: 1fr; gap: 4px; }.admin-report-personal dd { margin-bottom: 8px; } }
+
 @media (max-width: 520px) {
   .dashboard-welcome { padding: 0 0 4px; }
   .report-detail { gap: 12px; margin-block: 12px 18px; }

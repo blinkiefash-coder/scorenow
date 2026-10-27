@@ -1,5 +1,6 @@
 import cors from "cors";
 import "dotenv/config";
+import { createHash, timingSafeEqual } from "node:crypto";
 import express, { type NextFunction, type Request, type Response } from "express";
 import multer from "multer";
 import nodemailer from "nodemailer";
@@ -7,6 +8,7 @@ import path from "node:path";
 import {
   BUREAUS,
   bureauNames,
+  type Applicant,
   fetchBureauReport,
   downloadReportPdf,
   isBureau,
@@ -21,6 +23,9 @@ import {
 import {
   completeReportRequest,
   createDemoReportRequest,
+  createAdminReportAudit,
+  createAdminSession,
+  completeAdminReportAudit,
   createOtp,
   createReportPayment,
   createSession,
@@ -28,6 +33,7 @@ import {
   findReportPayment,
   findReportRequest,
   findSessionUser,
+  findAdminSession,
   findUserByEmail,
   getApplicant,
   getDashboardStatus,
@@ -39,6 +45,7 @@ import {
   markPaymentPaidAndCreateRequest,
   markReportProcessing,
   revokeSession,
+  revokeAdminSession,
   saveAssessment,
   saveReportPdf,
   saveWebsiteInquiry,
@@ -75,12 +82,44 @@ const requireUser = async (request: Request, response: Response, next: NextFunct
 };
 
 const sessionUser = (response: Response) => response.locals.user as SessionUser;
+const sessionAdminId = (response: Response) => response.locals.adminId as string;
 
 const startSession = (request: Request, userId: string) =>
   createSession({ userId, ipAddress: request.ip, userAgent: request.get("user-agent") });
 
 const REPORT_PRICE_RUPEES = 99;
 const REPORT_GST_RUPEES = Math.round((REPORT_PRICE_RUPEES - REPORT_PRICE_RUPEES / 1.18) * 100) / 100;
+
+const requireAdmin = async (request: Request, response: Response, next: NextFunction) => {
+  const token = bearerToken(request);
+  const admin = await findAdminSession(token).catch(() => null);
+  if (!admin) {
+    response.status(401).json({ message: "Admin sign-in is required." });
+    return;
+  }
+  response.locals.adminId = admin.admin_id;
+  next();
+};
+
+const adminLoginAttempts = new Map<string, { count: number; resetAt: number }>();
+const MAX_ADMIN_LOGIN_ATTEMPTS = 5;
+const ADMIN_LOGIN_WINDOW_MS = 15 * 60 * 1000;
+const equalSecret = (candidate: string, expected: string) => timingSafeEqual(
+  createHash("sha256").update(candidate).digest(),
+  createHash("sha256").update(expected).digest(),
+);
+
+const canAttemptAdminLogin = (ipAddress: string) => {
+  const now = Date.now();
+  const attempt = adminLoginAttempts.get(ipAddress);
+  if (!attempt || attempt.resetAt <= now) {
+    adminLoginAttempts.set(ipAddress, { count: 1, resetAt: now + ADMIN_LOGIN_WINDOW_MS });
+    return true;
+  }
+  if (attempt.count >= MAX_ADMIN_LOGIN_ATTEMPTS) return false;
+  attempt.count += 1;
+  return true;
+};
 
 const allowedReportTypes = new Set(["application/pdf", "image/jpeg", "image/png"]);
 const upload = multer({
@@ -133,6 +172,109 @@ const fieldLabels: Record<string, string> = {
 
 app.get("/api/health", (_request, response) => {
   response.json({ status: "ok", service: "Score Now API" });
+});
+
+app.post("/api/admin/login", async (request, response) => {
+  const ipAddress = requestIpAddress(request);
+  if (!canAttemptAdminLogin(ipAddress)) {
+    response.status(429).json({ message: "Too many sign-in attempts. Try again in 15 minutes." });
+    return;
+  }
+
+  const adminId = process.env.ADMIN_LOGIN_ID || "";
+  const password = process.env.ADMIN_PASSWORD || "";
+  const pin = process.env.ADMIN_PIN || "";
+  if (!adminId || password.length < 12 || !/^\d{6}$/.test(pin)) {
+    response.status(503).json({ message: "Admin access is not configured. Set ADMIN_LOGIN_ID, ADMIN_PASSWORD, and a 6-digit ADMIN_PIN." });
+    return;
+  }
+
+  const valid = equalSecret(String(request.body.id || ""), adminId) &&
+    equalSecret(String(request.body.password || ""), password) &&
+    equalSecret(String(request.body.pin || ""), pin);
+  if (!valid) {
+    response.status(401).json({ message: "Invalid admin credentials." });
+    return;
+  }
+
+  adminLoginAttempts.delete(ipAddress);
+  const token = await createAdminSession({ adminId, ipAddress, userAgent: request.get("user-agent") });
+  response.json({ token, adminId });
+});
+
+app.get("/api/admin/session", requireAdmin, (request, response) => {
+  response.json({ adminId: sessionAdminId(response) });
+});
+
+app.post("/api/admin/logout", requireAdmin, async (request, response) => {
+  await revokeAdminSession(bearerToken(request));
+  response.json({ ok: true });
+});
+
+app.post("/api/admin/reports", requireAdmin, async (request, response) => {
+  const bureau = request.body.bureau;
+  if (!isBureau(bureau)) {
+    response.status(400).json({ message: "Choose a valid credit bureau." });
+    return;
+  }
+  if (request.body.consent !== true) {
+    response.status(400).json({ message: "Confirm that the client has consented to this bureau report request." });
+    return;
+  }
+  if (!isBureauAvailable(bureau)) {
+    response.status(503).json({ message: `${bureauNames[bureau]} reports are not configured.` });
+    return;
+  }
+
+  const applicant: Applicant = {
+    fullName: String(request.body.fullName || "").trim(),
+    pan: String(request.body.pan || "").trim().toUpperCase(),
+    dateOfBirth: String(request.body.dateOfBirth || "").trim(),
+    gender: String(request.body.gender || "").trim().toLowerCase() || null,
+    addressLine1: String(request.body.addressLine1 || "").trim() || null,
+    city: String(request.body.city || "").trim() || null,
+    state: String(request.body.state || "").trim() || null,
+    pincode: String(request.body.pincode || "").trim() || null,
+    email: String(request.body.email || "").trim() || null,
+    mobile: String(request.body.mobile || "").replace(/\D/g, ""),
+  };
+  if (applicant.fullName.length < 2 || !/^[A-Z]{5}[0-9]{4}[A-Z]$/.test(applicant.pan) ||
+      !/^\d{4}-\d{2}-\d{2}$/.test(applicant.dateOfBirth) || applicant.mobile.length !== 10) {
+    response.status(400).json({ message: "Enter a valid full name, PAN, date of birth, and 10-digit mobile number." });
+    return;
+  }
+  const missing = missingApplicantFields(bureau, applicant);
+  if (missing.length) {
+    response.status(400).json({ message: `Enter ${missing.join(", ")} to request this report.` });
+    return;
+  }
+
+  const consentIpAddress = requestIpAddress(request);
+  const auditId = await createAdminReportAudit({
+    adminId: sessionAdminId(response),
+    bureau,
+    panLast4: applicant.pan.slice(-4),
+    mobileLast4: applicant.mobile.slice(-4),
+    consentIpAddress,
+  });
+
+  try {
+    const result = await fetchBureauReport(bureau, applicant, consentIpAddress);
+    if (!result.ok) {
+      await completeAdminReportAudit({ auditId, status: "failed", providerTransactionId: null, creditScore: null, failureReason: result.message });
+      response.status(502).json({ message: result.message, diagnostics: result.diagnostics });
+      return;
+    }
+
+    const report = normalizeReport(bureau, result.raw);
+    await completeAdminReportAudit({ auditId, status: "completed", providerTransactionId: result.providerTxnId, creditScore: report.score, failureReason: null });
+    response.json({ bureau, providerTxnId: result.providerTxnId, report });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Unable to fetch this credit report.";
+    await completeAdminReportAudit({ auditId, status: "failed", providerTransactionId: null, creditScore: null, failureReason: message });
+    console.error("Admin bureau report request failed", error);
+    response.status(502).json({ message: "Unable to fetch this credit report." });
+  }
 });
 
 // Returns whether the code was actually delivered, so the caller can decide
