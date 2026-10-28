@@ -37,6 +37,10 @@ Before real delivery, create `backend/.env` from `backend/.env.example` and conf
 
 Set `VITE_API_URL` in `frontend/.env` if the API is hosted somewhere other than `http://localhost:3000`, then restart Vite. For local testing without sending email, set `EMAIL_PREVIEW=true` in `backend/.env`; preview mode renders messages without delivering them.
 
+## Customer login
+
+Customers can continue using mobile OTP or choose email and password. Account creation verifies the mobile number and requires an email and a password of at least 8 characters. Passwords are stored in PostgreSQL only as per-account salted scrypt hashes, never as plain text; the backend adds the password-hash columns to the existing `users` table on startup. Existing customers can create/set a password by choosing **Create Account** and verifying the mobile number and email already on their account. Email OTP sign-in remains available as a fallback.
+
 ## Credit report PDF downloads
 
 The customer dashboard downloads a bureau-provided PDF when one is available. If a bureau response does not include a usable PDF, the backend generates a Score Now-formatted PDF from the normalized report data. Admin-initiated bureau checks can also download a Score Now report copy. Generated copies are explicitly labeled as not issued or endorsed by the bureau and are served only to the authenticated report owner or authorized admin.

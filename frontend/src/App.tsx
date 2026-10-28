@@ -1,9 +1,9 @@
-import { Fragment, useCallback, useEffect, useRef, useState, type CSSProperties, type FormEvent } from 'react'
+import { Fragment, useEffect, useRef, useState, type CSSProperties, type FormEvent } from 'react'
 import {
-  AlertTriangle, ArrowLeft, ArrowRight, BadgeIndianRupee, BarChart3, BookOpen,
+  AlertTriangle, ArrowLeft, ArrowRight, BadgeIndianRupee, BarChart3,
   Building2, CalendarDays, Check, ChevronDown, CircleHelp, Clock3, CreditCard, Download, ExternalLink,
   Eye, EyeOff, FileCheck2, FileSearch, Gift, Handshake, Headphones,
-  House, Lightbulb, LockKeyhole, Mail, MapPin, Menu, MessageCircle, Pause,
+  Gauge, House, Lightbulb, LockKeyhole, Mail, MapPin, Menu, MessageCircle, Pause,
   Phone, Play, RotateCcw, Search, Settings, ShieldCheck, Smartphone, Sparkles, Star,
   TrendingUp, Users, Volume2, VolumeX, UserRound, WalletCards, X, Zap,
 } from 'lucide-react'
@@ -435,6 +435,7 @@ function maskEmail(email: string) {
 function AuthModal({ open, notice, onClose, onSuccess }: { open: boolean; notice?: string; onClose: () => void; onSuccess: (user: AuthUser) => void }) {
   const [view, setView] = useState<'login' | 'signup' | 'otp'>('login')
   const [loginMethod, setLoginMethod] = useState<'mobile' | 'email'>('mobile')
+  const [emailLoginMode, setEmailLoginMode] = useState<'password' | 'otp'>('password')
   const [showPassword, setShowPassword] = useState(false)
   const [otpDigits, setOtpDigits] = useState(['', '', '', '', '', ''])
   const [resendSeconds, setResendSeconds] = useState(28)
@@ -445,6 +446,7 @@ function AuthModal({ open, notice, onClose, onSuccess }: { open: boolean; notice
   const [sampleOtp, setSampleOtp] = useState('')
   const pendingFullNameRef = useRef('')
   const pendingEmailRef = useRef('')
+  const pendingPasswordRef = useRef('')
   const firebaseConfirmationRef = useRef<ConfirmationResult | null>(null)
 
   const usesFirebasePhoneAuth = !import.meta.env.DEV
@@ -507,6 +509,18 @@ function AuthModal({ open, notice, onClose, onSuccess }: { open: boolean; notice
     setAuthError('')
     setAuthLoading(true)
     try {
+      if (loginMethod === 'email' && emailLoginMode === 'password') {
+        const response = await fetch(`${apiUrl}/api/auth/email/login`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email: value, password: String(data.get('password') || '') }),
+        })
+        const result = await response.json() as { message?: string; user?: Omit<AuthUser, 'token'>; token?: string }
+        if (!response.ok) throw new Error(result.message || 'Unable to sign in.')
+        if (result.user && result.token) onSuccess({ ...result.user, token: result.token })
+        onClose()
+        return
+      }
       await requestOtp(loginMethod, value)
       setOtpContact({ type: loginMethod, value })
       setOtpOrigin('login')
@@ -525,6 +539,7 @@ function AuthModal({ open, notice, onClose, onSuccess }: { open: boolean; notice
     const mobile = String(data.get('mobile') || '')
     pendingFullNameRef.current = String(data.get('name') || '')
     pendingEmailRef.current = String(data.get('email') || '')
+    pendingPasswordRef.current = String(data.get('password') || '')
     setAuthError('')
     setAuthLoading(true)
     try {
@@ -571,7 +586,13 @@ function AuthModal({ open, notice, onClose, onSuccess }: { open: boolean; notice
             return fetch(`${apiUrl}/api/auth/firebase-session`, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ idToken, fullName: pendingFullNameRef.current, email: pendingEmailRef.current }),
+              body: JSON.stringify({
+                idToken,
+                fullName: pendingFullNameRef.current,
+                email: pendingEmailRef.current,
+                password: pendingPasswordRef.current,
+                intent: otpOrigin,
+              }),
             })
           })()
         : await fetch(`${apiUrl}/api/auth/otp/verify`, {
@@ -583,6 +604,8 @@ function AuthModal({ open, notice, onClose, onSuccess }: { open: boolean; notice
               code,
               fullName: pendingFullNameRef.current,
               email: pendingEmailRef.current,
+              password: pendingPasswordRef.current,
+              intent: otpOrigin,
             }),
           })
       const result = await response.json() as { message?: string; user?: Omit<AuthUser, 'token'>; token?: string }
@@ -644,9 +667,9 @@ function AuthModal({ open, notice, onClose, onSuccess }: { open: boolean; notice
             {notice && <p className="auth-notice" role="alert"><LockKeyhole /> {notice}</p>}
 
             {view === 'login' && (
-              <div className="auth-tabs" role="tablist">
+                <div className="auth-tabs" role="tablist">
                 <button type="button" role="tab" aria-selected={loginMethod === 'mobile'} className={loginMethod === 'mobile' ? 'active' : ''} onClick={() => setLoginMethod('mobile')}><Smartphone /> Mobile Number</button>
-                <button type="button" role="tab" aria-selected={loginMethod === 'email'} className={loginMethod === 'email' ? 'active' : ''} onClick={() => setLoginMethod('email')}><Mail /> Email</button>
+                <button type="button" role="tab" aria-selected={loginMethod === 'email'} className={loginMethod === 'email' ? 'active' : ''} onClick={() => { setLoginMethod('email'); setEmailLoginMode('password') }}><Mail /> Email</button>
               </div>
             )}
 
@@ -659,17 +682,21 @@ function AuthModal({ open, notice, onClose, onSuccess }: { open: boolean; notice
                     <div className="auth-phone-input"><span className="country-code">🇮🇳 +91<ChevronDown /></span><input name="mobile" type="tel" inputMode="numeric" pattern="[0-9]{10}" placeholder="Enter your mobile number" required /></div>
                   </label>
                 ) : (
-                  <label><span>Email Address</span><div className="auth-input-icon"><Mail /><input name="email" type="email" placeholder="Enter your email" required autoComplete="email" /></div></label>
+                  <>
+                    <label><span>Email Address</span><div className="auth-input-icon"><Mail /><input name="email" type="email" placeholder="Enter your email" required autoComplete="email" /></div></label>
+                    {emailLoginMode === 'password' && <label><span>Password</span><div className="auth-password-input"><LockKeyhole /><input name="password" type={showPassword ? 'text' : 'password'} maxLength={128} required placeholder="Enter your password" autoComplete="current-password" /><button type="button" onClick={() => setShowPassword((value) => !value)} aria-label={showPassword ? 'Hide password' : 'Show password'}>{showPassword ? <EyeOff /> : <Eye />}</button></div></label>}
+                  </>
                 )}
-                <p className="auth-otp-note"><ShieldCheck /> We'll send a one-time code to verify it's you.</p>
-                <button className="button button-primary" type="submit" disabled={authLoading}>{authLoading ? 'Sending…' : <>Send OTP <ArrowRight /></>}</button>
+                {(loginMethod === 'mobile' || emailLoginMode === 'otp') && <p className="auth-otp-note"><ShieldCheck /> We'll send a one-time code to verify it's you.</p>}
+                <button className="button button-primary" type="submit" disabled={authLoading}>{authLoading ? (loginMethod === 'email' && emailLoginMode === 'password' ? 'Signing in…' : 'Sending…') : loginMethod === 'email' && emailLoginMode === 'password' ? <>Sign In <ArrowRight /></> : <>Send OTP <ArrowRight /></>}</button>
+                {loginMethod === 'email' && <p className="auth-switch"><button type="button" onClick={() => setEmailLoginMode((mode) => mode === 'password' ? 'otp' : 'password')}>{emailLoginMode === 'password' ? 'Sign in with an email code instead' : 'Sign in with your password instead'}</button></p>}
               </form>
             ) : (
               <form className="auth-form" onSubmit={submitSignup}>
                 <label><span>Full Name</span><div className="auth-input-icon"><UserRound /><input name="name" required placeholder="Enter your full name" autoComplete="name" /></div></label>
                 <label><span>Mobile Number</span><div className="auth-phone-input"><span className="country-code">🇮🇳 +91<ChevronDown /></span><input name="mobile" type="tel" inputMode="numeric" pattern="[0-9]{10}" placeholder="Enter your mobile number" required /></div></label>
-                <label><span>Email Address (optional)</span><div className="auth-input-icon"><Mail /><input name="email" type="email" placeholder="Enter your email address" autoComplete="email" /></div></label>
-                <label><span>Create Password</span><div className="auth-password-input"><LockKeyhole /><input name="password" type={showPassword ? 'text' : 'password'} minLength={8} required placeholder="Minimum 8 characters" autoComplete="new-password" /><button type="button" onClick={() => setShowPassword((value) => !value)} aria-label={showPassword ? 'Hide password' : 'Show password'}>{showPassword ? <EyeOff /> : <Eye />}</button></div></label>
+                <label><span>Email Address</span><div className="auth-input-icon"><Mail /><input name="email" type="email" placeholder="Enter your email address" autoComplete="email" required /></div></label>
+                <label><span>Create Password</span><div className="auth-password-input"><LockKeyhole /><input name="password" type={showPassword ? 'text' : 'password'} minLength={8} maxLength={128} required placeholder="Minimum 8 characters" autoComplete="new-password" /><button type="button" onClick={() => setShowPassword((value) => !value)} aria-label={showPassword ? 'Hide password' : 'Show password'}>{showPassword ? <EyeOff /> : <Eye />}</button></div></label>
                 <label className="auth-terms"><input type="checkbox" required /><span>I agree to the <a href="#terms">Terms &amp; Conditions</a> and <a href="#privacy">Privacy Policy</a></span></label>
                 <button className="button button-primary" type="submit" disabled={authLoading}>{authLoading ? 'Sending…' : <>Create Account <ArrowRight /></>}</button>
               </form>
@@ -1146,7 +1173,7 @@ function CreditScoreEstimator() {
 
 const openChatEvent = 'scorenow:open-chat'
 
-function ChatAssistant({ requireLogin }: { requireLogin: RequireLogin }) {
+function ChatAssistant({ requireLogin, isDashboard = false }: { requireLogin: RequireLogin; isDashboard?: boolean }) {
   const [isOpen, setIsOpen] = useState(false)
   const [step, setStep] = useState(0)
   const [name, setName] = useState('')
@@ -1228,7 +1255,7 @@ function ChatAssistant({ requireLogin }: { requireLogin: RequireLogin }) {
   }, [isOpen, step])
 
   return (
-    <aside className={isOpen ? 'chat-assistant open' : 'chat-assistant'} aria-label="Score Now chat assistant">
+    <aside className={`chat-assistant${isOpen ? ' open' : ''}${isDashboard ? ' dashboard-assistant' : ''}`} aria-label="Score Now chat assistant">
       {isOpen && (
         <div className="chat-panel">
           <div className="chat-header">
@@ -1344,6 +1371,8 @@ const formatMonth = (value: string) => new Date(`${value}-01T00:00:00`).toLocale
 type ReportAccount = ReportDetail['accounts'][number]
 type AccountFilter = 'all' | 'attention' | 'active' | 'closed'
 
+const accountKey = (account: ReportAccount, index: number) => `${account.lender}-${account.accountNumber ?? 'unknown'}-${index}`
+
 const needsAttention = (account: ReportAccount) =>
   (account.overdueAmount ?? 0) > 0 || (account.writtenOffAmount ?? 0) > 0 || (account.settlementAmount ?? 0) > 0
 
@@ -1361,10 +1390,12 @@ const accountFilters: { id: AccountFilter; label: string; matches: (account: Rep
   { id: 'closed', label: 'Closed', matches: (account) => account.status === 'closed' },
 ]
 
-function ReportDetailView({ user, requestId, onLoaded }: { user: AuthUser; requestId: string; onLoaded: (detail: ReportDetail) => void }) {
+function ReportDetailView({ user, requestId }: { user: AuthUser; requestId: string }) {
   const [detail, setDetail] = useState<ReportDetail | null>(null)
   const [error, setError] = useState('')
   const [accountFilter, setAccountFilter] = useState<AccountFilter>('all')
+  const [accountSearch, setAccountSearch] = useState('')
+  const [expandedAccount, setExpandedAccount] = useState<string | null>(null)
   const [downloading, setDownloading] = useState(false)
   const [downloadError, setDownloadError] = useState('')
 
@@ -1376,19 +1407,25 @@ function ReportDetailView({ user, requestId, onLoaded }: { user: AuthUser; reque
         if (!response.ok) throw new Error(result.message || 'Unable to load this report.')
         if (!cancelled) {
           setDetail(result)
-          onLoaded(result)
+          setExpandedAccount(result.accounts.length ? accountKey(result.accounts[0], 0) : null)
         }
       })
       .catch((loadError: unknown) => { if (!cancelled) setError(loadError instanceof Error ? loadError.message : 'Unable to load this report.') })
     return () => { cancelled = true }
-  }, [requestId, user, onLoaded])
+  }, [requestId, user])
 
   if (error) return <p className="dashboard-notice error">{error}</p>
   if (!detail) return <div className="dashboard-card report-loading"><RotateCcw /> Loading full report…</div>
 
   const { summary, personal } = detail
   const bureauLabel = bureauCatalog.find((item) => item.id === detail.bureau)?.name ?? detail.bureau
-  const visibleAccounts = detail.accounts.filter(accountFilters.find((item) => item.id === accountFilter)!.matches)
+  const visibleAccounts = detail.accounts
+    .map((account, index) => ({ account, index }))
+    .filter(({ account }) => accountFilters.find((item) => item.id === accountFilter)!.matches(account))
+    .filter(({ account }) => {
+      const query = accountSearch.trim().toLowerCase()
+      return !query || account.lender.toLowerCase().includes(query) || (account.accountNumber ?? '').toLowerCase().includes(query) || account.type.toLowerCase().includes(query)
+    })
 
   const downloadPdf = async () => {
     setDownloading(true)
@@ -1438,16 +1475,6 @@ function ReportDetailView({ user, requestId, onLoaded }: { user: AuthUser; reque
         {(summary.writtenOffAccounts ?? 0) > 0 && <div className="is-bad"><small>Written off / settled</small><strong>{summary.writtenOffAccounts}</strong></div>}
       </div>
 
-      {detail.scoreFactors && detail.scoreFactors.length > 0 && <article className="dashboard-card report-factors" id="score-insights">
-        <div className="dashboard-card-heading"><strong><Lightbulb /> What&apos;s affecting your score</strong><small>From {bureauLabel}</small></div>
-        <ul>{detail.scoreFactors.map((factor) => (
-          <li key={factor.text} className={factor.impact}>
-            <span className="factor-icon">{factor.impact === 'negative' ? <AlertTriangle /> : <Check />}</span>
-            <div><strong>{factor.impact === 'negative' ? 'Hurting your score' : 'Helping your score'}</strong><p>{factor.text}</p>{factor.tip && <small><TrendingUp /> {factor.tip}</small>}</div>
-          </li>
-        ))}</ul>
-      </article>}
-
       <div className="report-detail-grid">
         <article className="dashboard-card report-personal" id="personal-details">
           <div className="dashboard-card-heading"><strong><UserRound /> Personal Details</strong></div>
@@ -1470,37 +1497,78 @@ function ReportDetailView({ user, requestId, onLoaded }: { user: AuthUser; reque
       </div>
 
       <article className="dashboard-card report-accounts" id="credit-accounts">
-        <div className="dashboard-card-heading"><strong><WalletCards /> Credit Accounts</strong><small>{detail.accounts.length} accounts</small></div>
+        <div className="dashboard-card-heading">
+          <div className="report-accounts-title">
+            <strong><WalletCards /> Credit Accounts</strong>
+            <small>View and manage all your credit accounts reported by different lenders.</small>
+          </div>
+          <span className="report-account-total">{detail.accounts.length} accounts</span>
+        </div>
         <div className="report-account-toolbar">
           <div className="report-account-filters" role="tablist" aria-label="Filter accounts">{accountFilters.map((filter) => {
             const count = detail.accounts.filter(filter.matches).length
             return <button type="button" role="tab" aria-selected={accountFilter === filter.id} className={accountFilter === filter.id ? 'active' : ''} key={filter.id} onClick={() => setAccountFilter(filter.id)}>{filter.label} <b>{count}</b></button>
           })}</div>
-          <div className="payment-legend" aria-hidden="true"><span><i className="ontime" /> On time</span><span><i className="late" /> Days late</span><span><i className="unknown" /> Not reported</span></div>
+          <label className="report-account-search">
+            <Search aria-hidden="true" />
+            <span className="sr-only">Search credit accounts</span>
+            <input value={accountSearch} onChange={(event) => setAccountSearch(event.target.value)} placeholder="Search by lender or account number…" />
+          </label>
+          <div className="payment-legend" aria-label="Payment history legend"><span><i className="ontime" /> On time</span><span><i className="late" /> Days late</span><span><i className="unknown" /> Not reported</span></div>
         </div>
-        {visibleAccounts.length ? <div className="report-account-table-wrap" id="payment-history"><table className="report-account-table">
-          <thead><tr><th scope="col">Lender</th><th scope="col">Account type</th><th scope="col">Account no.</th><th scope="col">Status</th><th scope="col">Outstanding</th><th scope="col">Overdue</th><th scope="col">Last payment</th></tr></thead>
-          <tbody>{visibleAccounts.map((account, index) => (
-            <Fragment key={`${account.lender}-${account.accountNumber}-${index}`}>
-              <tr>
-                <td><strong>{account.lender}</strong></td>
-                <td>{account.type}</td>
-                <td>{account.accountNumber ? `•••• ${account.accountNumber.slice(-4)}` : '—'}</td>
-                <td><span className={`account-chip ${accountFlag(account).tone}`}>{accountFlag(account).label}</span></td>
-                <td>{formatMoney(account.currentBalance)}</td>
-                <td className={(account.overdueAmount ?? 0) > 0 ? 'is-bad' : ''}>{formatMoney(account.overdueAmount)}</td>
-                <td>{formatDate(account.lastPaymentOn)}</td>
-              </tr>
-              {((account.writtenOffAmount ?? 0) > 0 || (account.settlementAmount ?? 0) > 0) && <tr className="report-account-alert-row"><td colSpan={7}><AlertTriangle /> {(account.writtenOffAmount ?? 0) > 0 ? `Lender wrote off ${formatMoney(account.writtenOffAmount)}` : `Settled for ${formatMoney(account.settlementAmount)}`}. Review this item in your report.</td></tr>}
-              {account.paymentHistory.length > 0 && <tr className="report-payment-history-row"><td colSpan={7}>
-                <div className="report-payment-history"><strong>Payment history</strong><div className="payment-history" aria-label={`${account.lender} payment history, most recent first`}>{account.paymentHistory.map((entry) => {
-                  const late = (entry.daysPastDue ?? 0) > 0
-                  return <span key={entry.month} className={entry.daysPastDue === null ? 'unknown' : late ? 'late' : 'ontime'} title={`${formatMonth(entry.month)}: ${entry.daysPastDue === null ? 'Not reported' : late ? `${entry.daysPastDue} days late` : 'On time'}`}>{late ? entry.daysPastDue : ''}</span>
-                })}</div></div>
-              </td></tr>}
-            </Fragment>
-          ))}</tbody>
-        </table></div> : <p className="report-empty">{detail.accounts.length ? 'No accounts match this filter.' : 'No accounts found in this report.'}</p>}
+        {visibleAccounts.length ? <div className="credit-account-list" id="payment-history">
+          {visibleAccounts.map(({ account, index }) => {
+            const key = accountKey(account, index)
+            const expanded = expandedAccount === key
+            const flag = accountFlag(account)
+            const alertText = (account.writtenOffAmount ?? 0) > 0
+              ? `Lender wrote off ${formatMoney(account.writtenOffAmount)}. Review this item in your report.`
+              : (account.settlementAmount ?? 0) > 0
+                ? `This account was settled for ${formatMoney(account.settlementAmount)}. Review the details in your report.`
+                : (account.overdueAmount ?? 0) > 0
+                  ? `${formatMoney(account.overdueAmount)} is reported overdue on this account. Review the payment details in your report.`
+                  : ''
+            return (
+              <article className={`credit-account-card${needsAttention(account) ? ' needs-attention' : ''}`} key={key}>
+                <div className="credit-account-summary">
+                  <div className="credit-account-lender">
+                    <span className={`credit-account-avatar tone-${index % 4}`}>{account.lender.trim().charAt(0).toUpperCase() || '?'}</span>
+                    <span><strong>{account.lender}</strong><small>{account.type}</small></span>
+                  </div>
+                  <div className="credit-account-field account-number-field"><small>Account no.</small><strong>{account.accountNumber ? `•••• ${account.accountNumber.slice(-4)}` : '—'}</strong></div>
+                  <div className="credit-account-field"><small>Status</small><span className={`account-chip ${flag.tone}`}>{flag.label}</span></div>
+                  <div className="credit-account-field"><small>Outstanding</small><strong>{formatMoney(account.currentBalance)}</strong></div>
+                  <div className="credit-account-field"><small>Overdue</small><strong className={(account.overdueAmount ?? 0) > 0 ? 'is-bad' : 'is-good'}>{formatMoney(account.overdueAmount)}</strong></div>
+                  <div className="credit-account-field"><small>Last payment</small><strong>{formatDate(account.lastPaymentOn)}</strong></div>
+                  <button
+                    className="credit-account-toggle"
+                    type="button"
+                    aria-label={`${expanded ? 'Collapse' : 'Expand'} ${account.lender} account details`}
+                    aria-expanded={expanded}
+                    onClick={() => setExpandedAccount(expanded ? null : key)}
+                  ><ChevronDown /></button>
+                </div>
+                {expanded && <div className="credit-account-details">
+                  {alertText && <div className="credit-account-alert"><AlertTriangle /><span>{alertText}</span></div>}
+                  <dl className="credit-account-extra">
+                    <div><dt>Outstanding</dt><dd>{formatMoney(account.currentBalance)}</dd></div>
+                    <div><dt>Overdue</dt><dd className={(account.overdueAmount ?? 0) > 0 ? 'is-bad' : 'is-good'}>{formatMoney(account.overdueAmount)}</dd></div>
+                    <div><dt>Last payment</dt><dd>{formatDate(account.lastPaymentOn)}</dd></div>
+                  </dl>
+                  <div className="credit-account-payment-heading"><strong>Payment history</strong><span>Most recent first</span></div>
+                  {account.paymentHistory.length ? <div className="credit-account-payment-history" aria-label={`${account.lender} payment history, most recent first`}>
+                    {account.paymentHistory.map((entry) => {
+                      const late = (entry.daysPastDue ?? 0) > 0
+                      const paymentTone = entry.daysPastDue === null ? 'unknown' : late ? 'late' : 'ontime'
+                      const paymentText = entry.daysPastDue === null ? 'Not reported' : late ? `${entry.daysPastDue} days late` : 'On time'
+                      return <div className="credit-account-payment" key={entry.month} title={`${formatMonth(entry.month)}: ${paymentText}`}><small>{formatMonth(entry.month)}</small><span className={paymentTone}>{late ? entry.daysPastDue : entry.daysPastDue === null ? '—' : <Check />}</span></div>
+                    })}
+                  </div> : <p className="report-empty credit-account-no-history">No payment history was included for this account.</p>}
+                </div>}
+              </article>
+            )
+          })}
+        </div> : <p className="report-empty">{detail.accounts.length ? 'No accounts match your filters.' : 'No accounts found in this report.'}</p>}
       </article>
     </section>
   )
@@ -1645,10 +1713,197 @@ function ProfileOnboarding({ user, onComplete, onLogout }: { user: AuthUser; onC
   )
 }
 
+type CreditGuideSlug = 'improve-credit-score' | 'good-credit-score' | 'credit-enquiries'
+type CreditGuide = {
+  title: string
+  description: string
+  readTime: string
+  icon: typeof TrendingUp
+  sections: { title: string; paragraphs: string[]; points?: string[] }[]
+}
+
+const creditGuides: Record<CreditGuideSlug, CreditGuide> = {
+  'improve-credit-score': {
+    title: '5 Ways to Improve Your Credit Score',
+    description: 'Build healthy credit habits over time, understand the options available, and choose borrowing only when it fits your needs.',
+    readTime: '5 min read',
+    icon: TrendingUp,
+    sections: [
+      {
+        title: 'Start with the habits that matter',
+        paragraphs: ['Improving a credit profile is usually a gradual process. Focus on accurate reporting and steady repayment habits rather than quick fixes or promises of a particular score.'],
+        points: [
+          'Pay every loan and card instalment by its due date.',
+          'Keep card balances manageable and avoid using all available credit.',
+          'Check your report for accounts, balances, or enquiries you do not recognise.',
+          'Apply for new credit only when you have a clear need.',
+          'Keep well-managed accounts open unless there is a good reason to close them.',
+        ],
+      },
+      {
+        title: 'Choose credit carefully',
+        paragraphs: ['A new credit product is not required for everyone. Consider the total cost, repayment commitment, and whether the lender reports account activity to the credit bureaus before applying.'],
+      },
+    ],
+  },
+  'good-credit-score': {
+    title: 'What is a Good Credit Score?',
+    description: 'Learn how to read your score in context and why lenders look at more than one number.',
+    readTime: '4 min read',
+    icon: Gauge,
+    sections: [
+      {
+        title: 'A score is a snapshot, not a guarantee',
+        paragraphs: ['Credit bureaus generally show a score on a 300–900 scale, but score bands and lender criteria can differ. A higher score is often viewed positively, but it does not guarantee loan or card approval.'],
+        points: [
+          'Lenders may also consider income, existing obligations, employment, and their own policies.',
+          'Different bureaus can show different scores because their report data or scoring models may vary.',
+          'Use the score together with the report details to understand your credit health.',
+        ],
+      },
+      {
+        title: 'Look beyond the score',
+        paragraphs: ['Review the payment history, balances, account status, and recent enquiries shown on the report. Correct any inaccurate details with the bureau or lender that supplied them.'],
+      },
+    ],
+  },
+  'credit-enquiries': {
+    title: 'How Credit Enquiries Affect Your Score',
+    description: 'Understand what happens when you apply for credit and how to keep track of applications on your report.',
+    readTime: '6 min read',
+    icon: FileSearch,
+    sections: [
+      {
+        title: 'What is a credit enquiry?',
+        paragraphs: ['When a lender checks your credit report as part of a credit application, that check may appear as an enquiry. The exact score impact depends on bureau methods and lender context. Checking your own report is different from applying for new credit.'],
+      },
+      {
+        title: 'Manage applications thoughtfully',
+        paragraphs: ['Several applications in a short period can signal increased borrowing activity. Before applying, compare the product terms and check whether you meet the provider’s stated criteria.'],
+        points: [
+          'Avoid submitting multiple applications just to compare offers.',
+          'Ask a lender whether an initial eligibility check is a soft enquiry or a full credit application.',
+          'Review enquiry entries and contact the lender or bureau if you see one you do not recognise.',
+          'Keep records of applications and consent you provide.',
+        ],
+      },
+    ],
+  },
+}
+
+const guideProductOptions = [
+  {
+    icon: CreditCard,
+    title: 'FD-backed secured card',
+    description: 'Some providers offer a credit card secured against a fixed deposit. The deposit may be held as collateral while the card is active.',
+    checks: 'Ask about the deposit lock-in, fees, interest, bureau reporting, and what happens if a payment is missed.',
+    message: 'Hello Score Now, I would like to ask about FD-backed secured credit card options.',
+  },
+  {
+    icon: WalletCards,
+    title: 'Existing or standard credit card',
+    description: 'If you already have a card, regular on-time payments and sensible balances may help build a positive repayment record.',
+    checks: 'Compare annual charges and repayment terms. Avoid applying for a card solely to chase a score increase.',
+    message: 'Hello Score Now, I would like guidance on choosing and managing a credit card responsibly.',
+  },
+]
+
+function CreditGuidePage({ slug }: { slug: string }) {
+  const guideSlug = Object.keys(creditGuides).find((key) => key === slug) as CreditGuideSlug | undefined
+  const guide = guideSlug ? creditGuides[guideSlug] : undefined
+  if (!guide) {
+    return (
+      <main className="guide-not-found">
+        <Brand href="/" />
+        <h1>Guide not found</h1>
+        <p>That credit guide may have moved. You can return to your dashboard to browse the available guides.</p>
+        <a className="button button-primary" href="/dashboard#credit-learning">Back to credit guides <ArrowRight /></a>
+      </main>
+    )
+  }
+
+  const GuideIcon = guide.icon
+  const otherGuides = (Object.entries(creditGuides) as [CreditGuideSlug, CreditGuide][])
+    .filter(([otherSlug]) => otherSlug !== guideSlug)
+
+  return (
+    <div className="site-shell credit-guide-page">
+      <header className="site-header">
+        <div className="nav-wrap">
+          <Brand href="/" />
+          <a className="guide-back-link" href="/dashboard#credit-learning"><ArrowLeft /> Back to dashboard</a>
+        </div>
+      </header>
+      <main className="credit-guide-main">
+        <div className="credit-guide-wrap">
+          <a className="guide-breadcrumb" href="/dashboard#credit-learning">Credit workspace <ArrowRight /> Guides</a>
+          <article className="credit-guide-article">
+            <header className="credit-guide-title">
+              <span className="credit-guide-title-icon"><GuideIcon /></span>
+              <span className="credit-guide-read-time"><Clock3 /> {guide.readTime}</span>
+              <h1>{guide.title}</h1>
+              <p>{guide.description}</p>
+            </header>
+
+            {guide.sections.map((section) => (
+              <section className="credit-guide-section" key={section.title}>
+                <h2>{section.title}</h2>
+                {section.paragraphs.map((paragraph) => <p key={paragraph}>{paragraph}</p>)}
+                {section.points && <ul>{section.points.map((point) => <li key={point}><Check /> <span>{point}</span></li>)}</ul>}
+              </section>
+            ))}
+
+            {guideSlug === 'improve-credit-score' && (
+              <section className="guide-options">
+                <div className="guide-options-heading">
+                  <span><CreditCard /></span>
+                  <div><h2>Credit options to explore</h2><p>These are general examples, not specific product offers or a recommendation to borrow.</p></div>
+                </div>
+                <div className="guide-option-grid">
+                  {guideProductOptions.map((option) => {
+                    const OptionIcon = option.icon
+                    return (
+                      <article className="guide-option-card" key={option.title}>
+                        <span className="guide-option-icon"><OptionIcon /></span>
+                        <h3>{option.title}</h3>
+                        <p>{option.description}</p>
+                        <small>{option.checks}</small>
+                        <a href={`https://wa.me/919114141011?text=${encodeURIComponent(option.message)}`} target="_blank" rel="noreferrer">
+                          Ask about this option <ArrowRight />
+                        </a>
+                      </article>
+                    )
+                  })}
+                </div>
+                <p className="guide-disclaimer"><ShieldCheck /> A fixed deposit by itself does not build a credit history. An FD-backed card may report repayment activity, but terms and bureau reporting vary by provider. No product can guarantee a score increase.</p>
+              </section>
+            )}
+
+            <aside className="guide-help-callout">
+              <span><MessageCircle /></span>
+              <div><strong>Need help understanding your report?</strong><p>Ask our team about your report or general credit options.</p></div>
+              <a href={`https://wa.me/919114141011?text=${encodeURIComponent(`Hello Score Now, I have a question about: ${guide.title}`)}`} target="_blank" rel="noreferrer">Talk to our team <ArrowRight /></a>
+            </aside>
+          </article>
+
+          <section className="related-guides">
+            <div className="related-guides-heading"><h2>Explore more guides</h2><a href="/dashboard#credit-learning">All guides <ArrowRight /></a></div>
+            <div className="related-guide-grid">
+              {otherGuides.map(([otherSlug, otherGuide]) => {
+                const OtherIcon = otherGuide.icon
+                return <a className="related-guide-card" href={`/guides/${otherSlug}`} key={otherSlug}><span><OtherIcon /></span><strong>{otherGuide.title}</strong><small>{otherGuide.readTime} <ArrowRight /></small></a>
+              })}
+            </div>
+          </section>
+        </div>
+      </main>
+    </div>
+  )
+}
+
 function DashboardPage({ user, onLogout }: { user: AuthUser; onLogout: () => void }) {
   const [status, setStatus] = useState<DashboardStatus | null>(null)
   const [options, setOptions] = useState<ReportOptions | null>(null)
-  const [reportDetail, setReportDetail] = useState<ReportDetail | null>(null)
   const [providerDiagnostics, setProviderDiagnostics] = useState<Partial<Record<BureauId, ProviderDiagnostics>>>({})
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
@@ -1660,11 +1915,12 @@ function DashboardPage({ user, onLogout }: { user: AuthUser; onLogout: () => voi
   const [supportError, setSupportError] = useState('')
   const [supportNotice, setSupportNotice] = useState('')
   const [busyBureau, setBusyBureau] = useState<BureauId | null>(null)
+  const [downloadingReport, setDownloadingReport] = useState(false)
+  const [downloadReportError, setDownloadReportError] = useState('')
   const [selectedBureau, setSelectedBureau] = useState<BureauId | null>(null)
   const [activeNav, setActiveNav] = useState('#dashboard-overview')
   const [notice, setNotice] = useState<{ tone: 'info' | 'success' | 'error'; text: string } | null>(null)
   const [simCheckout, setSimCheckout] = useState<SimulatedCheckoutState | null>(null)
-  const handleReportDetailLoaded = useCallback((detail: ReportDetail) => setReportDetail(detail), [])
   const firstName = user.full_name.trim().split(' ')[0] || 'there'
   const hour = new Date().getHours()
   const greeting = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening'
@@ -1771,8 +2027,29 @@ function DashboardPage({ user, onLogout }: { user: AuthUser; onLogout: () => voi
   const completedReports = status.reports.filter((report) => report.status === 'completed')
   const activeBureau = selectedBureau && reportFor(selectedBureau)?.status === 'completed' ? selectedBureau : completedReports[0]?.bureau ?? null
   const activeReport = activeBureau ? reportFor(activeBureau) : undefined
-  const activeReportDetail = reportDetail?.bureau === activeReport?.bureau ? reportDetail : null
   const price = options?.price ?? 99
+  const downloadActiveReport = async () => {
+    if (!activeReport || downloadingReport) return
+    setDownloadingReport(true)
+    setDownloadReportError('')
+    try {
+      const response = await fetch(`${apiUrl}/api/reports/${activeReport.request_id}/pdf`, { headers: authHeaders(user) })
+      if (!response.ok) {
+        const result = await response.json().catch(() => null) as { message?: string } | null
+        throw new Error(result?.message || 'Unable to download your report.')
+      }
+      const url = URL.createObjectURL(await response.blob())
+      const link = document.createElement('a')
+      link.href = url
+      link.download = `ScoreNow-${activeReport.bureau}-report-${activeReport.report_date ?? 'latest'}.pdf`
+      link.click()
+      window.setTimeout(() => URL.revokeObjectURL(url), 1000)
+    } catch (error) {
+      setDownloadReportError(error instanceof Error ? error.message : 'Unable to download your report.')
+    } finally {
+      setDownloadingReport(false)
+    }
+  }
   const sidebarItems: { icon: typeof House; label: string; href: string; external?: boolean }[] = [
     { icon: FileSearch, label: 'Credit score', href: '#dashboard-overview' },
     { icon: FileCheck2, label: 'Download report', href: activeReport ? '#my-report' : '#credit-reports' },
@@ -1932,16 +2209,23 @@ function DashboardPage({ user, onLogout }: { user: AuthUser; onLogout: () => voi
       setBusyBureau(null)
     }
   }
-  const needleAngle = activeReport?.credit_score ? 180 + ((activeReport.credit_score - 300) / 600) * 180 : 180
+  const scoreProgress = activeReport?.credit_score
+    ? Math.max(0, Math.min(1, (activeReport.credit_score - 300) / 600))
+    : 0.5
+  const scoreMarkerPosition = {
+    left: `${scoreProgress * 100}%`,
+    top: `${(1 - Math.sin(Math.PI * scoreProgress)) * 100}%`,
+  }
 
   return (
     <div className="dashboard-shell">
+      <a className="dashboard-skip-link" href="#dashboard-main">Skip to dashboard content</a>
       <aside className="dashboard-sidebar">
         <Brand href="/" />
         <nav aria-label="Dashboard navigation">
           {sidebarItems.map(({ icon: Icon, label, href, external }) => (
             <Fragment key={label}>
-              <a href={href} className={activeNav === href ? 'active' : ''} onClick={() => setActiveNav(href)}><Icon /><span>{label}</span>{!external && <ArrowRight />}</a>
+              <a href={href} className={activeNav === href ? 'active' : ''} aria-current={activeNav === href ? 'page' : undefined} onClick={() => setActiveNav(href)}><Icon /><span>{label}</span>{!external && <ArrowRight />}</a>
               {label === 'Report insights' && <div className="dashboard-sidebar-subnav" aria-label="Report sections">
                 {[
                   ['All accounts', activeReport ? '#credit-accounts' : '#credit-reports'],
@@ -1961,7 +2245,7 @@ function DashboardPage({ user, onLogout }: { user: AuthUser; onLogout: () => voi
         </div>
       </aside>
 
-      <main className="dashboard-main">
+      <main className="dashboard-main" id="dashboard-main">
         <header className="dashboard-topbar">
           <div className="dashboard-page-heading"><span>Score Now <b>/</b> Credit workspace</span><strong>Your dashboard</strong></div>
           <div className="dashboard-top-actions">
@@ -1984,7 +2268,7 @@ function DashboardPage({ user, onLogout }: { user: AuthUser; onLogout: () => voi
           <section className="dashboard-grid dashboard-overview-grid" id="dashboard-overview">
             {activeReport
               ? <article className="dashboard-card score-card">
-                  <div className="dashboard-card-heading">
+                  <div className="dashboard-card-heading score-card-header">
                     <strong>Your credit score</strong>
                     <span className="score-report-date"><Clock3 /> Updated {formatDate(activeReport.report_date)}{activeReport.is_demo ? ' · Sample' : ''}</span>
                   </div>
@@ -1995,61 +2279,35 @@ function DashboardPage({ user, onLogout }: { user: AuthUser; onLogout: () => voi
                       </button>
                     ))}
                   </div>}
-                  <div className="dashboard-score-area">
+                  <div className="score-card-body">
                     <div className={`dashboard-gauge score-band-${scoreBandTone(activeReport.score_band)}`} aria-label={`Credit score ${activeReport.credit_score ?? 'unavailable'} out of 900`}>
-                      <div className="dashboard-gauge-track" />
-                      <div className="dashboard-gauge-needle" style={{ transform: `rotate(${needleAngle}deg)` }} />
+                      <div className="dashboard-gauge-track"><div className="dashboard-gauge-needle" style={scoreMarkerPosition} /></div>
                       <strong>{activeReport.credit_score ?? '—'}</strong>
-                      <small>{activeReport.score_band || 'See full report'}</small>
                       <span className="gauge-min">300</span><span className="gauge-max">900</span>
                     </div>
                     <div className="dashboard-score-copy">
-                      <strong><ShieldCheck /> {activeReport.score_band ? `Your score is ${activeReport.score_band.toLowerCase()}` : bureauName(activeReport.bureau)}</strong>
+                      <span className={`score-status-label score-band-${scoreBandTone(activeReport.score_band)}`}>{activeReport.score_band || 'Score available'}</span>
+                      <strong>{activeReport.overdue_accounts
+                        ? `${activeReport.overdue_accounts} account${activeReport.overdue_accounts === 1 ? '' : 's'} need attention`
+                        : activeReport.score_band?.toLowerCase().includes('needs attention')
+                          ? 'Your score needs attention'
+                          : 'Your credit score is ready'}</strong>
                       <p>{activeReport.overdue_accounts
-                        ? `${activeReport.overdue_accounts} account${activeReport.overdue_accounts === 1 ? '' : 's'} reported overdue. Review your account details and payment history below.`
-                        : activeReport.credit_score
-                          ? `Your ${bureauName(activeReport.bureau)} report is ready. Explore the summary and account details below.`
-                          : 'Your score details are available in the full report.'}</p>
-                      <span>Score range <b>300–900</b></span>
+                        ? 'Review your account details and payment history to see what may need action.'
+                        : `Explore your ${bureauName(activeReport.bureau)} report and account details.`}</p>
+                      <div className="score-card-actions">
+                        <button className="dashboard-primary-action" type="button" onClick={() => void downloadActiveReport()} disabled={downloadingReport}>
+                          <Download /> {downloadingReport ? 'Preparing report…' : 'Download my report'}
+                        </button>
+                        <a href="#my-report">Understand my report <ArrowRight /></a>
+                      </div>
+                      {downloadReportError && <p className="dashboard-notice error score-download-error" role="alert">{downloadReportError}</p>}
                     </div>
                   </div>
-                  <a className="dashboard-primary-action" href="#my-report">Understand my report <ArrowRight /></a>
                 </article>
               : <article className="dashboard-card empty-report-card">
                   <div className="empty-dashboard-state"><FileSearch /><strong>Your credit picture starts here</strong><span>Choose a bureau to securely request your report. We’ll help you understand the information and decide what to focus on.</span></div>
                 </article>}
-            <article className="dashboard-card dashboard-insights-card" id="score-insights">
-              <div className="dashboard-card-heading">
-                <strong><Lightbulb /> What’s affecting your score?</strong>
-                {activeReport && <a href="#my-report">View report <ArrowRight /></a>}
-              </div>
-              {activeReportDetail?.scoreFactors?.length ? (
-                <ul className="dashboard-factor-list">
-                  {activeReportDetail.scoreFactors.slice(0, 4).map((factor) => (
-                    <li key={factor.text} className={factor.impact}>
-                      <span className="dashboard-factor-icon">{factor.impact === 'negative' ? <ArrowRight /> : <Check />}</span>
-                      <div><strong>{factor.text}</strong>{factor.tip && <small>{factor.tip}</small>}</div>
-                    </li>
-                  ))}
-                </ul>
-              ) : activeReport ? (
-                <div className="dashboard-insights-empty">
-                  <span><ShieldCheck /></span>
-                  <strong>{activeReport.overdue_accounts ? 'Review your reported overdue accounts' : 'Your report is ready to explore'}</strong>
-                  <p>{activeReport.overdue_accounts
-                    ? `${activeReport.overdue_accounts} overdue account${activeReport.overdue_accounts === 1 ? '' : 's'} reported by ${bureauName(activeReport.bureau)}. See the account details and payment history for context.`
-                    : 'Open your detailed report to review account information, enquiries, and payment history.'}</p>
-                  <a href="#my-report">Explore report insights <ArrowRight /></a>
-                </div>
-              ) : (
-                <div className="dashboard-insights-empty">
-                  <span><FileSearch /></span>
-                  <strong>Your report insights will appear here</strong>
-                  <p>Get a credit report to see the account details and factors available from your bureau.</p>
-                  <a href="#credit-reports">Choose a bureau <ArrowRight /></a>
-                </div>
-              )}
-            </article>
           </section>
 
           {activeReport && <section className="dashboard-metrics" aria-label="Credit report highlights">
@@ -2101,14 +2359,17 @@ function DashboardPage({ user, onLogout }: { user: AuthUser; onLogout: () => voi
                 const canBuy = available && Boolean(options?.paymentsEnabled) && !busyBureau && report?.status !== 'processing'
                 return (
                   <article className={`bureau-card${activeBureau === bureau.id ? ' selected' : ''}`} key={bureau.id}>
-                    <img src={bureau.logo} alt={bureau.name} />
-                    <strong>{bureau.name}</strong>
+                    <div className="bureau-card-heading">
+                      <img src={bureau.logo} alt="" />
+                      <strong>{bureau.name}</strong>
+                      {activeBureau === bureau.id && <span className="bureau-selected-tag"><Check /> Selected</span>}
+                    </div>
                     {report?.status === 'completed' ? <span className="bureau-status ready"><Check /> Report ready · {formatDate(report.report_date)}</span>
                       : report?.status === 'processing' ? <span className="bureau-status pending"><Clock3 /> Fetching report…</span>
                         : report?.status === 'failed' ? <span className="bureau-status failed"><AlertTriangle /> Report unavailable · retry at no extra charge</span>
                           : <span className="bureau-status">{available ? 'Not fetched yet' : 'Coming soon'}</span>}
                     <div className="bureau-actions">
-                      {report?.status === 'completed' && activeBureau !== bureau.id && <button type="button" className="button button-outline" onClick={() => { setSelectedBureau(bureau.id); document.getElementById('dashboard-overview')?.scrollIntoView({ behavior: 'smooth', block: 'start' }) }}>View score</button>}
+                      {report?.status === 'completed' && <button type="button" className="button button-outline" onClick={() => { setSelectedBureau(bureau.id); document.getElementById('dashboard-overview')?.scrollIntoView({ behavior: 'smooth', block: 'start' }) }}>View score</button>}
                       {report?.status === 'failed'
                         ? <button type="button" className="button button-primary" disabled={Boolean(busyBureau)} onClick={() => void retryReport(report)}>{busy ? 'Fetching…' : <>Retry free <RotateCcw /></>}</button>
                         : <button type="button" className="button button-primary" disabled={!canBuy} onClick={() => void buyReport(bureau.id)}>{busy ? 'Processing…' : report?.status === 'completed' ? `Refresh · ₹${price}` : `Get report · ₹${price}`}</button>}
@@ -2129,10 +2390,39 @@ function DashboardPage({ user, onLogout }: { user: AuthUser; onLogout: () => voi
             {options && !options.paymentsEnabled && <p className="bureau-note">Online payments are being set up. Please check back shortly.</p>}
           </section>
 
-          {activeReport && <div id="my-report" className="dashboard-report-anchor"><ReportDetailView key={activeReport.request_id} user={user} requestId={activeReport.request_id} onLoaded={handleReportDetailLoaded} /></div>}
+          {activeReport && <div id="my-report" className="dashboard-report-anchor"><ReportDetailView key={activeReport.request_id} user={user} requestId={activeReport.request_id} /></div>}
 
-          <section className="dashboard-grid dashboard-grid-bottom learning-only" id="credit-learning">
-            <article className="dashboard-card learning-card"><div className="dashboard-card-heading"><strong><BookOpen /> Improve your credit</strong><span className="learning-count">3 quick guides</span></div><div className="learning-list"><div><span>5 min</span><p><strong>5 Ways to Improve Your Credit Score</strong><small>Simple tips to build a stronger credit profile.</small></p></div><div><span>4 min</span><p><strong>What is a Good Credit Score?</strong><small>Understand score ranges and what they mean.</small></p></div><div><span>6 min</span><p><strong>How Credit Enquiries Affect Your Score</strong><small>Learn how to manage credit applications.</small></p></div></div></article>
+          <section className="dashboard-card learning-card" id="credit-learning">
+            <div className="learning-heading">
+              <div>
+                <h2><BarChart3 /> Improve your credit</h2>
+                <p>Explore quick guides to understand your credit better and take control of your financial future.</p>
+              </div>
+              <span className="learning-count">3 quick guides</span>
+            </div>
+            <div className="learning-guides">
+              <article className="learning-guide blue">
+                <div className="learning-guide-top"><span className="learning-guide-icon"><TrendingUp /></span><span className="learning-guide-time">5 min</span></div>
+                <h3>5 Ways to Improve Your Credit Score</h3>
+                <p>Simple tips to build a stronger credit profile.</p>
+                <a href="/guides/improve-credit-score">Read guide <ArrowRight /></a>
+                <TrendingUp className="learning-guide-art" aria-hidden="true" />
+              </article>
+              <article className="learning-guide green">
+                <div className="learning-guide-top"><span className="learning-guide-icon"><Gauge /></span><span className="learning-guide-time">4 min</span></div>
+                <h3>What is a Good Credit Score?</h3>
+                <p>Understand score ranges and what they mean.</p>
+                <a href="/guides/good-credit-score">Read guide <ArrowRight /></a>
+                <Gauge className="learning-guide-art" aria-hidden="true" />
+              </article>
+              <article className="learning-guide amber">
+                <div className="learning-guide-top"><span className="learning-guide-icon"><FileSearch /></span><span className="learning-guide-time">6 min</span></div>
+                <h3>How Credit Enquiries Affect Your Score</h3>
+                <p>Learn how to manage credit applications.</p>
+                <a href="/guides/credit-enquiries">Read guide <ArrowRight /></a>
+                <FileSearch className="learning-guide-art" aria-hidden="true" />
+              </article>
+            </div>
           </section>
 
           <section className="dashboard-account-grid">
@@ -2471,7 +2761,7 @@ function DashboardRoute() {
   if (!user) return null
   return <>
     <DashboardPage user={user} onLogout={logout} />
-    <ChatAssistant requireLogin={requireLogin} />
+    <ChatAssistant requireLogin={requireLogin} isDashboard />
     {authModal}
   </>
 }
@@ -3379,18 +3669,24 @@ function AdminPage() {
 
 function App() {
   const pathname = window.location.pathname.replace(/\/$/, '')
+  const guideSlug = pathname.startsWith('/guides/') ? pathname.slice('/guides/'.length) : ''
+  const currentGuide = creditGuides[guideSlug as CreditGuideSlug]
   useEffect(() => {
     const isBusinessPage = pathname === '/business'
     const isCreditScorePage = pathname === '/creditscore'
     const isAdminPage = pathname === '/admin'
-    const title = isCreditScorePage
+    const title = currentGuide
+      ? `${currentGuide.title} | Score Now`
+      : isCreditScorePage
       ? 'Credit Score Report Request | Score Now'
       : isAdminPage
         ? 'Administrator | Score Now'
         : isBusinessPage
         ? 'Business Credit Report & CMR Guidance | Score Now'
         : 'Credit Score Guidance & Report Help in India | Score Now'
-    const description = isBusinessPage
+    const description = currentGuide
+      ? currentGuide.description
+      : isBusinessPage
       ? 'Understand your commercial credit report, identify CMR issues, and get practical business credit guidance from Score Now.'
       : isAdminPage
         ? 'Private Score Now administration workspace.'
@@ -3413,11 +3709,12 @@ function App() {
     updateMeta('meta[name="twitter:title"]', 'content', title)
     updateMeta('meta[name="twitter:description"]', 'content', description)
     document.querySelector<HTMLLinkElement>('link[rel="canonical"]')?.setAttribute('href', canonicalUrl)
-  }, [pathname])
+  }, [pathname, currentGuide])
 
   if (pathname === '/creditscore') return <CreditScorePage />
   if (pathname === '/dashboard') return <DashboardRoute />
   if (pathname === '/admin') return <AdminPage />
+  if (pathname.startsWith('/guides/')) return <CreditGuidePage slug={guideSlug} />
   return pathname === '/business' ? <BusinessPage /> : <HomePage />
 }
 

@@ -22,6 +22,7 @@ import {
 } from "./bureaus.js";
 import {
   completeReportRequest,
+  authenticateCustomerByEmail,
   authenticateDatabaseAdmin,
   createDemoReportRequest,
   createAdminReportAudit,
@@ -61,6 +62,7 @@ import {
   revokeSession,
   revokeAdminSession,
   setAdminAccountStatus,
+  setCustomerPassword,
   setCustomerAccountStatus,
   updateSupportTicket,
   createSupportTicket,
@@ -135,6 +137,7 @@ const requireAdminRoles = (...roles: ("owner" | "manager" | "support" | "analyst
 const adminLoginAttempts = new Map<string, { count: number; resetAt: number }>();
 const MAX_ADMIN_LOGIN_ATTEMPTS = 5;
 const ADMIN_LOGIN_WINDOW_MS = 15 * 60 * 1000;
+const customerEmailLoginAttempts = new Map<string, { count: number; resetAt: number }>();
 const equalSecret = (candidate: string, expected: string) => timingSafeEqual(
   createHash("sha256").update(candidate).digest(),
   createHash("sha256").update(expected).digest(),
@@ -145,6 +148,18 @@ const canAttemptAdminLogin = (ipAddress: string) => {
   const attempt = adminLoginAttempts.get(ipAddress);
   if (!attempt || attempt.resetAt <= now) {
     adminLoginAttempts.set(ipAddress, { count: 1, resetAt: now + ADMIN_LOGIN_WINDOW_MS });
+    return true;
+  }
+  if (attempt.count >= MAX_ADMIN_LOGIN_ATTEMPTS) return false;
+  attempt.count += 1;
+  return true;
+};
+
+const canAttemptCustomerEmailLogin = (ipAddress: string) => {
+  const now = Date.now();
+  const attempt = customerEmailLoginAttempts.get(ipAddress);
+  if (!attempt || attempt.resetAt <= now) {
+    customerEmailLoginAttempts.set(ipAddress, { count: 1, resetAt: now + ADMIN_LOGIN_WINDOW_MS });
     return true;
   }
   if (attempt.count >= MAX_ADMIN_LOGIN_ATTEMPTS) return false;
@@ -203,6 +218,34 @@ const fieldLabels: Record<string, string> = {
 
 app.get("/api/health", (_request, response) => {
   response.json({ status: "ok", service: "Score Now API" });
+});
+
+app.post("/api/auth/email/login", async (request, response) => {
+  const ipAddress = requestIpAddress(request);
+  if (!canAttemptCustomerEmailLogin(ipAddress)) {
+    response.status(429).json({ message: "Too many sign-in attempts. Try again in 15 minutes." });
+    return;
+  }
+
+  const email = String(request.body.email || "").trim().toLowerCase();
+  const password = String(request.body.password || "");
+  if (!/^\S+@\S+\.\S+$/.test(email) || password.length < 1 || password.length > 128) {
+    response.status(400).json({ message: "Enter a valid email address and password." });
+    return;
+  }
+
+  try {
+    const user = await authenticateCustomerByEmail(email, password);
+    if (!user) {
+      response.status(401).json({ message: "Email or password is incorrect." });
+      return;
+    }
+    customerEmailLoginAttempts.delete(ipAddress);
+    response.json({ message: "Signed in successfully.", user, token: await startSession(request, user.id) });
+  } catch (error) {
+    console.error("Customer email sign-in failed", error);
+    response.status(500).json({ message: "Unable to sign in right now. Please try again." });
+  }
 });
 
 app.post("/api/admin/login", async (request, response) => {
@@ -689,9 +732,16 @@ app.post("/api/auth/otp/verify", async (request, response) => {
   const code = String(request.body.code || "").trim();
   const fullName = String(request.body.fullName || "").trim();
   const email = String(request.body.email || "").trim().toLowerCase();
+  const password = String(request.body.password || "");
+  const intent = request.body.intent === "signup" ? "signup" : "login";
 
   if (!type || !value || !/^\d{6}$/.test(code)) {
     response.status(400).json({ message: "Enter the 6-digit code you received." });
+    return;
+  }
+  if (intent === "signup" && (type !== "mobile" || fullName.length < 2 ||
+      !/^\S+@\S+\.\S+$/.test(email) || password.length < 8 || password.length > 128)) {
+    response.status(400).json({ message: "Sign-up requires your name, a valid email, and a password of 8 to 128 characters." });
     return;
   }
 
@@ -700,6 +750,10 @@ app.post("/api/auth/otp/verify", async (request, response) => {
       const mobile = value.replace(/\D/g, "");
       await verifyOtp({ mobile, code, purpose: "login" });
       const user = await upsertUserByMobile({ mobile, fullName, email: email || undefined });
+      if (intent === "signup" && !await setCustomerPassword(user.id, email, password)) {
+        response.status(409).json({ message: "That email is already linked to another account, or the account cannot be updated." });
+        return;
+      }
       response.json({ message: "Verified successfully.", user, token: await startSession(request, user.id) });
       return;
     }
@@ -722,8 +776,15 @@ app.post("/api/auth/firebase-session", async (request, response) => {
   const idToken = String(request.body.idToken || "");
   const fullName = String(request.body.fullName || "").trim();
   const email = String(request.body.email || "").trim().toLowerCase();
+  const password = String(request.body.password || "");
+  const intent = request.body.intent === "signup" ? "signup" : "login";
   if (!idToken) {
     response.status(400).json({ message: "Missing Firebase ID token." });
+    return;
+  }
+  if (intent === "signup" && (fullName.length < 2 || !/^\S+@\S+\.\S+$/.test(email) ||
+      password.length < 8 || password.length > 128)) {
+    response.status(400).json({ message: "Sign-up requires your name, a valid email, and a password of 8 to 128 characters." });
     return;
   }
 
@@ -732,6 +793,10 @@ app.post("/api/auth/firebase-session", async (request, response) => {
     const mobile = token.phone_number!.replace(/^\+91/, "").replace(/\D/g, "");
     if (mobile.length !== 10) throw new Error("Use an Indian mobile number for this account.");
     const user = await upsertUserByMobile({ mobile, fullName, email: email || undefined });
+    if (intent === "signup" && !await setCustomerPassword(user.id, email, password)) {
+      response.status(409).json({ message: "That email is already linked to another account, or the account cannot be updated." });
+      return;
+    }
     response.json({ message: "Phone verified successfully.", user, token: await startSession(request, user.id) });
   } catch (error) {
     console.error("Firebase phone session verification failed", error);
