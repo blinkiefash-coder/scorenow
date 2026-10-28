@@ -1,6 +1,7 @@
 ---
 deployment:
   tasks:
+    - npm --prefix frontend ci --include=dev && npm --prefix frontend run build
     - /bin/mkdir -p /home/spjheceg/public_html/ /home/spjheceg/scorenow-api/dist/
     - /bin/cp -R frontend/dist/. /home/spjheceg/public_html/
     - /bin/cp -R backend/dist/. /home/spjheceg/scorenow-api/dist/
