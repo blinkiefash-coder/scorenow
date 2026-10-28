@@ -447,6 +447,8 @@ function AuthModal({ open, notice, onClose, onSuccess }: { open: boolean; notice
   const pendingEmailRef = useRef('')
   const firebaseConfirmationRef = useRef<ConfirmationResult | null>(null)
 
+  const usesFirebasePhoneAuth = !import.meta.env.DEV
+
   useEffect(() => {
     if (!open) return
     setView('login')
@@ -480,7 +482,7 @@ function AuthModal({ open, notice, onClose, onSuccess }: { open: boolean; notice
   if (!open) return null
 
   const requestOtp = async (type: 'mobile' | 'email', value: string) => {
-    if (type === 'mobile') {
+    if (type === 'mobile' && usesFirebasePhoneAuth) {
       resetFirebaseRecaptcha()
       firebaseConfirmationRef.current = await sendFirebasePhoneOtp(value)
       setSampleOtp('')
@@ -560,6 +562,7 @@ function AuthModal({ open, notice, onClose, onSuccess }: { open: boolean; notice
     setAuthLoading(true)
     try {
       const response = otpContact.type === 'mobile'
+        && usesFirebasePhoneAuth
         ? await (async () => {
             const confirmation = firebaseConfirmationRef.current
             if (!confirmation) throw new Error('Request a new SMS code and try again.')
@@ -574,7 +577,13 @@ function AuthModal({ open, notice, onClose, onSuccess }: { open: boolean; notice
         : await fetch(`${apiUrl}/api/auth/otp/verify`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ type: 'email', value: otpContact.value, code }),
+            body: JSON.stringify({
+              type: otpContact.type,
+              value: otpContact.value,
+              code,
+              fullName: pendingFullNameRef.current,
+              email: pendingEmailRef.current,
+            }),
           })
       const result = await response.json() as { message?: string; user?: Omit<AuthUser, 'token'>; token?: string }
       if (!response.ok) throw new Error(result.message || 'Verification failed.')
@@ -1497,6 +1506,30 @@ type DashboardStatus = {
   reports: BureauReport[]
 }
 
+type SupportTicketComment = {
+  id: string
+  author_type: 'customer' | 'admin'
+  author_id: string
+  author_name: string
+  message: string
+  created_at: string
+}
+
+type SupportTicket = {
+  id: string
+  requester_name: string
+  requester_mobile: string
+  subject: string
+  message: string
+  status: 'open' | 'in_progress' | 'resolved' | 'closed'
+  priority: 'low' | 'normal' | 'high' | 'urgent'
+  assigned_to: string | null
+  created_by: string
+  created_at: string
+  updated_at: string
+  comments: SupportTicketComment[]
+}
+
 type ReportOptions = { price: number; paymentsEnabled: boolean; demoMode: boolean; bureaus: { id: BureauId; name: string; available: boolean }[] }
 
 const bureauCatalog: { id: BureauId; name: string; logo: string }[] = [
@@ -1612,6 +1645,14 @@ function DashboardPage({ user, onLogout }: { user: AuthUser; onLogout: () => voi
   const [options, setOptions] = useState<ReportOptions | null>(null)
   const [providerDiagnostics, setProviderDiagnostics] = useState<Partial<Record<BureauId, ProviderDiagnostics>>>({})
   const [loading, setLoading] = useState(true)
+  const [refreshing, setRefreshing] = useState(false)
+  const [supportTickets, setSupportTickets] = useState<SupportTicket[]>([])
+  const [supportLoading, setSupportLoading] = useState(true)
+  const [supportRefresh, setSupportRefresh] = useState(0)
+  const [supportSubmitting, setSupportSubmitting] = useState(false)
+  const [supportReplying, setSupportReplying] = useState<string | null>(null)
+  const [supportError, setSupportError] = useState('')
+  const [supportNotice, setSupportNotice] = useState('')
   const [busyBureau, setBusyBureau] = useState<BureauId | null>(null)
   const [selectedBureau, setSelectedBureau] = useState<BureauId | null>(null)
   const [activeNav, setActiveNav] = useState('#dashboard-overview')
@@ -1620,8 +1661,9 @@ function DashboardPage({ user, onLogout }: { user: AuthUser; onLogout: () => voi
   const firstName = user.full_name.trim().split(' ')[0] || 'there'
   const hour = new Date().getHours()
   const greeting = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening'
-  const loadStatus = async () => {
-    setLoading(true)
+  const loadStatus = async (refresh = false) => {
+    if (refresh) setRefreshing(true)
+    else setLoading(true)
     try {
       const [statusResponse, optionsResponse] = await Promise.all([
         fetch(`${apiUrl}/api/dashboard`, { headers: authHeaders(user) }),
@@ -1634,14 +1676,85 @@ function DashboardPage({ user, onLogout }: { user: AuthUser; onLogout: () => voi
       if (!statusResponse.ok) throw new Error('Unable to load dashboard')
       setStatus(await statusResponse.json() as DashboardStatus)
       if (optionsResponse.ok) setOptions(await optionsResponse.json() as ReportOptions)
-    } catch {
-      setStatus({ profile: null, reports: [] })
+      if (refresh) setNotice({ tone: 'success', text: 'Your dashboard is up to date.' })
+    } catch (error) {
+      if (refresh) {
+        setNotice({ tone: 'error', text: error instanceof Error ? error.message : 'Unable to refresh your dashboard.' })
+      } else {
+        setStatus({ profile: null, reports: [] })
+      }
     } finally {
-      setLoading(false)
+      if (refresh) setRefreshing(false)
+      else setLoading(false)
     }
   }
 
   useEffect(() => { void loadStatus() }, [user.id])
+
+  useEffect(() => {
+    let cancelled = false
+    fetch(`${apiUrl}/api/support/tickets`, { headers: authHeaders(user) })
+      .then(async (response) => {
+        const result = await response.json() as { tickets?: SupportTicket[]; message?: string }
+        if (!response.ok) throw new Error(result.message || 'Unable to load your support tickets.')
+        if (!cancelled) setSupportTickets(result.tickets || [])
+      })
+      .catch((error: unknown) => {
+        if (!cancelled) setSupportError(error instanceof Error ? error.message : 'Unable to load your support tickets.')
+      })
+      .finally(() => { if (!cancelled) setSupportLoading(false) })
+    return () => { cancelled = true }
+  }, [user, supportRefresh])
+
+  const submitSupportTicket = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    const formElement = event.currentTarget
+    setSupportSubmitting(true)
+    setSupportError('')
+    setSupportNotice('')
+    const form = new FormData(formElement)
+    try {
+      const response = await fetch(`${apiUrl}/api/support/tickets`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...authHeaders(user) },
+        body: JSON.stringify(Object.fromEntries(form.entries())),
+      })
+      const result = await response.json() as { message?: string }
+      if (!response.ok) throw new Error(result.message || 'Unable to submit your support ticket.')
+      formElement.reset()
+      setSupportNotice(result.message || 'Your support ticket was sent to our team.')
+      setSupportLoading(true)
+      setSupportRefresh((refresh) => refresh + 1)
+    } catch (error) {
+      setSupportError(error instanceof Error ? error.message : 'Unable to submit your support ticket.')
+    } finally {
+      setSupportSubmitting(false)
+    }
+  }
+
+  const replyToSupportTicket = async (event: FormEvent<HTMLFormElement>, ticketId: string) => {
+    event.preventDefault()
+    const formElement = event.currentTarget
+    const message = String(new FormData(formElement).get('message') || '').trim()
+    setSupportReplying(ticketId)
+    setSupportError('')
+    try {
+      const response = await fetch(`${apiUrl}/api/support/tickets/${ticketId}/comments`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...authHeaders(user) },
+        body: JSON.stringify({ message }),
+      })
+      const result = await response.json() as { message?: string }
+      if (!response.ok) throw new Error(result.message || 'Unable to send your reply.')
+      formElement.reset()
+      setSupportLoading(true)
+      setSupportRefresh((refresh) => refresh + 1)
+    } catch (error) {
+      setSupportError(error instanceof Error ? error.message : 'Unable to send your reply.')
+    } finally {
+      setSupportReplying(null)
+    }
+  }
 
   if (loading) return <div className="dashboard-loading"><span><RotateCcw /></span><strong>Loading your credit workspace…</strong></div>
   if (!status?.profile) return <ProfileOnboarding user={user} onComplete={() => void loadStatus()} onLogout={onLogout} />
@@ -1693,6 +1806,28 @@ function DashboardPage({ user, onLogout }: { user: AuthUser; onLogout: () => voi
     }
   }
 
+  const recordPaymentFailure = async (orderId: string, failureMessage: string) => {
+    try {
+      const response = await fetch(`${apiUrl}/api/reports/fail`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...authHeaders(user) },
+        body: JSON.stringify({ orderId }),
+      })
+      const result = await response.json() as { message?: string }
+      if (response.status === 401) {
+        onLogout()
+        throw new Error('Your session expired before the failed payment could be recorded.')
+      }
+      if (!response.ok) throw new Error(result.message || 'Unable to record the failed payment.')
+    } catch (error) {
+      console.error('Payment failure history update failed', error)
+      setNotice({
+        tone: 'error',
+        text: `${failureMessage} We could not update the payment history. Please refresh or contact support.`,
+      })
+    }
+  }
+
   const buyReport = async (bureau: BureauId) => {
     setBusyBureau(bureau)
     setNotice(null)
@@ -1729,7 +1864,11 @@ function DashboardPage({ user, onLogout }: { user: AuthUser; onLogout: () => voi
           handler: (payment: RazorpaySuccess) => { void verifyPayment(bureau, payment).finally(resolve) },
           modal: { ondismiss: () => resolve() },
         })
-        checkout.on('payment.failed', (failure) => setNotice({ tone: 'error', text: failure.error?.description || 'Payment failed. You have not been charged.' }))
+        checkout.on('payment.failed', (failure) => {
+          const message = failure.error?.description || 'Payment failed. You have not been charged.'
+          setNotice({ tone: 'error', text: message })
+          void recordPaymentFailure(order.orderId, message)
+        })
         checkout.open()
       })
     } catch (error) {
@@ -1808,28 +1947,71 @@ function DashboardPage({ user, onLogout }: { user: AuthUser; onLogout: () => voi
         <header className="dashboard-topbar">
           <div className="dashboard-page-heading"><span>Score Now <b>/</b> Credit workspace</span><strong>Your dashboard</strong></div>
           <div className="dashboard-top-actions">
+            <span className="dashboard-updated">{activeReport ? <>Last updated <strong>{formatDate(activeReport.report_date)}</strong></> : 'Your credit workspace'}</span>
+            <button className="dashboard-refresh-button" type="button" onClick={() => void loadStatus(true)} disabled={refreshing}>
+              <RotateCcw className={refreshing ? 'spin' : ''} />{refreshing ? 'Refreshing…' : 'Refresh dashboard'}
+            </button>
             <a className="dashboard-score-cta" href="#credit-reports">Get a credit report <ArrowRight /></a>
             <AuthAvatarButton user={user} onClick={() => undefined} onLogout={onLogout} />
           </div>
         </header>
 
         <div className="dashboard-content">
-          <div id="dashboard-overview" className="dashboard-anchor" />
           <div className="dashboard-welcome">
-            <div><span className="dashboard-kicker">CREDIT DASHBOARD</span><h1>{greeting}, {firstName}! <span>👋</span></h1><p>{completedReports.length ? 'Your credit profile, all in one place.' : 'Choose a bureau to get started with your credit report.'}</p></div>
+            <div><span className="dashboard-kicker">YOUR CREDIT WORKSPACE</span><h1>{greeting}, {firstName}! <span>👋</span></h1><p>{completedReports.length ? 'Your credit picture, with Score Now here to help you understand what comes next.' : 'Start with a report. We’ll help you understand it and guide you through what to do next.'}</p></div>
           </div>
 
           {notice && <p className={`dashboard-notice ${notice.tone}`} role="status">{notice.text}</p>}
 
           <section className="dashboard-grid dashboard-overview-grid" id="dashboard-overview">
-            {activeReport ? <>
-              <article className="dashboard-card score-card">
-                <div className="dashboard-card-heading"><strong>Your credit score</strong></div>
-                <div className="dashboard-score-area"><div className={`dashboard-gauge score-band-${scoreBandTone(activeReport.score_band)}`}><div className="dashboard-gauge-track" /><div className="dashboard-gauge-needle" style={{ transform: `rotate(${needleAngle}deg)` }} /><strong>{activeReport.credit_score ?? '—'}</strong><small>{activeReport.score_band || 'See full report'}</small><span className="gauge-min">300</span><span className="gauge-max">900</span></div><div className="dashboard-score-copy"><strong><ShieldCheck /> {bureauName(activeReport.bureau)}</strong><p>{activeReport.credit_score ? 'Your latest score from this bureau.' : 'Your score is available in the full report.'}</p><span>Score range <b>300–900</b></span></div></div>
-                <a className="dashboard-primary-action" href="#credit-accounts">View account details <ArrowRight /></a>
-              </article>
-            </> : <article className="dashboard-card empty-report-card"><div className="empty-dashboard-state"><FileSearch /><strong>No credit data yet</strong><span>Choose CIBIL, Equifax, or Experian above. Your score, accounts, and enquiries will appear here once the report is fetched.</span></div></article>}
+            {activeReport
+              ? <article className="dashboard-card score-card">
+                  <div className="dashboard-card-heading">
+                    <strong>Your credit score</strong>
+                    <span className="score-report-date"><Clock3 /> Updated {formatDate(activeReport.report_date)}{activeReport.is_demo ? ' · Sample' : ''}</span>
+                  </div>
+                  <div className="dashboard-score-area">
+                    <div className={`dashboard-gauge score-band-${scoreBandTone(activeReport.score_band)}`} aria-label={`Credit score ${activeReport.credit_score ?? 'unavailable'} out of 900`}>
+                      <div className="dashboard-gauge-track" />
+                      <div className="dashboard-gauge-needle" style={{ transform: `rotate(${needleAngle}deg)` }} />
+                      <strong>{activeReport.credit_score ?? '—'}</strong>
+                      <small>{activeReport.score_band || 'See full report'}</small>
+                      <span className="gauge-min">300</span><span className="gauge-max">900</span>
+                    </div>
+                    <div className="dashboard-score-copy">
+                      <strong><ShieldCheck /> {bureauName(activeReport.bureau)}</strong>
+                      <p>{activeReport.credit_score ? 'This is your latest score from this credit bureau.' : 'Your score details are available in the full report.'}</p>
+                      <span>Score range <b>300–900</b></span>
+                    </div>
+                  </div>
+                  <a className="dashboard-primary-action" href="#my-report">Understand my report <ArrowRight /></a>
+                </article>
+              : <article className="dashboard-card empty-report-card">
+                  <div className="empty-dashboard-state"><FileSearch /><strong>Your credit picture starts here</strong><span>Choose a bureau to securely request your report. We’ll help you understand the information and decide what to focus on.</span></div>
+                </article>}
+            <article className="dashboard-card dashboard-guidance-card">
+              <span className="dashboard-guidance-label"><Sparkles /> YOUR NEXT STEP</span>
+              <div className="dashboard-guidance-icon"><ShieldCheck /></div>
+              <h2>{activeReport ? 'Let’s make sense of your report' : 'We’ll guide you from here'}</h2>
+              <p>{activeReport
+                ? 'Your report has the details behind your score. Review your accounts and enquiries, and we’ll help you understand what stands out.'
+                : 'Start with a credit report. Score Now will help you understand your credit profile and find a clear next step.'}</p>
+              <ul>
+                <li><Check /> Clear explanations, not confusing jargon</li>
+                <li><Check /> Guidance based on your report details</li>
+                <li><Check /> Support from our team when you need it</li>
+              </ul>
+              <a className="dashboard-guidance-action" href={activeReport ? '#my-report' : '#credit-reports'}>{activeReport ? 'Review my report' : 'Choose a credit report'} <ArrowRight /></a>
+              <small><LockKeyhole /> Your report stays private in your account.</small>
+            </article>
           </section>
+
+          {activeReport && <section className="dashboard-metrics" aria-label="Credit report highlights">
+            <article className="dashboard-card dashboard-metric"><span className="dashboard-metric-icon blue"><WalletCards /></span><div><small>Total accounts</small><strong>{activeReport.total_accounts ?? '—'}</strong><span>Listed on your report</span></div></article>
+            <article className="dashboard-card dashboard-metric"><span className="dashboard-metric-icon green"><Check /></span><div><small>Active accounts</small><strong>{activeReport.active_accounts ?? '—'}</strong><span>Currently open</span></div></article>
+            <article className="dashboard-card dashboard-metric"><span className="dashboard-metric-icon gold"><BadgeIndianRupee /></span><div><small>Outstanding balance</small><strong>{activeReport.total_outstanding === null ? '—' : formatMoney(Number(activeReport.total_outstanding))}</strong><span>Across reported accounts</span></div></article>
+            <article className="dashboard-card dashboard-metric"><span className={`dashboard-metric-icon ${activeReport.overdue_accounts ? 'red' : 'green'}`}><AlertTriangle /></span><div><small>Overdue accounts</small><strong>{activeReport.overdue_accounts ?? '—'}</strong><span>As shown by {bureauName(activeReport.bureau)}</span></div></article>
+          </section>}
 
           <section className="dashboard-card bureau-section" id="credit-reports">
             <div className="dashboard-card-heading"><strong>Your Credit Reports</strong><small><LockKeyhole /> ₹{price} per report · secure payment by Razorpay</small></div>
@@ -1904,6 +2086,33 @@ function DashboardPage({ user, onLogout }: { user: AuthUser; onLogout: () => voi
 
           <section className="dashboard-card help-card" id="help-support">
             <div className="dashboard-card-heading"><strong><CircleHelp /> Help &amp; support</strong><small>Mon–Sat · 10 AM – 7 PM</small></div>
+            <form className="customer-ticket-form" onSubmit={(event) => void submitSupportTicket(event)}>
+              <h3>Send a message to our support team</h3>
+              <label>What do you need help with?<input name="subject" minLength={3} maxLength={180} placeholder="Briefly describe your issue" required /></label>
+              <label>Message<textarea name="message" rows={4} minLength={3} maxLength={4000} placeholder="Include details that will help us resolve this for you." required /></label>
+              {supportError && <p className="dashboard-notice error" role="alert">{supportError}</p>}
+              {supportNotice && <p className="dashboard-notice info" role="status">{supportNotice}</p>}
+              <button type="submit" className="button button-primary" disabled={supportSubmitting}>{supportSubmitting ? <><RotateCcw className="spin" /> Sending…</> : <>Submit support ticket <ArrowRight /></>}</button>
+            </form>
+            <div className="customer-ticket-section">
+              <div className="customer-ticket-heading"><h3>Your support tickets</h3><button type="button" className="button button-outline" onClick={() => { setSupportLoading(true); setSupportRefresh((refresh) => refresh + 1) }} disabled={supportLoading}><RotateCcw /> Refresh</button></div>
+              {supportLoading && <div className="customer-ticket-loading" role="status"><RotateCcw className="spin" /> Loading your tickets…</div>}
+              {!supportLoading && supportTickets.length === 0 && <p className="customer-ticket-empty">Your submitted support requests will appear here.</p>}
+              <div className="customer-ticket-list">
+                {supportTickets.map((ticket) => <article className="customer-ticket" key={ticket.id}>
+                  <div className="customer-ticket-top"><div><strong>{ticket.subject}</strong><span className={`admin-status ${ticket.status === 'resolved' || ticket.status === 'closed' ? 'completed' : 'pending'}`}>{ticket.status.replace('_', ' ')}</span></div><time>{formatAdminTimestamp(ticket.updated_at)}</time></div>
+                  <p className="customer-ticket-original">{ticket.message}</p>
+                  {ticket.comments.length > 0 && <div className="customer-ticket-comments" aria-label="Ticket conversation">
+                    {ticket.comments.map((comment) => <div className={`customer-ticket-comment ${comment.author_type}`} key={comment.id}><div><strong>{comment.author_type === 'admin' ? 'Score Now support' : 'You'}</strong><time>{formatAdminTimestamp(comment.created_at)}</time></div><p>{comment.message}</p></div>)}
+                  </div>}
+                  {ticket.status !== 'closed' && <form className="customer-ticket-reply" onSubmit={(event) => void replyToSupportTicket(event, ticket.id)}>
+                    <label className="sr-only" htmlFor={`customer-ticket-reply-${ticket.id}`}>Reply to {ticket.subject}</label>
+                    <input id={`customer-ticket-reply-${ticket.id}`} name="message" maxLength={4000} placeholder="Add a reply…" required />
+                    <button className="button button-outline" type="submit" disabled={supportReplying === ticket.id}>{supportReplying === ticket.id ? 'Sending…' : 'Reply'}</button>
+                  </form>}
+                </article>)}
+              </div>
+            </div>
             <div className="help-options">
               <button type="button" className="help-option" onClick={() => window.dispatchEvent(new Event(openChatEvent))}><MessageCircle /><span><strong>Chat with Neha</strong><small>Get a quick suggested next step</small></span><ArrowRight /></button>
               <a className="help-option" href="https://wa.me/919114141011?text=Hello%20Score%20Now%2C%20I%20need%20help%20with%20my%20credit%20report." target="_blank" rel="noreferrer"><MessageCircle /><span><strong>WhatsApp</strong><small>+91 91141 41011</small></span><ArrowRight /></a>
@@ -2323,25 +2532,137 @@ function CreditScorePage() {
   )
 }
 
+type AdminRole = 'owner' | 'manager' | 'support' | 'analyst'
+
+type AdminActivity = {
+  summary: {
+    totalUsers: number
+    paidPayments: number
+    paymentRevenue: number
+    failedPayments: number
+    reportRequests: number
+    failedReportRequests: number
+  }
+  payments: {
+    id: string
+    full_name: string
+    mobile_last4: string
+    bureau: BureauId | null
+    amount: string | number
+    gst_amount: string | number
+    gateway: string
+    status: string
+    failure_reason: string | null
+    created_at: string
+    paid_at: string | null
+    failure_at: string | null
+    report_status: string | null
+    report_failure_reason: string | null
+  }[]
+  adminReports: {
+    id: string
+    full_name: string | null
+    mobile_last4: string
+    bureau: BureauId
+    status: string
+    credit_score: number | null
+    failure_reason: string | null
+    admin_id: string
+    created_at: string
+    completed_at: string | null
+  }[]
+  pagination: {
+    page: number
+    pageSize: number
+    totalPayments: number
+    totalAdminReports: number
+  }
+}
+
+type AdminCustomer = {
+  id: string
+  full_name: string
+  mobile: string
+  email: string | null
+  status: string
+  created_at: string
+  pan_last4: string | null
+  kyc_status: string | null
+  total_payments: string
+  paid_payments: string
+  latest_report_status: string | null
+  last_login: string | null
+  journey_stage: string
+}
+
+type AdminTicket = SupportTicket
+
+type AdminAnalytics = {
+  summary: Record<string, number>
+  trend: { day: string; signups: number; paid_orders: number; revenue: number; failed_attempts: number }[]
+  funnel: { step: string; count: number }[]
+}
+
+type AdminTeamMember = { email: string; full_name: string; role: string; status: string; created_at: string }
+
+type AdminCustomerInvitation = { id: string; full_name: string; mobile: string; email: string | null; status: string; created_at: string }
+
+const formatAdminTimestamp = (value: string | null) => value
+  ? new Date(value).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' })
+  : '—'
+
 function AdminPage() {
   const [token, setToken] = useState(() => sessionStorage.getItem('scorenow-admin-token') || '')
   const [adminId, setAdminId] = useState('')
+  const [adminRole, setAdminRole] = useState<'owner' | 'manager' | 'support' | 'analyst'>('owner')
+  const [activeSection, setActiveSection] = useState<'overview' | 'customers' | 'reports' | 'analytics' | 'tickets' | 'journey' | 'team'>('overview')
   const [authState, setAuthState] = useState<'checking' | 'signed-out' | 'signed-in'>(token ? 'checking' : 'signed-out')
   const [loginError, setLoginError] = useState('')
   const [reportError, setReportError] = useState('')
   const [loading, setLoading] = useState(false)
   const [bureau, setBureau] = useState<BureauId>('cibil')
   const [report, setReport] = useState<ReportDetail | null>(null)
+  const [activity, setActivity] = useState<AdminActivity | null>(null)
+  const [activityError, setActivityError] = useState('')
+  const [activityLoading, setActivityLoading] = useState(true)
+  const [activitySearch, setActivitySearch] = useState('')
+  const [activityRefresh, setActivityRefresh] = useState(0)
+  const [activityPage, setActivityPage] = useState(1)
+  const [customerSearch, setCustomerSearch] = useState('')
+  const [customerPage, setCustomerPage] = useState(1)
+  const [customers, setCustomers] = useState<AdminCustomer[]>([])
+  const [customerTotal, setCustomerTotal] = useState(0)
+  const [manualChecks, setManualChecks] = useState<AdminActivity['adminReports']>([])
+  const [customerInvitations, setCustomerInvitations] = useState<AdminCustomerInvitation[]>([])
+  const [analytics, setAnalytics] = useState<AdminAnalytics | null>(null)
+  const [tickets, setTickets] = useState<AdminTicket[]>([])
+  const [team, setTeam] = useState<AdminTeamMember[]>([])
+  const [primaryAdmin, setPrimaryAdmin] = useState<string | null>(null)
+  const [sectionError, setSectionError] = useState('')
+  const [sectionRefresh, setSectionRefresh] = useState(0)
+  const [ticketStatus, setTicketStatus] = useState('open')
+  const [inviteUrl, setInviteUrl] = useState('')
+  const [teamInviteToken, setTeamInviteToken] = useState(() => new URLSearchParams(window.location.search).get('invite') || '')
+  const [teamNotice, setTeamNotice] = useState('')
+  const [sectionLoading, setSectionLoading] = useState(true)
+
+  const refreshActivity = () => {
+    setActivityLoading(true)
+    setActivityError('')
+    setActivityRefresh((refresh) => refresh + 1)
+  }
 
   useEffect(() => {
     if (!token) return
     let cancelled = false
     fetch(`${apiUrl}/api/admin/session`, { headers: { Authorization: `Bearer ${token}` } })
       .then(async (response) => {
-        const result = await response.json() as { adminId?: string }
+        const result = await response.json() as { adminId?: string; role?: AdminRole }
         if (!response.ok) throw new Error('Admin session expired. Sign in again.')
         if (!cancelled) {
           setAdminId(result.adminId || 'Admin')
+          setAdminRole(result.role || 'owner')
+          setActiveSection(result.role === 'support' ? 'customers' : result.role === 'analyst' ? 'analytics' : 'overview')
           setAuthState('signed-in')
         }
       })
@@ -2355,6 +2676,86 @@ function AdminPage() {
     return () => { cancelled = true }
   }, [token])
 
+  useEffect(() => {
+    if (authState !== 'signed-in' || !token || !['owner', 'manager'].includes(adminRole)) return
+    let cancelled = false
+    fetch(`${apiUrl}/api/admin/activity?page=${activityPage}`, { headers: { Authorization: 'Bearer ' + token } })
+      .then(async (response) => {
+        const result = await response.json() as AdminActivity & { message?: string }
+        if (response.status === 401) {
+          sessionStorage.removeItem('scorenow-admin-token')
+          if (!cancelled) {
+            setToken('')
+            setAuthState('signed-out')
+          }
+          throw new Error('Admin session expired. Sign in again.')
+        }
+        if (!response.ok) throw new Error(result.message || 'Unable to load admin activity.')
+        if (!cancelled) setActivity(result)
+      })
+      .catch((error: unknown) => {
+        if (!cancelled) setActivityError(error instanceof Error ? error.message : 'Unable to load admin activity.')
+      })
+      .finally(() => {
+        if (!cancelled) setActivityLoading(false)
+      })
+    return () => { cancelled = true }
+  }, [authState, token, activityRefresh, activityPage, adminRole])
+
+  useEffect(() => {
+    if (authState !== 'signed-in' || !token || activeSection === 'overview' || activeSection === 'reports') return
+    let cancelled = false
+    const headers = { Authorization: `Bearer ${token}` }
+    const load = async () => {
+      if (activeSection === 'customers') {
+        const response = await fetch(`${apiUrl}/api/admin/customers?q=${encodeURIComponent(customerSearch)}&page=${customerPage}`, { headers })
+        const result = await response.json() as { customers?: AdminCustomer[]; pagination?: { total: number }; manualChecks?: AdminActivity['adminReports']; message?: string }
+        if (!response.ok) throw new Error(result.message || 'Unable to load customers.')
+        if (!cancelled) {
+          setCustomers(result.customers || [])
+          setCustomerTotal(result.pagination?.total || 0)
+          setManualChecks(result.manualChecks || [])
+        }
+        if (adminRole === 'owner' || adminRole === 'manager') {
+          const accountsResponse = await fetch(`${apiUrl}/api/admin/customer-accounts`, { headers })
+          const accounts = await accountsResponse.json() as { invitations?: AdminCustomerInvitation[]; message?: string }
+          if (!accountsResponse.ok) throw new Error(accounts.message || 'Unable to load customer accounts.')
+          if (!cancelled) setCustomerInvitations(accounts.invitations || [])
+        }
+      } else if (activeSection === 'analytics' || activeSection === 'journey') {
+        const response = await fetch(`${apiUrl}/api/admin/analytics`, { headers })
+        const result = await response.json() as AdminAnalytics & { message?: string }
+        if (!response.ok) throw new Error(result.message || 'Unable to load analytics.')
+        if (!cancelled) setAnalytics(result)
+        if (activeSection === 'journey') {
+          const customersResponse = await fetch(`${apiUrl}/api/admin/customers?page=1`, { headers })
+          const customerResult = await customersResponse.json() as { customers?: AdminCustomer[]; message?: string }
+          if (!customersResponse.ok) throw new Error(customerResult.message || 'Unable to load customer journey.')
+          if (!cancelled) setCustomers(customerResult.customers || [])
+        }
+      } else if (activeSection === 'tickets') {
+        const response = await fetch(`${apiUrl}/api/admin/tickets?status=${encodeURIComponent(ticketStatus)}`, { headers })
+        const result = await response.json() as { tickets?: AdminTicket[]; message?: string }
+        if (!response.ok) throw new Error(result.message || 'Unable to load tickets.')
+        if (!cancelled) setTickets(result.tickets || [])
+      } else if (activeSection === 'team') {
+        const response = await fetch(`${apiUrl}/api/admin/team`, { headers })
+        const result = await response.json() as { admins?: AdminTeamMember[]; primaryAdmin?: string | null; message?: string }
+        if (!response.ok) throw new Error(result.message || 'Unable to load admin team.')
+        if (!cancelled) {
+          setTeam(result.admins || [])
+          setPrimaryAdmin(result.primaryAdmin || null)
+        }
+      }
+    }
+    void load().catch((error: unknown) => {
+      if (!cancelled) setSectionError(error instanceof Error ? error.message : 'Unable to load this section.')
+    }).finally(() => {
+      if (!cancelled) setSectionLoading(false)
+    })
+    return () => { cancelled = true }
+  }, [authState, token, activeSection, customerSearch, customerPage, ticketStatus, sectionRefresh, adminRole])
+
   const signIn = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
     setLoginError('')
@@ -2366,10 +2767,12 @@ function AdminPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ id: data.get('id'), password: data.get('password'), pin: data.get('pin') }),
       })
-      const result = await response.json() as { token?: string; adminId?: string; message?: string }
+      const result = await response.json() as { token?: string; adminId?: string; role?: AdminRole; message?: string }
       if (!response.ok || !result.token) throw new Error(result.message || 'Unable to sign in.')
       sessionStorage.setItem('scorenow-admin-token', result.token)
       setAdminId(result.adminId || 'Admin')
+      setAdminRole(result.role || 'owner')
+      setActiveSection(result.role === 'support' ? 'customers' : result.role === 'analyst' ? 'analytics' : 'overview')
       setToken(result.token)
       setAuthState('signed-in')
     } catch (error) {
@@ -2384,7 +2787,9 @@ function AdminPage() {
     sessionStorage.removeItem('scorenow-admin-token')
     setToken('')
     setAdminId('')
+    setAdminRole('owner')
     setReport(null)
+    setActivity(null)
     setAuthState('signed-out')
   }
 
@@ -2424,8 +2829,199 @@ function AdminPage() {
       setReportError(error instanceof Error ? error.message : 'Unable to fetch this report.')
     } finally {
       setLoading(false)
+      refreshActivity()
     }
   }
+
+  const acceptTeamInvitation = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    setLoading(true)
+    setTeamNotice('')
+    const form = new FormData(event.currentTarget)
+    try {
+      const response = await fetch(`${apiUrl}/api/admin/team/invitations/accept`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token: teamInviteToken, password: form.get('password'), pin: form.get('pin') }),
+      })
+      const result = await response.json() as { token?: string; adminId?: string; role?: AdminRole; message?: string }
+      if (!response.ok || !result.token) throw new Error(result.message || 'Unable to accept this invitation.')
+      sessionStorage.setItem('scorenow-admin-token', result.token)
+      setAdminId(result.adminId || 'Admin')
+      setAdminRole(result.role || 'support')
+      setActiveSection(result.role === 'analyst' ? 'analytics' : result.role === 'support' ? 'customers' : 'overview')
+      setToken(result.token)
+      setTeamInviteToken('')
+      window.history.replaceState(null, '', '/admin')
+      setAuthState('signed-in')
+    } catch (error) {
+      setTeamNotice(error instanceof Error ? error.message : 'Unable to accept this invitation.')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const createCustomerInvite = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    const formElement = event.currentTarget
+    setSectionLoading(true)
+    setSectionError('')
+    const form = new FormData(event.currentTarget)
+    try {
+      const response = await fetch(`${apiUrl}/api/admin/customer-invitations`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ fullName: form.get('fullName'), mobile: form.get('mobile'), email: form.get('email') }),
+      })
+      const result = await response.json() as { message?: string }
+      if (!response.ok) throw new Error(result.message || 'Unable to create the customer invitation.')
+      setTeamNotice(result.message || 'Customer invitation recorded.')
+      formElement.reset()
+      setSectionRefresh((refresh) => refresh + 1)
+    } catch (error) {
+      setSectionError(error instanceof Error ? error.message : 'Unable to create the customer invitation.')
+    } finally {
+      setSectionLoading(false)
+    }
+  }
+
+  const updateCustomerStatus = async (customer: AdminCustomer) => {
+    setSectionLoading(true)
+    setSectionError('')
+    try {
+      const response = await fetch(`${apiUrl}/api/admin/customers/${customer.id}/status`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ status: customer.status === 'blocked' ? 'active' : 'blocked' }),
+      })
+      const result = await response.json() as { message?: string }
+      if (!response.ok) throw new Error(result.message || 'Unable to update this customer.')
+      setSectionRefresh((refresh) => refresh + 1)
+    } catch (error) {
+      setSectionError(error instanceof Error ? error.message : 'Unable to update this customer.')
+    } finally {
+      setSectionLoading(false)
+    }
+  }
+
+  const updateTicket = async (ticket: AdminTicket, status: AdminTicket['status'], assignedTo: string | null = ticket.assigned_to) => {
+    setSectionLoading(true)
+    setSectionError('')
+    try {
+      const response = await fetch(`${apiUrl}/api/admin/tickets/${ticket.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ status, assignedTo }),
+      })
+      const result = await response.json() as { message?: string }
+      if (!response.ok) throw new Error(result.message || 'Unable to update ticket.')
+      setSectionRefresh((refresh) => refresh + 1)
+    } catch (error) {
+      setSectionError(error instanceof Error ? error.message : 'Unable to update ticket.')
+    } finally {
+      setSectionLoading(false)
+    }
+  }
+
+  const replyToAdminTicket = async (event: FormEvent<HTMLFormElement>, ticketId: string) => {
+    event.preventDefault()
+    const formElement = event.currentTarget
+    const message = String(new FormData(formElement).get('message') || '').trim()
+    setSectionLoading(true)
+    setSectionError('')
+    try {
+      const response = await fetch(`${apiUrl}/api/admin/tickets/${ticketId}/comments`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
+        body: JSON.stringify({ message }),
+      })
+      const result = await response.json() as { message?: string }
+      if (!response.ok) throw new Error(result.message || 'Unable to send ticket reply.')
+      formElement.reset()
+      setSectionRefresh((refresh) => refresh + 1)
+    } catch (error) {
+      setSectionError(error instanceof Error ? error.message : 'Unable to send ticket reply.')
+    } finally {
+      setSectionLoading(false)
+    }
+  }
+
+  const inviteAdmin = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    const formElement = event.currentTarget
+    setSectionLoading(true)
+    setSectionError('')
+    const form = new FormData(event.currentTarget)
+    try {
+      const response = await fetch(`${apiUrl}/api/admin/team/invitations`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
+        body: JSON.stringify(Object.fromEntries(form.entries())),
+      })
+      const result = await response.json() as { invitationUrl?: string; message?: string }
+      if (!response.ok || !result.invitationUrl) throw new Error(result.message || 'Unable to invite this admin.')
+      setInviteUrl(result.invitationUrl)
+      setSectionRefresh((refresh) => refresh + 1)
+      formElement.reset()
+    } catch (error) {
+      setSectionError(error instanceof Error ? error.message : 'Unable to invite this admin.')
+    } finally {
+      setSectionLoading(false)
+    }
+  }
+
+  const setTeamMemberStatus = async (member: AdminTeamMember) => {
+    setSectionLoading(true)
+    setSectionError('')
+    try {
+      const response = await fetch(`${apiUrl}/api/admin/team/${encodeURIComponent(member.email)}/status`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ status: member.status === 'disabled' ? 'active' : 'disabled' }),
+      })
+      const result = await response.json() as { message?: string }
+      if (!response.ok) throw new Error(result.message || 'Unable to update admin status.')
+      setSectionRefresh((refresh) => refresh + 1)
+    } catch (error) {
+      setSectionError(error instanceof Error ? error.message : 'Unable to update admin status.')
+    } finally {
+      setSectionLoading(false)
+    }
+  }
+
+  const searchTerm = activitySearch.trim().toLowerCase()
+  const activityTotalPages = activity
+    ? Math.max(1, Math.ceil(Math.max(activity.pagination.totalPayments, activity.pagination.totalAdminReports) / activity.pagination.pageSize))
+    : 1
+  const matchingPayments = (activity?.payments ?? []).filter((item) =>
+    `${item.full_name} ${item.mobile_last4} ${item.bureau ?? ''} ${item.status} ${item.report_status ?? ''}`
+      .toLowerCase().includes(searchTerm))
+  const matchingAdminReports = (activity?.adminReports ?? []).filter((item) =>
+    `${item.full_name ?? ''} ${item.mobile_last4} ${item.bureau} ${item.status} ${item.admin_id}`
+      .toLowerCase().includes(searchTerm))
+
+  const adminSections: {
+    id: 'overview' | 'customers' | 'reports' | 'analytics' | 'tickets' | 'journey' | 'team'
+    label: string
+    icon: typeof House
+    roles: AdminRole[]
+  }[] = [
+    { id: 'overview', label: 'Overview', icon: House, roles: ['owner', 'manager'] },
+    { id: 'customers', label: 'Customers', icon: Users, roles: ['owner', 'manager', 'support'] },
+    { id: 'reports', label: 'Credit score checker', icon: FileSearch, roles: ['owner', 'manager'] },
+    { id: 'analytics', label: 'Analytics', icon: BarChart3, roles: ['owner', 'manager', 'analyst'] },
+    { id: 'tickets', label: 'Helpline tickets', icon: MessageCircle, roles: ['owner', 'manager', 'support'] },
+    { id: 'journey', label: 'Signup journey', icon: TrendingUp, roles: ['owner', 'manager', 'analyst'] },
+    { id: 'team', label: 'Manage admins', icon: LockKeyhole, roles: ['owner'] },
+  ]
+  const visibleAdminSections = adminSections.filter((section) => section.roles.includes(adminRole))
+  const changeAdminSection = (section: typeof activeSection) => {
+    setActiveSection(section)
+    setSectionError('')
+    if (section !== 'overview' && section !== 'reports') setSectionLoading(true)
+    else setActivityLoading(true)
+  }
+  const customerTotalPages = Math.max(1, Math.ceil(customerTotal / 50))
 
   if (authState === 'checking') return <div className="admin-loading"><RotateCcw /> Verifying admin session…</div>
 
@@ -2433,16 +3029,91 @@ function AdminPage() {
     <main className="admin-shell">
       <header className="admin-header"><Brand href="/" /><div><span>SECURE OPERATIONS</span><strong>{authState === 'signed-in' ? adminId : 'Administrator access'}</strong></div>{authState === 'signed-in' && <button className="button button-outline" type="button" onClick={() => void signOut()}><LockKeyhole /> Sign out</button>}</header>
       {authState === 'signed-out' ? <section className="admin-login-wrap">
-        <div className="admin-heading"><span>PRIVATE WORKSPACE</span><h1>Administrator sign in</h1><p>Use your configured administrator ID, password, and PIN.</p></div>
-        <form className="dashboard-card admin-login-form" onSubmit={signIn}>
-          <label>Administrator ID<input name="id" autoComplete="username" required /></label>
-          <label>Password<input name="password" type="password" autoComplete="current-password" required /></label>
-          <label>Security PIN<input name="pin" type="password" inputMode="numeric" pattern="[0-9]{6}" maxLength={6} autoComplete="one-time-code" required /></label>
-          {loginError && <p className="dashboard-notice error" role="alert">{loginError}</p>}
-          <button className="button button-primary" type="submit" disabled={loading}>{loading ? 'Signing in…' : <>Sign in <ArrowRight /></>}</button>
-        </form>
-      </section> : <div className="admin-content">
-        <div className="admin-heading"><span>CLIENT REPORTS</span><h1>Fetch a bureau report</h1><p>Only proceed with the client’s informed authorization. Bureau requests may incur provider charges.</p></div>
+        {teamInviteToken ? <>
+          <div className="admin-heading"><span>ADMIN INVITATION</span><h1>Set up your admin account</h1><p>Create your private password and 6-digit PIN to accept this one-time invitation.</p></div>
+          <form className="dashboard-card admin-login-form" onSubmit={(event) => void acceptTeamInvitation(event)}>
+            <label>Password<input name="password" type="password" minLength={12} autoComplete="new-password" required /></label>
+            <label>6-digit security PIN<input name="pin" type="password" inputMode="numeric" pattern="[0-9]{6}" maxLength={6} autoComplete="new-password" required /></label>
+            {teamNotice && <p className="dashboard-notice error" role="alert">{teamNotice}</p>}
+            <button className="button button-primary" type="submit" disabled={loading}>{loading ? 'Activating account…' : <>Accept invitation <ArrowRight /></>}</button>
+          </form>
+        </> : <>
+          <div className="admin-heading"><span>PRIVATE WORKSPACE</span><h1>Administrator sign in</h1><p>Use your admin email or ID, password, and PIN.</p></div>
+          <form className="dashboard-card admin-login-form" onSubmit={signIn}>
+            <label>Administrator email or ID<input name="id" autoComplete="username" required /></label>
+            <label>Password<input name="password" type="password" autoComplete="current-password" required /></label>
+            <label>Security PIN<input name="pin" type="password" inputMode="numeric" pattern="[0-9]{6}" maxLength={6} autoComplete="one-time-code" required /></label>
+            {loginError && <p className="dashboard-notice error" role="alert">{loginError}</p>}
+            <button className="button button-primary" type="submit" disabled={loading}>{loading ? 'Signing in…' : <>Sign in <ArrowRight /></>}</button>
+          </form>
+        </>}
+      </section> : <div className="admin-layout">
+        <aside className="admin-sidebar">
+          <div className="admin-sidebar-identity"><span>ADMINISTRATOR</span><strong>{adminId}</strong><small>{adminRole}</small></div>
+          <nav aria-label="Admin sections">{visibleAdminSections.map((section) => { const Icon = section.icon; return <button key={section.id} type="button" className={activeSection === section.id ? 'active' : ''} onClick={() => changeAdminSection(section.id)}><Icon />{section.label}</button> })}</nav>
+          <p>Private operations workspace</p>
+        </aside>
+        <div className="admin-content">
+        {(activeSection === 'overview' ? activityLoading : activeSection === 'reports' ? loading : sectionLoading) && <div className="admin-data-loading" role="status"><RotateCcw /> Loading {activeSection === 'overview' ? 'activity' : activeSection === 'reports' ? 'the credit report' : activeSection === 'tickets' ? 'support tickets' : activeSection === 'customers' ? 'customer records' : activeSection === 'team' ? 'admin team' : 'analytics'} from the database…</div>}
+        {sectionError && activeSection !== 'overview' && <p className="dashboard-notice error" role="alert">{sectionError}</p>}
+        {activeSection !== 'overview' && <div className="admin-section-actions"><button className="button button-outline" type="button" onClick={() => { setSectionLoading(true); setSectionRefresh((refresh) => refresh + 1) }} disabled={sectionLoading}><RotateCcw /> {sectionLoading ? 'Refreshing…' : 'Refresh section'}</button></div>}
+        {activeSection === 'overview' ? <>
+        <div className="admin-heading"><span>SECURE OPERATIONS</span><h1>Admin overview</h1><p>Review customer activity, payment outcomes, and bureau report requests.</p></div>
+        <section className="admin-activity" aria-label="Admin activity">
+          <div className="admin-activity-toolbar">
+            <label className="admin-activity-search"><Search /><input aria-label="Search admin activity on this page" type="search" value={activitySearch} onChange={(event) => { setActivitySearch(event.target.value); setActivityPage(1) }} placeholder="Search this page by name, phone, bureau, or status" /></label>
+            <button className="button button-outline" type="button" onClick={refreshActivity} disabled={activityLoading}><RotateCcw /> {activityLoading ? 'Refreshing…' : 'Refresh activity'}</button>
+          </div>
+          {activityError && <p className="dashboard-notice error" role="alert">{activityError}</p>}
+          {activity && <div className="admin-stat-grid">
+            <article className="dashboard-card admin-stat"><Users /><span>Total users</span><strong>{activity.summary.totalUsers.toLocaleString('en-IN')}</strong></article>
+            <article className="dashboard-card admin-stat"><BadgeIndianRupee /><span>Payments received</span><strong>{activity.summary.paidPayments.toLocaleString('en-IN')}</strong><small>{formatMoney(activity.summary.paymentRevenue)} including GST</small></article>
+            <article className="dashboard-card admin-stat"><AlertTriangle /><span>Failed payment attempts</span><strong>{activity.summary.failedPayments.toLocaleString('en-IN')}</strong></article>
+            <article className="dashboard-card admin-stat"><FileCheck2 /><span>Paid report requests</span><strong>{activity.summary.reportRequests.toLocaleString('en-IN')}</strong><small>{activity.summary.failedReportRequests.toLocaleString('en-IN')} report fetches failed</small></article>
+          </div>}
+          <article className="dashboard-card admin-activity-card">
+            <div className="dashboard-card-heading"><strong>Customer payments &amp; reports</strong><small>50 per page</small></div>
+            {!activity && !activityError ? <p className="admin-activity-empty">Loading customer activity…</p> : matchingPayments.length ? <div className="admin-table-wrap"><table className="admin-activity-table">
+              <thead><tr><th>Customer</th><th>Bureau</th><th>Payment</th><th>Report</th><th>Amount</th><th>Date</th></tr></thead>
+              <tbody>{matchingPayments.map((item) => {
+                const bureauName = bureauCatalog.find((entry) => entry.id === item.bureau)?.name ?? item.bureau ?? '—'
+                const reportErrorMessage = item.report_failure_reason
+                const hasFailedAttempt = item.status === 'created' && Boolean(item.failure_reason)
+                const paymentStatus = hasFailedAttempt ? 'failed attempt' : item.status === 'created' ? 'pending' : item.status
+                const paymentStatusClass = hasFailedAttempt ? 'failed' : item.status
+                return <tr key={item.id}>
+                  <td><strong>{item.full_name || 'Customer'}</strong><small>+91 ••••••{item.mobile_last4}</small></td>
+                  <td>{bureauName}</td>
+                  <td><span className={`admin-status ${paymentStatusClass}`}>{paymentStatus}</span><small>{item.gateway}</small>{item.failure_reason && <small className="admin-activity-error" title={item.failure_reason}>{item.failure_reason}</small>}</td>
+                  <td><span className={`admin-status ${item.report_status || 'pending'}`}>{item.report_status || 'Not requested'}</span>{reportErrorMessage && <small className="admin-activity-error" title={reportErrorMessage}>{reportErrorMessage}</small>}</td>
+                  <td>{formatMoney(Number(item.amount) + Number(item.gst_amount))}</td>
+                  <td>{formatAdminTimestamp(item.paid_at ?? item.failure_at ?? item.created_at)}</td>
+                </tr>
+              })}</tbody>
+            </table></div> : <p className="admin-activity-empty">{activity ? 'No matching payment activity found.' : 'Customer activity is not available yet.'}</p>}
+          </article>
+          <article className="dashboard-card admin-activity-card">
+            <div className="dashboard-card-heading"><strong>Admin-initiated bureau checks</strong><small>50 per page</small></div>
+            {!activity && !activityError ? <p className="admin-activity-empty">Loading report history…</p> : matchingAdminReports.length ? <div className="admin-table-wrap"><table className="admin-activity-table">
+              <thead><tr><th>Client</th><th>Bureau</th><th>Status</th><th>Score</th><th>Checked by</th><th>Date</th></tr></thead>
+              <tbody>{matchingAdminReports.map((item) => <tr key={item.id}>
+                <td><strong>{item.full_name || 'Client'}</strong><small>•••• {item.mobile_last4}</small></td>
+                <td>{bureauCatalog.find((entry) => entry.id === item.bureau)?.name ?? item.bureau}</td>
+                <td><span className={`admin-status ${item.status}`}>{item.status}</span>{item.failure_reason && <small className="admin-activity-error" title={item.failure_reason}>{item.failure_reason}</small>}</td>
+                <td>{item.credit_score ?? '—'}</td>
+                <td>{item.admin_id}</td>
+                <td>{formatAdminTimestamp(item.completed_at ?? item.created_at)}</td>
+              </tr>)}</tbody>
+            </table></div> : <p className="admin-activity-empty">{activity ? 'No matching admin report checks found.' : 'Report history is not available yet.'}</p>}
+          </article>
+          {activity && <nav className="admin-activity-pagination" aria-label="Activity pages">
+            <button className="button button-outline" type="button" onClick={() => { setActivityLoading(true); setActivityPage((page) => page - 1) }} disabled={activityLoading || activity.pagination.page <= 1}><ArrowLeft /> Previous</button>
+            <span>Page {activity.pagination.page} of {activityTotalPages}</span>
+            <button className="button button-outline" type="button" onClick={() => { setActivityLoading(true); setActivityPage((page) => page + 1) }} disabled={activityLoading || activity.pagination.page >= activityTotalPages}>Next <ArrowRight /></button>
+          </nav>}
+        </section>
+        </> : activeSection === 'reports' ? <>
+        <div className="admin-heading admin-report-heading"><span>CLIENT REPORTS</span><h1>Credit score checker</h1><p>Fetch a client’s bureau report with their informed authorization. Bureau requests may incur provider charges.</p></div>
         <form className="dashboard-card admin-report-form" onSubmit={(event) => void fetchReport(event)}>
           <div className="admin-form-grid">
             <label>Bureau<select value={bureau} onChange={(event) => setBureau(event.target.value as BureauId)}>{bureauCatalog.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
@@ -2476,7 +3147,118 @@ function AdminPage() {
           <article className="dashboard-card report-enquiries"><div className="dashboard-card-heading"><strong>Credit enquiries</strong><small>{report.enquiries.length} total</small></div>{report.enquiries.length ? <ul>{report.enquiries.map((item, index) => <li key={`${item.lender}-${index}`}><div><strong>{item.lender}</strong><small>{item.purpose || 'Credit enquiry'}{item.amount ? ` · ${formatMoney(item.amount)}` : ''}</small></div><time>{formatDate(item.date)}</time></li>)}</ul> : <p className="report-empty">No enquiries reported.</p>}</article>
           <article className="dashboard-card report-accounts"><div className="dashboard-card-heading"><strong>Credit accounts</strong><small>{report.accounts.length} accounts</small></div>{report.accounts.length ? <div className="report-account-list">{report.accounts.map((account, index) => <div className={`report-account ${account.status}`} key={`${account.lender}-${account.accountNumber}-${index}`}><div className="report-account-head"><div><strong>{account.lender}</strong><small>{account.type}{account.accountNumber ? ` · ${account.accountNumber}` : ''}</small></div><span className={`account-chip ${needsAttention(account) ? 'overdue' : account.status}`}>{accountFlag(account).label}</span></div><dl className="report-account-figures"><div><dt>Balance</dt><dd>{formatMoney(account.currentBalance)}</dd></div><div><dt>Limit</dt><dd>{formatMoney(account.creditLimit)}</dd></div><div><dt>Overdue</dt><dd>{formatMoney(account.overdueAmount)}</dd></div><div><dt>Opened</dt><dd>{formatDate(account.openedOn)}</dd></div></dl></div>)}</div> : <p className="report-empty">No accounts returned by the bureau.</p>}</article>
         </section>}
-      </div>}
+        </> : activeSection === 'customers' ? <>
+          <div className="admin-heading"><span>CUSTOMER CARE</span><h1>Customers</h1><p>Search verified customer accounts by name, phone, email, or an exact PAN. PAN is only shown as its last four characters.</p></div>
+          <div className="admin-customer-toolbar">
+            <label className="admin-activity-search"><Search /><input aria-label="Search customers by name, mobile, email, or PAN" value={customerSearch} onChange={(event) => { setCustomerSearch(event.target.value); setCustomerPage(1); setSectionLoading(true) }} placeholder="Name, mobile, email, or PAN" /></label>
+            <button type="button" className="button button-outline" onClick={() => { setSectionLoading(true); setSectionRefresh((refresh) => refresh + 1) }} disabled={sectionLoading}><RotateCcw /> Refresh</button>
+          </div>
+          {sectionLoading && !customers.length && <p className="admin-activity-empty">Loading customer records…</p>}
+          <article className="dashboard-card admin-activity-card">
+            <div className="dashboard-card-heading"><strong>Registered customers</strong><small>{customerTotal.toLocaleString('en-IN')} total</small></div>
+            {customers.length ? <div className="admin-table-wrap"><table className="admin-activity-table">
+              <thead><tr><th>Customer</th><th>Mobile / Email</th><th>PAN</th><th>Journey step</th><th>Reports</th><th>Account</th><th>Manage</th></tr></thead>
+              <tbody>{customers.map((customer) => <tr key={customer.id}>
+                <td><strong>{customer.full_name}</strong><small>Joined {formatAdminTimestamp(customer.created_at)}</small></td>
+                <td>{customer.mobile}<small>{customer.email || 'No email on file'}</small></td>
+                <td>{customer.pan_last4 ? `••••••${customer.pan_last4}` : 'Not provided'}</td>
+                <td>{customer.journey_stage}<small>{customer.kyc_status ? `Profile: ${customer.kyc_status}` : 'Profile incomplete'}</small></td>
+                <td>{customer.paid_payments} paid / {customer.total_payments} orders<small>{customer.latest_report_status || 'No report request'}</small></td>
+                <td><span className={`admin-status ${customer.status === 'active' ? 'completed' : 'failed'}`}>{customer.status}</span></td>
+                <td><button className="button button-outline admin-small-button" type="button" disabled={sectionLoading} onClick={() => void updateCustomerStatus(customer)}>{customer.status === 'blocked' ? 'Enable' : 'Block'}</button></td>
+              </tr>)}</tbody>
+            </table></div> : <p className="admin-activity-empty">{customerSearch ? 'No matching customers found.' : 'No registered customers yet.'}</p>}
+          </article>
+          {manualChecks.length > 0 && <article className="dashboard-card admin-activity-card">
+            <div className="dashboard-card-heading"><strong>Admin report checks matching this PAN</strong><small>{manualChecks.length} checks</small></div>
+            <div className="admin-table-wrap"><table className="admin-activity-table"><thead><tr><th>Client</th><th>Bureau</th><th>Status</th><th>Score</th><th>Checked by</th><th>Date</th></tr></thead><tbody>
+              {manualChecks.map((check) => <tr key={check.id}><td><strong>{check.full_name || 'Client'}</strong><small>•••• {check.mobile_last4}</small></td><td>{bureauCatalog.find((item) => item.id === check.bureau)?.name ?? check.bureau}</td><td><span className={`admin-status ${check.status}`}>{check.status}</span><small className="admin-activity-error">{check.failure_reason}</small></td><td>{check.credit_score ?? '—'}</td><td>{check.admin_id}</td><td>{formatAdminTimestamp(check.completed_at ?? check.created_at)}</td></tr>)}
+            </tbody></table></div>
+          </article>}
+          {customerTotalPages > 1 && <nav className="admin-activity-pagination" aria-label="Customer pages"><button className="button button-outline" type="button" disabled={customerPage <= 1 || sectionLoading} onClick={() => { setSectionLoading(true); setCustomerPage((page) => page - 1) }}><ArrowLeft /> Previous</button><span>Page {customerPage} of {customerTotalPages}</span><button className="button button-outline" type="button" disabled={customerPage >= customerTotalPages || sectionLoading} onClick={() => { setSectionLoading(true); setCustomerPage((page) => page + 1) }}>Next <ArrowRight /></button></nav>}
+          {(adminRole === 'owner' || adminRole === 'manager') && <article className="dashboard-card admin-management-card">
+            <div className="dashboard-card-heading"><strong>Invite a new customer</strong><small>They claim the account after verifying this mobile with OTP</small></div>
+            <form className="admin-management-form" onSubmit={(event) => void createCustomerInvite(event)}>
+              <label>Full name<input name="fullName" minLength={2} maxLength={120} required /></label>
+              <label>Mobile number<input name="mobile" inputMode="numeric" pattern="[0-9]{10}" maxLength={10} required /></label>
+              <label>Email (optional)<input name="email" type="email" /></label>
+              <button className="button button-primary" type="submit" disabled={sectionLoading}><UserRound /> Record invitation</button>
+            </form>
+            {teamNotice && <p className="dashboard-notice info" role="status">{teamNotice}</p>}
+            <div className="admin-table-wrap"><table className="admin-activity-table"><thead><tr><th>Invited customer</th><th>Mobile</th><th>Email</th><th>Status</th><th>Invited</th></tr></thead><tbody>
+              {customerInvitations.length ? customerInvitations.map((invite) => <tr key={invite.id}><td><strong>{invite.full_name}</strong></td><td>{invite.mobile}</td><td>{invite.email || '—'}</td><td><span className={`admin-status ${invite.status === 'claimed' ? 'completed' : invite.status === 'cancelled' ? 'failed' : 'pending'}`}>{invite.status}</span></td><td>{formatAdminTimestamp(invite.created_at)}</td></tr>) : <tr><td colSpan={5}>No customer invitations yet.</td></tr>}
+            </tbody></table></div>
+          </article>}
+        </> : activeSection === 'analytics' ? <>
+          <div className="admin-heading"><span>BUSINESS INSIGHTS</span><h1>Analytics</h1><p>Database-backed totals and daily activity from registered accounts, payments, and report requests.</p></div>
+          {analytics && <>
+            <div className="admin-stat-grid admin-analytics-grid">
+              <article className="dashboard-card admin-stat"><Users /><span>Customers</span><strong>{(analytics.summary.total_users || 0).toLocaleString('en-IN')}</strong></article>
+              <article className="dashboard-card admin-stat"><UserRound /><span>Active accounts</span><strong>{(analytics.summary.active_users || 0).toLocaleString('en-IN')}</strong></article>
+              <article className="dashboard-card admin-stat"><UserRound /><span>Users with valid sessions</span><strong>{(analytics.summary.signed_in_users || 0).toLocaleString('en-IN')}</strong></article>
+              <article className="dashboard-card admin-stat"><BadgeIndianRupee /><span>Paid revenue</span><strong>{formatMoney(analytics.summary.revenue || 0)}</strong></article>
+              <article className="dashboard-card admin-stat"><CreditCard /><span>Paid orders</span><strong>{(analytics.summary.paid_payments || 0).toLocaleString('en-IN')}</strong></article>
+              <article className="dashboard-card admin-stat"><AlertTriangle /><span>Failed attempts</span><strong>{(analytics.summary.failed_payments || 0).toLocaleString('en-IN')}</strong></article>
+              <article className="dashboard-card admin-stat"><FileCheck2 /><span>Completed reports</span><strong>{(analytics.summary.completed_reports || 0).toLocaleString('en-IN')}</strong></article>
+              <article className="dashboard-card admin-stat"><MessageCircle /><span>Open tickets</span><strong>{(analytics.summary.open_tickets || 0).toLocaleString('en-IN')}</strong></article>
+            </div>
+            <article className="dashboard-card admin-activity-card">
+              <div className="dashboard-card-heading"><strong>Daily activity</strong><small>Last 14 days</small></div>
+              <div className="admin-table-wrap"><table className="admin-activity-table"><thead><tr><th>Date</th><th>Signups</th><th>Paid orders</th><th>Revenue</th><th>Failed payments</th></tr></thead><tbody>
+                {analytics.trend.map((day) => <tr key={day.day}><td>{formatDate(day.day)}</td><td>{day.signups}</td><td>{day.paid_orders}</td><td>{formatMoney(day.revenue)}</td><td>{day.failed_attempts}</td></tr>)}
+              </tbody></table></div>
+            </article>
+          </>}
+        </> : activeSection === 'journey' ? <>
+          <div className="admin-heading"><span>ONBOARDING FUNNEL</span><h1>Signup journey</h1><p>See how customers progress through account verification, profile completion, payment, and report delivery. Steps are inferred from saved records.</p></div>
+          {analytics && <div className="admin-funnel">{analytics.funnel.map((item, index) => {
+            const first = analytics.funnel[0]?.count || 0
+            const rate = first ? Math.round((item.count / first) * 100) : 0
+            return <article className="dashboard-card admin-funnel-step" key={item.step}><span>STEP {index + 1}</span><strong>{item.count.toLocaleString('en-IN')}</strong><b>{item.step}</b><div><i style={{ width: `${rate}%` }} /></div><small>{rate}% of accounts</small></article>
+          })}</div>}
+          <article className="dashboard-card admin-activity-card"><div className="dashboard-card-heading"><strong>Customer progress</strong><small>Latest 50</small></div>
+            {customers.length ? <div className="admin-table-wrap"><table className="admin-activity-table"><thead><tr><th>Customer</th><th>Mobile</th><th>Progress</th><th>Last sign in</th><th>Reports</th></tr></thead><tbody>
+              {customers.map((customer) => <tr key={customer.id}><td><strong>{customer.full_name}</strong><small>{customer.email || '—'}</small></td><td>{customer.mobile}</td><td><span className="admin-status pending">{customer.journey_stage}</span></td><td>{formatAdminTimestamp(customer.last_login)}</td><td>{customer.latest_report_status || 'No report yet'}</td></tr>)}
+            </tbody></table></div> : <p className="admin-activity-empty">No customer progress records found.</p>}
+          </article>
+        </> : activeSection === 'tickets' ? <>
+          <div className="admin-heading"><span>CUSTOMER SUPPORT</span><h1>Helpline tickets</h1><p>Review customer-submitted requests, reply in the ticket conversation, assign an owner, and update status. Website callback requests are also added here.</p></div>
+          <div className="admin-ticket-toolbar"><label>Status filter<select value={ticketStatus} onChange={(event) => { setTicketStatus(event.target.value); setSectionLoading(true) }}><option value="">All tickets</option><option value="open">Open</option><option value="in_progress">In progress</option><option value="resolved">Resolved</option><option value="closed">Closed</option></select></label><button className="button button-outline" type="button" onClick={() => { setSectionLoading(true); setSectionRefresh((refresh) => refresh + 1) }} disabled={sectionLoading}><RotateCcw /> Refresh</button></div>
+          <div className="admin-ticket-list">{tickets.length ? tickets.map((ticket) => <article className="dashboard-card admin-ticket" key={ticket.id}>
+            <div className="admin-ticket-top"><div><span className={`admin-status ${ticket.priority === 'urgent' || ticket.priority === 'high' ? 'failed' : 'pending'}`}>{ticket.priority}</span><span className={`admin-status ${ticket.status === 'resolved' || ticket.status === 'closed' ? 'completed' : 'pending'}`}>{ticket.status.replace('_', ' ')}</span></div><time>{formatAdminTimestamp(ticket.created_at)}</time></div>
+            <h2>{ticket.subject}</h2><p>{ticket.message}</p><div className="admin-ticket-customer"><strong>{ticket.requester_name}</strong><span>{ticket.requester_mobile}</span><small>Created by {ticket.created_by}</small></div>
+            <div className="admin-ticket-actions"><label>Assign to<input key={ticket.assigned_to || ''} defaultValue={ticket.assigned_to || ''} placeholder="Admin email or name" onBlur={(event) => { const value = event.currentTarget.value.trim() || null; if (value !== ticket.assigned_to) void updateTicket(ticket, ticket.status, value) }} /></label><label>Ticket status<select value={ticket.status} onChange={(event) => void updateTicket(ticket, event.target.value as AdminTicket['status'])}><option value="open">Open</option><option value="in_progress">In progress</option><option value="resolved">Resolved</option><option value="closed">Closed</option></select></label></div>
+            <div className="admin-ticket-thread">
+              <strong>Conversation</strong>
+              {ticket.comments.length ? ticket.comments.map((comment) => <div className={`admin-ticket-comment ${comment.author_type}`} key={comment.id}><div><b>{comment.author_name}</b><time>{formatAdminTimestamp(comment.created_at)}</time></div><p>{comment.message}</p></div>) : <p className="admin-ticket-no-replies">No replies yet.</p>}
+              <form className="admin-ticket-reply" onSubmit={(event) => void replyToAdminTicket(event, ticket.id)}>
+                <label className="sr-only" htmlFor={`admin-ticket-reply-${ticket.id}`}>Reply to {ticket.subject}</label>
+                <textarea id={`admin-ticket-reply-${ticket.id}`} name="message" rows={2} maxLength={4000} placeholder="Write an update for the customer…" required />
+                <button className="button button-primary" type="submit" disabled={sectionLoading}><MessageCircle /> Send reply</button>
+              </form>
+            </div>
+          </article>) : <p className="admin-activity-empty">No tickets match this status.</p>}</div>
+        </> : <>
+          <div className="admin-heading"><span>ACCESS CONTROL</span><h1>Manage admins</h1><p>Invite trusted teammates with role-based access. Invitations expire after 48 hours and each admin chooses a private password and PIN.</p></div>
+          <article className="dashboard-card admin-management-card">
+            <div className="dashboard-card-heading"><strong>Invite an admin</strong><small>Invite link shown once; share it through a secure channel</small></div>
+            <form className="admin-management-form" onSubmit={(event) => void inviteAdmin(event)}>
+              <label>Full name<input name="fullName" minLength={2} maxLength={120} required /></label>
+              <label>Email<input name="email" type="email" required /></label>
+              <label>Role<select name="role" defaultValue="support"><option value="manager">Manager — customers, analytics, tickets, reports</option><option value="support">Support — customer help and tickets</option><option value="analyst">Analyst — analytics and funnel</option></select></label>
+              <button className="button button-primary" type="submit" disabled={sectionLoading}><UserRound /> Create invite</button>
+            </form>
+            {inviteUrl && <label className="admin-invite-link">One-time invite link<input readOnly value={inviteUrl} onFocus={(event) => event.currentTarget.select()} /><small>Copy and share privately. The invite is valid for 48 hours.</small></label>}
+          </article>
+          <article className="dashboard-card admin-activity-card">
+            <div className="dashboard-card-heading"><strong>Admin accounts</strong><small>{team.length + (primaryAdmin ? 1 : 0)} accounts</small></div>
+            <div className="admin-table-wrap"><table className="admin-activity-table"><thead><tr><th>Admin</th><th>Role</th><th>Status</th><th>Added</th><th>Manage</th></tr></thead><tbody>
+              {primaryAdmin && <tr><td><strong>{primaryAdmin}</strong><small>Environment-protected primary admin</small></td><td>Owner</td><td><span className="admin-status completed">active</span></td><td>—</td><td>Protected</td></tr>}
+              {team.map((member) => <tr key={member.email}><td><strong>{member.full_name}</strong><small>{member.email}</small></td><td>{member.role}</td><td><span className={`admin-status ${member.status === 'active' ? 'completed' : member.status === 'disabled' ? 'failed' : 'pending'}`}>{member.status}</span></td><td>{formatAdminTimestamp(member.created_at)}</td><td>{member.status !== 'invited' && <button className="button button-outline admin-small-button" type="button" disabled={sectionLoading || member.email === adminId} onClick={() => void setTeamMemberStatus(member)}>{member.status === 'disabled' ? 'Enable' : 'Disable'}</button>}</td></tr>)}
+            </tbody></table></div>
+          </article>
+        </>}
+      </div></div>}
     </main>
   )
 }

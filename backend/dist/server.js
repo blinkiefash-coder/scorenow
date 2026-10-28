@@ -6,7 +6,7 @@ import multer from "multer";
 import nodemailer from "nodemailer";
 import path from "node:path";
 import { BUREAUS, bureauNames, fetchBureauReport, downloadReportPdf, isBureau, isBureauAvailable, livePdfUrl, missingApplicantFields, scoreBand, stateCodes, } from "./bureaus.js";
-import { completeReportRequest, createDemoReportRequest, createAdminReportAudit, createAdminSession, completeAdminReportAudit, createOtp, createReportPayment, createSession, failReportRequest, findReportPayment, findReportRequest, findSessionUser, findAdminSession, findUserByEmail, getApplicant, getDashboardStatus, getReportDetail, getReportPdf, initializeDatabase, markEmailVerified, markPaymentFailed, markPaymentPaidAndCreateRequest, markReportProcessing, revokeSession, revokeAdminSession, saveAssessment, saveReportPdf, saveWebsiteInquiry, saveKycProfile, setUserEmailIfMissing, upsertUserByMobile, verifyOtp, } from "./database.js";
+import { completeReportRequest, authenticateDatabaseAdmin, createDemoReportRequest, createAdminReportAudit, addSupportTicketComment, createAdminSession, completeAdminReportAudit, createOtp, createCustomerInvitation, createAdminInvitation, acceptAdminInvitation, createReportPayment, createSession, failReportRequest, findReportPayment, findReportRequest, findSessionUser, findAdminSession, findUserByEmail, getApplicant, getAdminActivity, getAdminAnalytics, getAdminCustomers, getDashboardStatus, getReportDetail, getReportPdf, initializeDatabase, listAdminAccounts, listAdminUsers, listCustomerInvitations, listSupportTickets, markEmailVerified, markPaymentFailed, markPaymentPaidAndCreateRequest, recordPaymentFailure, markReportProcessing, revokeSession, revokeAdminSession, setAdminAccountStatus, setCustomerAccountStatus, updateSupportTicket, createSupportTicket, cancelCustomerInvitation, saveAssessment, saveReportPdf, saveWebsiteInquiry, saveKycProfile, setUserEmailIfMissing, upsertUserByMobile, verifyOtp, } from "./database.js";
 import { verifyFirebasePhoneToken } from "./firebaseAdmin.js";
 import { demoReportResponses, isReportsDemoMode } from "./demoReports.js";
 import { createRazorpayOrder, isRazorpayConfigured, isSimulatedPayments, isValidPaymentSignature, simulatedId } from "./razorpay.js";
@@ -29,6 +29,7 @@ const requireUser = async (request, response, next) => {
 };
 const sessionUser = (response) => response.locals.user;
 const sessionAdminId = (response) => response.locals.adminId;
+const sessionAdminRole = (response) => response.locals.adminRole;
 const startSession = (request, userId) => createSession({ userId, ipAddress: request.ip, userAgent: request.get("user-agent") });
 const REPORT_PRICE_RUPEES = 99;
 const REPORT_GST_RUPEES = Math.round((REPORT_PRICE_RUPEES - REPORT_PRICE_RUPEES / 1.18) * 100) / 100;
@@ -40,6 +41,14 @@ const requireAdmin = async (request, response, next) => {
         return;
     }
     response.locals.adminId = admin.admin_id;
+    response.locals.adminRole = admin.role;
+    next();
+};
+const requireAdminRoles = (...roles) => (request, response, next) => {
+    if (!roles.includes(sessionAdminRole(response))) {
+        response.status(403).json({ message: "Your admin role does not have access to this action." });
+        return;
+    }
     next();
 };
 const adminLoginAttempts = new Map();
@@ -114,29 +123,310 @@ app.post("/api/admin/login", async (request, response) => {
     const adminId = process.env.ADMIN_LOGIN_ID || "";
     const password = process.env.ADMIN_PASSWORD || "";
     const pin = process.env.ADMIN_PIN || "";
-    if (!adminId || password.length < 12 || !/^\d{6}$/.test(pin)) {
-        response.status(503).json({ message: "Admin access is not configured. Set ADMIN_LOGIN_ID, ADMIN_PASSWORD, and a 6-digit ADMIN_PIN." });
-        return;
-    }
-    const valid = equalSecret(String(request.body.id || ""), adminId) &&
-        equalSecret(String(request.body.password || ""), password) &&
-        equalSecret(String(request.body.pin || ""), pin);
-    if (!valid) {
+    const submittedId = String(request.body.id || "").trim();
+    const submittedPassword = String(request.body.password || "");
+    const submittedPin = String(request.body.pin || "");
+    const databaseAdmin = await authenticateDatabaseAdmin(submittedId, submittedPassword, submittedPin);
+    const rootConfigured = Boolean(adminId && password.length >= 12 && /^\d{6}$/.test(pin));
+    const isRootAdmin = rootConfigured &&
+        equalSecret(submittedId, adminId) &&
+        equalSecret(submittedPassword, password) &&
+        equalSecret(submittedPin, pin);
+    if (!databaseAdmin && !isRootAdmin) {
+        if (!rootConfigured) {
+            response.status(503).json({ message: "No administrator credentials are configured." });
+            return;
+        }
         response.status(401).json({ message: "Invalid admin credentials." });
         return;
     }
     adminLoginAttempts.delete(ipAddress);
-    const token = await createAdminSession({ adminId, ipAddress, userAgent: request.get("user-agent") });
-    response.json({ token, adminId });
+    const sessionAdmin = databaseAdmin ?? { adminId, role: "owner" };
+    const token = await createAdminSession({
+        adminId: sessionAdmin.adminId,
+        role: sessionAdmin.role,
+        ipAddress,
+        userAgent: request.get("user-agent"),
+    });
+    response.json({ token, adminId: sessionAdmin.adminId, role: sessionAdmin.role });
 });
 app.get("/api/admin/session", requireAdmin, (request, response) => {
-    response.json({ adminId: sessionAdminId(response) });
+    response.json({ adminId: sessionAdminId(response), role: sessionAdminRole(response) });
+});
+app.get("/api/admin/activity", requireAdmin, requireAdminRoles("owner", "manager"), async (request, response) => {
+    const page = Number(request.query.page ?? 1);
+    if (!Number.isSafeInteger(page) || page < 1) {
+        response.status(400).json({ message: "Choose a valid activity page." });
+        return;
+    }
+    try {
+        response.json(await getAdminActivity(page));
+    }
+    catch (error) {
+        console.error("Admin activity load failed", error);
+        response.status(500).json({ message: "Unable to load admin activity." });
+    }
+});
+app.get("/api/admin/customers", requireAdmin, requireAdminRoles("owner", "manager", "support", "analyst"), async (request, response) => {
+    const page = Number(request.query.page ?? 1);
+    if (!Number.isSafeInteger(page) || page < 1) {
+        response.status(400).json({ message: "Choose a valid customer page." });
+        return;
+    }
+    try {
+        response.json(await getAdminCustomers(String(request.query.q || "").slice(0, 100), page));
+    }
+    catch (error) {
+        console.error("Admin customer search failed", error);
+        response.status(500).json({ message: "Unable to search customers." });
+    }
+});
+app.get("/api/admin/customer-accounts", requireAdmin, requireAdminRoles("owner", "manager"), async (_request, response) => {
+    try {
+        const [customers, invitations] = await Promise.all([listAdminUsers(), listCustomerInvitations()]);
+        response.json({ customers, invitations });
+    }
+    catch (error) {
+        console.error("Admin customer accounts load failed", error);
+        response.status(500).json({ message: "Unable to load customer accounts." });
+    }
+});
+app.post("/api/admin/customer-invitations", requireAdmin, requireAdminRoles("owner", "manager"), async (request, response) => {
+    const fullName = String(request.body.fullName || "").trim();
+    const mobile = String(request.body.mobile || "").replace(/\D/g, "");
+    const email = String(request.body.email || "").trim().toLowerCase() || null;
+    if (fullName.length < 2 || fullName.length > 120 || mobile.length !== 10 ||
+        (email !== null && !/^\S+@\S+\.\S+$/.test(email))) {
+        response.status(400).json({ message: "Enter a name, valid 10-digit mobile number, and valid optional email." });
+        return;
+    }
+    try {
+        const invitationId = await createCustomerInvitation({
+            fullName,
+            mobile,
+            email,
+            invitedBy: sessionAdminId(response),
+        });
+        response.status(201).json({
+            invitationId,
+            message: "Invitation recorded. The customer should sign up with this mobile number and verify it by OTP.",
+        });
+    }
+    catch (error) {
+        console.error("Customer invitation creation failed", error);
+        response.status(409).json({ message: "Unable to create invitation. Check whether this mobile already has an account or pending invitation." });
+    }
+});
+app.post("/api/admin/customer-invitations/:id/cancel", requireAdmin, requireAdminRoles("owner", "manager"), async (request, response) => {
+    const cancelled = await cancelCustomerInvitation(String(request.params.id));
+    if (!cancelled) {
+        response.status(404).json({ message: "Pending customer invitation not found." });
+        return;
+    }
+    response.json({ ok: true });
+});
+app.patch("/api/admin/customers/:id/status", requireAdmin, requireAdminRoles("owner", "manager"), async (request, response) => {
+    const userId = String(request.params.id);
+    const status = request.body.status;
+    if (!/^[0-9a-f-]{36}$/i.test(userId) || !["active", "blocked"].includes(status)) {
+        response.status(400).json({ message: "Choose a valid customer and status." });
+        return;
+    }
+    const updated = await setCustomerAccountStatus(userId, status);
+    if (!updated) {
+        response.status(404).json({ message: "Customer account not found." });
+        return;
+    }
+    response.json({ ok: true });
+});
+app.get("/api/admin/analytics", requireAdmin, requireAdminRoles("owner", "manager", "analyst"), async (_request, response) => {
+    try {
+        response.json(await getAdminAnalytics());
+    }
+    catch (error) {
+        console.error("Admin analytics load failed", error);
+        response.status(500).json({ message: "Unable to load analytics." });
+    }
+});
+app.get("/api/admin/tickets", requireAdmin, requireAdminRoles("owner", "manager", "support"), async (request, response) => {
+    const status = String(request.query.status || "");
+    try {
+        response.json({ tickets: await listSupportTickets(status) });
+    }
+    catch (error) {
+        console.error("Support ticket list failed", error);
+        response.status(500).json({ message: "Unable to load support tickets." });
+    }
+});
+app.get("/api/support/tickets", requireUser, async (_request, response) => {
+    try {
+        response.json({ tickets: await listSupportTickets("", sessionUser(response).id) });
+    }
+    catch (error) {
+        console.error("Customer support ticket list failed", error);
+        response.status(500).json({ message: "Unable to load your support tickets." });
+    }
+});
+app.post("/api/support/tickets", requireUser, async (request, response) => {
+    const user = sessionUser(response);
+    const subject = String(request.body.subject || "").trim();
+    const message = String(request.body.message || "").trim();
+    if (subject.length < 3 || subject.length > 180 || message.length < 3 || message.length > 4000) {
+        response.status(400).json({ message: "Enter a subject and message (up to 4,000 characters)." });
+        return;
+    }
+    try {
+        const id = await createSupportTicket({
+            requesterName: user.full_name,
+            requesterMobile: user.mobile,
+            subject,
+            message,
+            priority: "normal",
+            createdBy: "customer",
+            userId: user.id,
+        });
+        response.status(201).json({ id, message: "Your support ticket was sent to our team." });
+    }
+    catch (error) {
+        console.error("Customer support ticket creation failed", error);
+        response.status(500).json({ message: "Unable to submit your support ticket." });
+    }
+});
+app.post("/api/support/tickets/:id/comments", requireUser, async (request, response) => {
+    const ticketId = String(request.params.id);
+    const user = sessionUser(response);
+    const message = String(request.body.message || "").trim();
+    if (!/^[0-9a-f-]{36}$/i.test(ticketId) || message.length < 1 || message.length > 4000) {
+        response.status(400).json({ message: "Enter a valid ticket reply." });
+        return;
+    }
+    try {
+        const added = await addSupportTicketComment({
+            ticketId,
+            authorType: "customer",
+            authorId: user.id,
+            authorName: user.full_name,
+            message,
+            userId: user.id,
+        });
+        if (!added) {
+            response.status(404).json({ message: "Ticket not found or closed." });
+            return;
+        }
+        response.status(201).json({ ok: true });
+    }
+    catch (error) {
+        console.error("Customer support ticket reply failed", error);
+        response.status(500).json({ message: "Unable to send your reply." });
+    }
+});
+app.post("/api/admin/tickets/:id/comments", requireAdmin, requireAdminRoles("owner", "manager", "support"), async (request, response) => {
+    const ticketId = String(request.params.id);
+    const message = String(request.body.message || "").trim();
+    if (!/^[0-9a-f-]{36}$/i.test(ticketId) || message.length < 1 || message.length > 4000) {
+        response.status(400).json({ message: "Enter a valid ticket reply." });
+        return;
+    }
+    try {
+        const added = await addSupportTicketComment({
+            ticketId,
+            authorType: "admin",
+            authorId: sessionAdminId(response),
+            authorName: sessionAdminId(response),
+            message,
+        });
+        if (!added) {
+            response.status(404).json({ message: "Support ticket not found." });
+            return;
+        }
+        response.status(201).json({ ok: true });
+    }
+    catch (error) {
+        console.error("Admin support ticket reply failed", error);
+        response.status(500).json({ message: "Unable to send the ticket reply." });
+    }
+});
+app.patch("/api/admin/tickets/:id", requireAdmin, requireAdminRoles("owner", "manager", "support"), async (request, response) => {
+    const status = String(request.body.status || "");
+    const assignedTo = String(request.body.assignedTo || "").trim() || null;
+    const updated = await updateSupportTicket(String(request.params.id), status, assignedTo);
+    if (!updated) {
+        response.status(404).json({ message: "Support ticket not found or status is invalid." });
+        return;
+    }
+    response.json({ ok: true });
+});
+app.get("/api/admin/team", requireAdmin, requireAdminRoles("owner"), async (_request, response) => {
+    try {
+        response.json({ admins: await listAdminAccounts(), primaryAdmin: process.env.ADMIN_LOGIN_ID || null });
+    }
+    catch (error) {
+        console.error("Admin team list failed", error);
+        response.status(500).json({ message: "Unable to load admin team." });
+    }
+});
+app.post("/api/admin/team/invitations", requireAdmin, requireAdminRoles("owner"), async (request, response) => {
+    const fullName = String(request.body.fullName || "").trim();
+    const email = String(request.body.email || "").trim().toLowerCase();
+    const role = request.body.role;
+    if (fullName.length < 2 || fullName.length > 120 || !/^\S+@\S+\.\S+$/.test(email) ||
+        !["manager", "support", "analyst"].includes(role) || email === (process.env.ADMIN_LOGIN_ID || "").toLowerCase()) {
+        response.status(400).json({ message: "Enter a valid name, email, and non-owner role." });
+        return;
+    }
+    try {
+        const invite = await createAdminInvitation({ fullName, email, role, invitedBy: sessionAdminId(response) });
+        const requestOrigin = request.get("origin");
+        const requestAppUrl = requestOrigin && /^https?:\/\//i.test(requestOrigin) ? new URL(requestOrigin).origin : null;
+        const baseUrl = process.env.ADMIN_APP_URL || requestAppUrl || `${request.protocol}://${request.get("host")}`;
+        response.status(201).json({ email: invite.email, role, invitationUrl: `${baseUrl}/admin?invite=${invite.token}` });
+    }
+    catch (error) {
+        console.error("Admin invitation creation failed", error);
+        response.status(409).json({ message: "Unable to invite this admin. Check whether the email is already registered." });
+    }
+});
+app.post("/api/admin/team/invitations/accept", async (request, response) => {
+    const token = String(request.body.token || "");
+    const password = String(request.body.password || "");
+    const pin = String(request.body.pin || "");
+    if (!/^[0-9a-f]{64}$/.test(token) || password.length < 12 || !/^\d{6}$/.test(pin)) {
+        response.status(400).json({ message: "Use a valid invite, a password of at least 12 characters, and a 6-digit PIN." });
+        return;
+    }
+    const admin = await acceptAdminInvitation({ token, password, pin });
+    if (!admin) {
+        response.status(400).json({ message: "This admin invitation has expired or was already used." });
+        return;
+    }
+    const sessionToken = await createAdminSession({
+        adminId: admin.email,
+        role: admin.role,
+        ipAddress: request.ip,
+        userAgent: request.get("user-agent"),
+    });
+    response.status(201).json({ token: sessionToken, adminId: admin.email, role: admin.role });
+});
+app.patch("/api/admin/team/:email/status", requireAdmin, requireAdminRoles("owner"), async (request, response) => {
+    const email = String(request.params.email).toLowerCase();
+    const status = request.body.status;
+    if (!/^\S+@\S+\.\S+$/.test(email) || !["active", "disabled"].includes(status) ||
+        email === (process.env.ADMIN_LOGIN_ID || "").toLowerCase() || email === sessionAdminId(response).toLowerCase()) {
+        response.status(400).json({ message: "Choose a valid admin account and status. You cannot disable the primary admin or your own account." });
+        return;
+    }
+    const updated = await setAdminAccountStatus(email, status);
+    if (!updated) {
+        response.status(404).json({ message: "Admin account not found." });
+        return;
+    }
+    response.json({ ok: true });
 });
 app.post("/api/admin/logout", requireAdmin, async (request, response) => {
     await revokeAdminSession(bearerToken(request));
     response.json({ ok: true });
 });
-app.post("/api/admin/reports", requireAdmin, async (request, response) => {
+app.post("/api/admin/reports", requireAdmin, requireAdminRoles("owner", "manager"), async (request, response) => {
     const bureau = request.body.bureau;
     if (!isBureau(bureau)) {
         response.status(400).json({ message: "Choose a valid credit bureau." });
@@ -179,16 +469,18 @@ app.post("/api/admin/reports", requireAdmin, async (request, response) => {
         panLast4: applicant.pan.slice(-4),
         mobileLast4: applicant.mobile.slice(-4),
         consentIpAddress,
+        applicant,
     });
     try {
         const result = await fetchBureauReport(bureau, applicant, consentIpAddress);
         if (!result.ok) {
-            await completeAdminReportAudit({ auditId, status: "failed", providerTransactionId: null, creditScore: null, failureReason: result.message });
+            await completeAdminReportAudit({ auditId, status: "failed", providerTransactionId: null, creditScore: null, failureReason: result.message, providerResponse: result.raw });
             response.status(502).json({ message: result.message, diagnostics: result.diagnostics });
             return;
         }
         const report = normalizeReport(bureau, result.raw);
-        await completeAdminReportAudit({ auditId, status: "completed", providerTransactionId: result.providerTxnId, creditScore: report.score, failureReason: null });
+        await completeAdminReportAudit({ auditId, status: "completed", providerTransactionId: result.providerTxnId, creditScore: report.score, failureReason: null,
+            providerResponse: result.raw, normalizedReport: report });
         response.json({ bureau, providerTxnId: result.providerTxnId, report });
     }
     catch (error) {
@@ -533,14 +825,14 @@ app.post("/api/reports/verify", requireUser, async (request, response) => {
     }
     if (payment.gateway === "simulated") {
         if (!isSimulatedPayments()) {
-            await markPaymentFailed(payment.id);
+            await markPaymentFailed(payment.id, "Simulated payment order was rejected.");
             response.status(400).json({ message: "Simulated payments are no longer accepted. Please pay again." });
             return;
         }
         paymentId = simulatedId("pay");
     }
     else if (!paymentId || !signature || !isValidPaymentSignature(orderId, paymentId, signature)) {
-        await markPaymentFailed(payment.id);
+        await markPaymentFailed(payment.id, "Payment signature verification failed.");
         response.status(400).json({ message: "Payment verification failed. If money was deducted, it will be refunded by Razorpay." });
         return;
     }
@@ -558,6 +850,28 @@ app.post("/api/reports/verify", requireUser, async (request, response) => {
         console.error("Report payment verification failed", error);
         response.status(500).json({ message: "Payment received, but we could not fetch the report yet. Use Retry on your dashboard." });
     }
+});
+app.post("/api/reports/fail", requireUser, async (request, response) => {
+    const user = sessionUser(response);
+    const orderId = String(request.body.orderId || "").trim();
+    if (!orderId || orderId.length > 200) {
+        response.status(400).json({ message: "A valid payment order is required." });
+        return;
+    }
+    const payment = await findReportPayment(user.id, orderId);
+    if (!payment) {
+        response.status(404).json({ message: "We could not find that payment." });
+        return;
+    }
+    try {
+        await recordPaymentFailure(payment.id);
+    }
+    catch (error) {
+        console.error("Payment failure history update failed", error);
+        response.status(500).json({ message: "Unable to update payment history." });
+        return;
+    }
+    response.json({ ok: true });
 });
 // Lets a paying user retry a failed bureau fetch without paying again.
 app.post("/api/reports/:requestId/retry", requireUser, async (request, response) => {
