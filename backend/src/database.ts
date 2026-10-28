@@ -364,6 +364,27 @@ export const completeAdminReportAudit = async ({
   );
 };
 
+export const getAdminReportDocument = async (auditId: number) => {
+  const { rows } = await pool.query<{
+    id: number;
+    bureau: Bureau;
+    report_date: string;
+    normalized_report: NormalizedReport | null;
+  }>(
+    `SELECT id, bureau, to_char(COALESCE(completed_at, created_at), 'YYYY-MM-DD') AS report_date, normalized_report
+     FROM admin_report_audit
+     WHERE id = $1 AND status = 'completed' AND normalized_report IS NOT NULL`,
+    [auditId],
+  );
+  const row = rows[0];
+  return row ? {
+    id: row.id,
+    bureau: row.bureau,
+    reportDate: row.report_date,
+    report: row.normalized_report!,
+  } : null;
+};
+
 export const getAdminActivity = async (requestedPage = 1) => {
   const pageSize = 50;
   const page = Math.max(1, Math.floor(requestedPage));
@@ -1220,20 +1241,40 @@ export const getReportDetail = async (userId: string, requestId: string) => {
     reportDate: report.reportDate ?? row.report_date,
     reportUrl: row.report_url,
     isDemo: row.is_demo,
-    pdfAvailable: row.has_pdf || Boolean(livePdfUrl(row.raw_report)),
+    pdfAvailable: true,
   };
 };
 
 export const getReportPdf = async (userId: string, requestId: string) => {
-  const { rows } = await pool.query<{ request_id: string; bureau: Bureau; report_date: string; report_pdf: Buffer | null; raw_report: unknown }>(
+  const { rows } = await pool.query<{
+    request_id: string;
+    bureau: Bureau;
+    report_date: string;
+    report_pdf: Buffer | null;
+    raw_report: unknown;
+    normalized_report: NormalizedReport | null;
+  }>(
     `SELECT c.request_id, c.bureau, to_char(c.report_date, 'YYYY-MM-DD') AS report_date, c.report_pdf,
-            CASE WHEN c.report_pdf IS NULL THEN c.raw_report END AS raw_report
+            c.raw_report, c.normalized_report
      FROM credit_reports c JOIN credit_report_requests r ON r.id = c.request_id
      WHERE c.request_id::text = $1 AND c.user_id = $2 AND ${VISIBLE_REQUEST}`,
     [requestId, userId],
   );
   const row = rows[0];
-  return row ? { requestId: row.request_id, bureau: row.bureau, reportDate: row.report_date, pdf: row.report_pdf, raw: row.raw_report } : null;
+  if (!row) return null;
+  let report = row.normalized_report;
+  if (!report || report.parserVersion !== PARSER_VERSION) {
+    report = normalizeReport(row.bureau, row.raw_report);
+    await persistNormalizedReport(row.request_id, report);
+  }
+  return {
+    requestId: row.request_id,
+    bureau: row.bureau,
+    reportDate: row.report_date,
+    pdf: row.report_pdf,
+    raw: row.report_pdf ? null : row.raw_report,
+    report,
+  };
 };
 
 export const saveReportPdf = async (requestId: string, pdf: Buffer) => {

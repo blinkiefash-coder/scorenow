@@ -1425,6 +1425,7 @@ function ReportDetailView({ user, requestId, onLoaded }: { user: AuthUser; reque
           {detail.pdfAvailable && <button type="button" className="button button-primary" disabled={downloading} onClick={() => void downloadPdf()}><Download /> {downloading ? 'Preparing…' : 'Download PDF'}</button>}
         </div>
       </article>
+      <p className="dashboard-notice info">If a bureau-issued PDF is unavailable, the download is a Score Now-generated report copy based on the bureau data, not an official bureau document.</p>
       {downloadError && <p className="dashboard-notice error" role="alert">{downloadError}</p>}
       <div className="report-summary-strip">
         <div><small>Total accounts</small><strong>{summary.totalAccounts}</strong></div>
@@ -2695,9 +2696,12 @@ function AdminPage() {
   const [authState, setAuthState] = useState<'checking' | 'signed-out' | 'signed-in'>(token ? 'checking' : 'signed-out')
   const [loginError, setLoginError] = useState('')
   const [reportError, setReportError] = useState('')
+  const [reportPdfError, setReportPdfError] = useState('')
   const [loading, setLoading] = useState(false)
+  const [reportPdfLoadingId, setReportPdfLoadingId] = useState('')
   const [bureau, setBureau] = useState<BureauId>('cibil')
   const [report, setReport] = useState<ReportDetail | null>(null)
+  const [reportAuditId, setReportAuditId] = useState('')
   const [activity, setActivity] = useState<AdminActivity | null>(null)
   const [activityError, setActivityError] = useState('')
   const [activityLoading, setActivityLoading] = useState(true)
@@ -2865,6 +2869,7 @@ function AdminPage() {
     setAdminId('')
     setAdminRole('owner')
     setReport(null)
+    setReportAuditId('')
     setActivity(null)
     setAuthState('signed-out')
   }
@@ -2872,7 +2877,9 @@ function AdminPage() {
   const fetchReport = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
     setReport(null)
+    setReportAuditId('')
     setReportError('')
+    setReportPdfError('')
     setLoading(true)
     const data = new FormData(event.currentTarget)
     try {
@@ -2894,18 +2901,44 @@ function AdminPage() {
           consent: data.get('clientConsent') === 'on',
         }),
       })
-      const result = await response.json() as { report?: ReportDetail; message?: string }
+      const result = await response.json() as { report?: ReportDetail; auditId?: string; message?: string }
       if (response.status === 401) {
         await signOut()
         throw new Error('Admin session expired. Sign in again.')
       }
       if (!response.ok || !result.report) throw new Error(result.message || 'Unable to fetch this report.')
       setReport(result.report)
+      setReportAuditId(result.auditId || '')
     } catch (error) {
       setReportError(error instanceof Error ? error.message : 'Unable to fetch this report.')
     } finally {
       setLoading(false)
       refreshActivity()
+    }
+  }
+
+  const downloadAdminReportPdf = async (auditId: string, reportBureau: BureauId) => {
+    if (!auditId || !token) return
+    setReportPdfLoadingId(auditId)
+    setReportPdfError('')
+    try {
+      const response = await fetch(`${apiUrl}/api/admin/reports/${auditId}/pdf`, {
+        headers: { Authorization: `Bearer ${token}` },
+      })
+      if (!response.ok) {
+        const result = await response.json().catch(() => null) as { message?: string } | null
+        throw new Error(result?.message || 'Unable to generate this report PDF.')
+      }
+      const url = URL.createObjectURL(await response.blob())
+      const link = document.createElement('a')
+      link.href = url
+      link.download = `ScoreNow-${reportBureau}-report-copy.pdf`
+      link.click()
+      window.setTimeout(() => URL.revokeObjectURL(url), 1000)
+    } catch (error) {
+      setReportPdfError(error instanceof Error ? error.message : 'Unable to generate this report PDF.')
+    } finally {
+      setReportPdfLoadingId('')
     }
   }
 
@@ -3141,6 +3174,7 @@ function AdminPage() {
             <button className="button button-outline" type="button" onClick={refreshActivity} disabled={activityLoading}><RotateCcw /> {activityLoading ? 'Refreshing…' : 'Refresh activity'}</button>
           </div>
           {activityError && <p className="dashboard-notice error" role="alert">{activityError}</p>}
+          {reportPdfError && <p className="dashboard-notice error" role="alert">{reportPdfError}</p>}
           {activity && <div className="admin-stat-grid">
             <article className="dashboard-card admin-stat"><Users /><span>Total users</span><strong>{activity.summary.totalUsers.toLocaleString('en-IN')}</strong></article>
             <article className="dashboard-card admin-stat"><BadgeIndianRupee /><span>Payments received</span><strong>{activity.summary.paidPayments.toLocaleString('en-IN')}</strong><small>{formatMoney(activity.summary.paymentRevenue)} including GST</small></article>
@@ -3171,7 +3205,7 @@ function AdminPage() {
           <article className="dashboard-card admin-activity-card">
             <div className="dashboard-card-heading"><strong>Admin-initiated bureau checks</strong><small>50 per page</small></div>
             {!activity && !activityError ? <p className="admin-activity-empty">Loading report history…</p> : matchingAdminReports.length ? <div className="admin-table-wrap"><table className="admin-activity-table">
-              <thead><tr><th>Client</th><th>Bureau</th><th>Status</th><th>Score</th><th>Checked by</th><th>Date</th></tr></thead>
+              <thead><tr><th>Client</th><th>Bureau</th><th>Status</th><th>Score</th><th>Checked by</th><th>Date</th><th>PDF</th></tr></thead>
               <tbody>{matchingAdminReports.map((item) => <tr key={item.id}>
                 <td><strong>{item.full_name || 'Client'}</strong><small>•••• {item.mobile_last4}</small></td>
                 <td>{bureauCatalog.find((entry) => entry.id === item.bureau)?.name ?? item.bureau}</td>
@@ -3179,6 +3213,7 @@ function AdminPage() {
                 <td>{item.credit_score ?? '—'}</td>
                 <td>{item.admin_id}</td>
                 <td>{formatAdminTimestamp(item.completed_at ?? item.created_at)}</td>
+                <td>{item.status === 'completed' && <button className="button button-outline admin-small-button" type="button" onClick={() => void downloadAdminReportPdf(item.id, item.bureau)} disabled={reportPdfLoadingId === item.id}><Download /> {reportPdfLoadingId === item.id ? 'Preparing…' : 'Download'}</button>}</td>
               </tr>)}</tbody>
             </table></div> : <p className="admin-activity-empty">{activity ? 'No matching admin report checks found.' : 'Report history is not available yet.'}</p>}
           </article>
@@ -3209,6 +3244,9 @@ function AdminPage() {
           <button className="button button-primary" type="submit" disabled={loading}>{loading ? 'Requesting report…' : <>Fetch {bureauCatalog.find((item) => item.id === bureau)?.name} report <ArrowRight /></>}</button>
         </form>
         {report && <section className="admin-report-result" aria-live="polite">
+          <div className="report-toolbar-actions"><button className="button button-primary" type="button" onClick={() => void downloadAdminReportPdf(reportAuditId, report.bureau)} disabled={reportPdfLoadingId === reportAuditId || !reportAuditId}><Download /> {reportPdfLoadingId === reportAuditId ? 'Preparing PDF…' : 'Download Score Now PDF'}</button></div>
+          <p className="dashboard-notice info">This is a Score Now-generated copy based on bureau data, not an official bureau-issued report.</p>
+          {reportPdfError && <p className="dashboard-notice error" role="alert">{reportPdfError}</p>}
           <div className="admin-result-heading"><div><span>{bureauCatalog.find((item) => item.id === report.bureau)?.name} REPORT</span><h2>{report.personal.name || 'Client report'}</h2></div><strong>{report.score ?? '—'}<small>{report.score ? 'Credit score' : 'Score unavailable'}</small></strong></div>
           <div className="report-summary-strip">
             <div><small>Total accounts</small><strong>{report.summary.totalAccounts}</strong></div>

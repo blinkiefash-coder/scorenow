@@ -37,6 +37,10 @@ Before real delivery, create `backend/.env` from `backend/.env.example` and conf
 
 Set `VITE_API_URL` in `frontend/.env` if the API is hosted somewhere other than `http://localhost:3000`, then restart Vite. For local testing without sending email, set `EMAIL_PREVIEW=true` in `backend/.env`; preview mode renders messages without delivering them.
 
+## Credit report PDF downloads
+
+The customer dashboard downloads a bureau-provided PDF when one is available. If a bureau response does not include a usable PDF, the backend generates a Score Now-formatted PDF from the normalized report data. Admin-initiated bureau checks can also download a Score Now report copy. Generated copies are explicitly labeled as not issued or endorsed by the bureau and are served only to the authenticated report owner or authorized admin.
+
 ## Client preview deployment
 
 The deployment layout is:
@@ -49,3 +53,7 @@ Connect the GitHub repository to Render and create a Blueprint deployment from `
 Connect the same repository to Vercel and set the project root directory to `frontend`. Add `VITE_API_URL` with the Render API URL, for example `https://scorenow-api.onrender.com`, then deploy. Vite reads this value at build time, so redeploy the frontend whenever it changes.
 
 Verify the deployed API at `/api/health`, then test both assessment forms and report attachments. Render's free web services may sleep while idle, so the first request after inactivity can take longer.
+
+## cPanel deployment
+
+The root `.cpanel.yml` builds the frontend and backend, copies the static site to `/home/spjheceg/public_html/`, installs the backend runtime dependencies in `/home/spjheceg/scorenow-api/`, and touches Passenger's `tmp/restart.txt` after deployment. Confirm that these paths match the domain document root and Node.js application root in cPanel.

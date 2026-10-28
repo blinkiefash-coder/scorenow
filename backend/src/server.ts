@@ -44,6 +44,7 @@ import {
   getAdminActivity,
   getAdminAnalytics,
   getAdminCustomers,
+  getAdminReportDocument,
   getDashboardStatus,
   getReportDetail,
   getReportPdf,
@@ -72,6 +73,7 @@ import {
   upsertUserByMobile,
   verifyOtp,
 } from "./database.js";
+import { generateReportPdf } from "./reportPdf.js";
 import { verifyFirebasePhoneToken } from "./firebaseAdmin.js";
 import { demoReportResponses, isReportsDemoMode } from "./demoReports.js";
 import { createRazorpayOrder, isRazorpayConfigured, isSimulatedPayments, isValidPaymentSignature, simulatedId } from "./razorpay.js";
@@ -584,12 +586,36 @@ app.post("/api/admin/reports", requireAdmin, requireAdminRoles("owner", "manager
     const report = normalizeReport(bureau, result.raw);
     await completeAdminReportAudit({ auditId, status: "completed", providerTransactionId: result.providerTxnId, creditScore: report.score, failureReason: null,
       providerResponse: result.raw, normalizedReport: report });
-    response.json({ bureau, providerTxnId: result.providerTxnId, report });
+    response.json({ auditId: String(auditId), bureau, providerTxnId: result.providerTxnId, report });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unable to fetch this credit report.";
     await completeAdminReportAudit({ auditId, status: "failed", providerTransactionId: null, creditScore: null, failureReason: message });
     console.error("Admin bureau report request failed", error);
     response.status(502).json({ message: "Unable to fetch this credit report." });
+  }
+});
+
+app.get("/api/admin/reports/:auditId/pdf", requireAdmin, requireAdminRoles("owner", "manager"), async (request, response) => {
+  const auditId = Number(request.params.auditId);
+  if (!Number.isSafeInteger(auditId) || auditId < 1) {
+    response.status(400).json({ message: "Choose a valid admin report." });
+    return;
+  }
+  try {
+    const record = await getAdminReportDocument(auditId);
+    if (!record) {
+      response.status(404).json({ message: "Completed admin report not found." });
+      return;
+    }
+    const pdf = await generateReportPdf({ report: record.report, reportDate: record.reportDate });
+    response.set({
+      "Content-Type": "application/pdf",
+      "Content-Disposition": `attachment; filename="ScoreNow-${record.bureau}-report-copy-${record.reportDate}.pdf"`,
+      "Cache-Control": "private, no-store",
+    }).send(pdf);
+  } catch (error) {
+    console.error("Admin report PDF generation failed", error);
+    response.status(500).json({ message: "Unable to generate this report PDF." });
   }
 });
 
@@ -818,17 +844,18 @@ app.get("/api/reports/:requestId/pdf", requireUser, async (request, response) =>
       return;
     }
     let pdf = record.pdf;
+    let generatedCopy = false;
     if (!pdf) {
       pdf = await downloadReportPdf(livePdfUrl(record.raw));
       if (pdf) await saveReportPdf(record.requestId, pdf);
     }
     if (!pdf) {
-      response.status(404).json({ message: "A PDF is not available for this report." });
-      return;
+      pdf = await generateReportPdf({ report: record.report, reportDate: record.reportDate });
+      generatedCopy = true;
     }
     response.set({
       "Content-Type": "application/pdf",
-      "Content-Disposition": `attachment; filename="ScoreNow-${record.bureau}-report-${record.reportDate}.pdf"`,
+      "Content-Disposition": `attachment; filename="ScoreNow-${record.bureau}-${generatedCopy ? "report-copy" : "report"}-${record.reportDate}.pdf"`,
       "Cache-Control": "private, no-store",
     }).send(pdf);
   } catch (error) {

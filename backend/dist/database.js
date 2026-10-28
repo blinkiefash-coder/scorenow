@@ -1,6 +1,6 @@
 import { createCipheriv, createDecipheriv, createHash, randomBytes, randomInt, scryptSync, timingSafeEqual } from "node:crypto";
 import { Pool } from "pg";
-import { livePdfUrl, scoreBand } from "./bureaus.js";
+import { scoreBand } from "./bureaus.js";
 import { normalizeReport, PARSER_VERSION } from "./reportParser.js";
 const pool = new Pool({
     connectionString: process.env.DATABASE_URL,
@@ -250,6 +250,18 @@ export const completeAdminReportAudit = async ({ auditId, status, providerTransa
      WHERE id = $1`, [auditId, status, providerTransactionId, creditScore, failureReason?.slice(0, 500) ?? null,
         providerResponse == null ? null : JSON.stringify(providerResponse),
         normalizedReport == null ? null : JSON.stringify(normalizedReport)]);
+};
+export const getAdminReportDocument = async (auditId) => {
+    const { rows } = await pool.query(`SELECT id, bureau, to_char(COALESCE(completed_at, created_at), 'YYYY-MM-DD') AS report_date, normalized_report
+     FROM admin_report_audit
+     WHERE id = $1 AND status = 'completed' AND normalized_report IS NOT NULL`, [auditId]);
+    const row = rows[0];
+    return row ? {
+        id: row.id,
+        bureau: row.bureau,
+        reportDate: row.report_date,
+        report: row.normalized_report,
+    } : null;
 };
 export const getAdminActivity = async (requestedPage = 1) => {
     const pageSize = 50;
@@ -764,16 +776,30 @@ export const getReportDetail = async (userId, requestId) => {
         reportDate: report.reportDate ?? row.report_date,
         reportUrl: row.report_url,
         isDemo: row.is_demo,
-        pdfAvailable: row.has_pdf || Boolean(livePdfUrl(row.raw_report)),
+        pdfAvailable: true,
     };
 };
 export const getReportPdf = async (userId, requestId) => {
     const { rows } = await pool.query(`SELECT c.request_id, c.bureau, to_char(c.report_date, 'YYYY-MM-DD') AS report_date, c.report_pdf,
-            CASE WHEN c.report_pdf IS NULL THEN c.raw_report END AS raw_report
+            c.raw_report, c.normalized_report
      FROM credit_reports c JOIN credit_report_requests r ON r.id = c.request_id
      WHERE c.request_id::text = $1 AND c.user_id = $2 AND ${VISIBLE_REQUEST}`, [requestId, userId]);
     const row = rows[0];
-    return row ? { requestId: row.request_id, bureau: row.bureau, reportDate: row.report_date, pdf: row.report_pdf, raw: row.raw_report } : null;
+    if (!row)
+        return null;
+    let report = row.normalized_report;
+    if (!report || report.parserVersion !== PARSER_VERSION) {
+        report = normalizeReport(row.bureau, row.raw_report);
+        await persistNormalizedReport(row.request_id, report);
+    }
+    return {
+        requestId: row.request_id,
+        bureau: row.bureau,
+        reportDate: row.report_date,
+        pdf: row.report_pdf,
+        raw: row.report_pdf ? null : row.raw_report,
+        report,
+    };
 };
 export const saveReportPdf = async (requestId, pdf) => {
     await pool.query(`UPDATE credit_reports SET report_pdf = $2 WHERE request_id = $1`, [requestId, pdf]);
