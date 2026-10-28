@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type CSSProperties, type FormEvent } from 'react'
+import { Fragment, useCallback, useEffect, useRef, useState, type CSSProperties, type FormEvent } from 'react'
 import {
   AlertTriangle, ArrowLeft, ArrowRight, BadgeIndianRupee, BarChart3, BookOpen,
   Building2, CalendarDays, Check, ChevronDown, CircleHelp, Clock3, CreditCard, Download, ExternalLink,
@@ -1361,7 +1361,7 @@ const accountFilters: { id: AccountFilter; label: string; matches: (account: Rep
   { id: 'closed', label: 'Closed', matches: (account) => account.status === 'closed' },
 ]
 
-function ReportDetailView({ user, requestId }: { user: AuthUser; requestId: string }) {
+function ReportDetailView({ user, requestId, onLoaded }: { user: AuthUser; requestId: string; onLoaded: (detail: ReportDetail) => void }) {
   const [detail, setDetail] = useState<ReportDetail | null>(null)
   const [error, setError] = useState('')
   const [accountFilter, setAccountFilter] = useState<AccountFilter>('all')
@@ -1374,11 +1374,14 @@ function ReportDetailView({ user, requestId }: { user: AuthUser; requestId: stri
       .then(async (response) => {
         const result = await response.json() as ReportDetail & { message?: string }
         if (!response.ok) throw new Error(result.message || 'Unable to load this report.')
-        if (!cancelled) setDetail(result)
+        if (!cancelled) {
+          setDetail(result)
+          onLoaded(result)
+        }
       })
       .catch((loadError: unknown) => { if (!cancelled) setError(loadError instanceof Error ? loadError.message : 'Unable to load this report.') })
     return () => { cancelled = true }
-  }, [requestId, user])
+  }, [requestId, user, onLoaded])
 
   if (error) return <p className="dashboard-notice error">{error}</p>
   if (!detail) return <div className="dashboard-card report-loading"><RotateCcw /> Loading full report…</div>
@@ -1459,7 +1462,7 @@ function ReportDetailView({ user, requestId }: { user: AuthUser; requestId: stri
           </dl>
         </article>
 
-        <article className="dashboard-card report-enquiries">
+        <article className="dashboard-card report-enquiries" id="credit-enquiries">
           <div className="dashboard-card-heading"><strong><Search /> Credit Enquiries</strong><small>{detail.enquiries.length} total</small></div>
           {detail.enquiries.length ? <ul>{detail.enquiries.map((enquiry, index) => <li key={`${enquiry.lender}-${index}`}><div><strong>{enquiry.lender}</strong><small>{enquiry.purpose || 'Credit enquiry'}{enquiry.amount ? ` · ${formatMoney(enquiry.amount)}` : ''}</small></div><time>{formatDate(enquiry.date)}</time></li>)}</ul> : <p className="report-empty">No enquiries reported.</p>}
         </article>
@@ -1474,28 +1477,29 @@ function ReportDetailView({ user, requestId }: { user: AuthUser; requestId: stri
           })}</div>
           <div className="payment-legend" aria-hidden="true"><span><i className="ontime" /> On time</span><span><i className="late" /> Days late</span><span><i className="unknown" /> Not reported</span></div>
         </div>
-        {visibleAccounts.length ? <div className="report-account-list">{visibleAccounts.map((account, index) => (
-          <div className={`report-account ${account.status}`} key={`${account.lender}-${account.accountNumber}-${index}`}>
-            <div className="report-account-head">
-              <div><strong>{account.lender}</strong><small>{account.type}{account.accountNumber ? ` · ${account.accountNumber}` : ''}</small></div>
-              <span className={`account-chip ${accountFlag(account).tone}`}>{accountFlag(account).label}</span>
-            </div>
-            {((account.writtenOffAmount ?? 0) > 0 || (account.settlementAmount ?? 0) > 0) && <p className="account-alert"><AlertTriangle /> {(account.writtenOffAmount ?? 0) > 0 ? `Lender wrote off ${formatMoney(account.writtenOffAmount)}` : `Settled for ${formatMoney(account.settlementAmount)}`}. This has a strong negative effect on your score until resolved.</p>}
-            <dl className="report-account-figures">
-              <div><dt>{account.creditLimit ? 'Credit limit' : 'Sanctioned'}</dt><dd>{formatMoney(account.creditLimit ?? account.sanctionedAmount)}</dd></div>
-              <div><dt>Balance</dt><dd>{formatMoney(account.currentBalance)}</dd></div>
-              <div><dt>Overdue</dt><dd className={(account.overdueAmount ?? 0) > 0 ? 'is-bad' : ''}>{formatMoney(account.overdueAmount)}</dd></div>
-              {account.emiAmount ? <div><dt>EMI</dt><dd>{formatMoney(account.emiAmount)}</dd></div> : null}
-              {account.interestRate ? <div><dt>Interest</dt><dd>{account.interestRate}%</dd></div> : null}
-              <div><dt>Opened</dt><dd>{formatDate(account.openedOn)}</dd></div>
-              <div><dt>{account.closedOn ? 'Closed' : 'Last payment'}</dt><dd>{formatDate(account.closedOn ?? account.lastPaymentOn)}</dd></div>
-            </dl>
-            {account.paymentHistory.length > 0 && <div className="payment-history" aria-label="Payment history, most recent first">{account.paymentHistory.map((entry) => {
-              const late = (entry.daysPastDue ?? 0) > 0
-              return <span key={entry.month} className={entry.daysPastDue === null ? 'unknown' : late ? 'late' : 'ontime'} title={`${formatMonth(entry.month)}: ${entry.daysPastDue === null ? 'Not reported' : late ? `${entry.daysPastDue} days late` : 'On time'}`}>{late ? entry.daysPastDue : ''}</span>
-            })}</div>}
-          </div>
-        ))}</div> : <p className="report-empty">{detail.accounts.length ? 'No accounts match this filter.' : 'No accounts found in this report.'}</p>}
+        {visibleAccounts.length ? <div className="report-account-table-wrap" id="payment-history"><table className="report-account-table">
+          <thead><tr><th scope="col">Lender</th><th scope="col">Account type</th><th scope="col">Account no.</th><th scope="col">Status</th><th scope="col">Outstanding</th><th scope="col">Overdue</th><th scope="col">Last payment</th></tr></thead>
+          <tbody>{visibleAccounts.map((account, index) => (
+            <Fragment key={`${account.lender}-${account.accountNumber}-${index}`}>
+              <tr>
+                <td><strong>{account.lender}</strong></td>
+                <td>{account.type}</td>
+                <td>{account.accountNumber ? `•••• ${account.accountNumber.slice(-4)}` : '—'}</td>
+                <td><span className={`account-chip ${accountFlag(account).tone}`}>{accountFlag(account).label}</span></td>
+                <td>{formatMoney(account.currentBalance)}</td>
+                <td className={(account.overdueAmount ?? 0) > 0 ? 'is-bad' : ''}>{formatMoney(account.overdueAmount)}</td>
+                <td>{formatDate(account.lastPaymentOn)}</td>
+              </tr>
+              {((account.writtenOffAmount ?? 0) > 0 || (account.settlementAmount ?? 0) > 0) && <tr className="report-account-alert-row"><td colSpan={7}><AlertTriangle /> {(account.writtenOffAmount ?? 0) > 0 ? `Lender wrote off ${formatMoney(account.writtenOffAmount)}` : `Settled for ${formatMoney(account.settlementAmount)}`}. Review this item in your report.</td></tr>}
+              {account.paymentHistory.length > 0 && <tr className="report-payment-history-row"><td colSpan={7}>
+                <div className="report-payment-history"><strong>Payment history</strong><div className="payment-history" aria-label={`${account.lender} payment history, most recent first`}>{account.paymentHistory.map((entry) => {
+                  const late = (entry.daysPastDue ?? 0) > 0
+                  return <span key={entry.month} className={entry.daysPastDue === null ? 'unknown' : late ? 'late' : 'ontime'} title={`${formatMonth(entry.month)}: ${entry.daysPastDue === null ? 'Not reported' : late ? `${entry.daysPastDue} days late` : 'On time'}`}>{late ? entry.daysPastDue : ''}</span>
+                })}</div></div>
+              </td></tr>}
+            </Fragment>
+          ))}</tbody>
+        </table></div> : <p className="report-empty">{detail.accounts.length ? 'No accounts match this filter.' : 'No accounts found in this report.'}</p>}
       </article>
     </section>
   )
@@ -1643,6 +1647,7 @@ function ProfileOnboarding({ user, onComplete, onLogout }: { user: AuthUser; onC
 function DashboardPage({ user, onLogout }: { user: AuthUser; onLogout: () => void }) {
   const [status, setStatus] = useState<DashboardStatus | null>(null)
   const [options, setOptions] = useState<ReportOptions | null>(null)
+  const [reportDetail, setReportDetail] = useState<ReportDetail | null>(null)
   const [providerDiagnostics, setProviderDiagnostics] = useState<Partial<Record<BureauId, ProviderDiagnostics>>>({})
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
@@ -1658,6 +1663,7 @@ function DashboardPage({ user, onLogout }: { user: AuthUser; onLogout: () => voi
   const [activeNav, setActiveNav] = useState('#dashboard-overview')
   const [notice, setNotice] = useState<{ tone: 'info' | 'success' | 'error'; text: string } | null>(null)
   const [simCheckout, setSimCheckout] = useState<SimulatedCheckoutState | null>(null)
+  const handleReportDetailLoaded = useCallback((detail: ReportDetail) => setReportDetail(detail), [])
   const firstName = user.full_name.trim().split(' ')[0] || 'there'
   const hour = new Date().getHours()
   const greeting = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening'
@@ -1764,11 +1770,12 @@ function DashboardPage({ user, onLogout }: { user: AuthUser; onLogout: () => voi
   const completedReports = status.reports.filter((report) => report.status === 'completed')
   const activeBureau = selectedBureau && reportFor(selectedBureau)?.status === 'completed' ? selectedBureau : completedReports[0]?.bureau ?? null
   const activeReport = activeBureau ? reportFor(activeBureau) : undefined
+  const activeReportDetail = reportDetail?.bureau === activeReport?.bureau ? reportDetail : null
   const price = options?.price ?? 99
   const sidebarItems: { icon: typeof House; label: string; href: string; external?: boolean }[] = [
-    { icon: House, label: 'Overview', href: '#dashboard-overview' },
-    { icon: FileSearch, label: 'Credit reports', href: '#credit-reports' },
-    ...(activeReport ? [{ icon: FileCheck2, label: 'My report', href: '#my-report' }] : []),
+    { icon: FileSearch, label: 'Credit score', href: '#dashboard-overview' },
+    { icon: FileCheck2, label: 'Download report', href: activeReport ? '#my-report' : '#credit-reports' },
+    { icon: Lightbulb, label: 'Report insights', href: '#score-insights' },
     { icon: TrendingUp, label: 'Improve score', href: '#credit-learning' },
     { icon: Gift, label: 'Offers', href: '/#plans', external: true },
     { icon: UserRound, label: 'My profile', href: '#my-profile' },
@@ -1932,7 +1939,17 @@ function DashboardPage({ user, onLogout }: { user: AuthUser; onLogout: () => voi
         <Brand href="/" />
         <nav aria-label="Dashboard navigation">
           {sidebarItems.map(({ icon: Icon, label, href, external }) => (
-            <a key={label} href={href} className={activeNav === href ? 'active' : ''} onClick={() => setActiveNav(href)}><Icon /><span>{label}</span>{!external && <ArrowRight />}</a>
+            <Fragment key={label}>
+              <a href={href} className={activeNav === href ? 'active' : ''} onClick={() => setActiveNav(href)}><Icon /><span>{label}</span>{!external && <ArrowRight />}</a>
+              {label === 'Report insights' && <div className="dashboard-sidebar-subnav" aria-label="Report sections">
+                {[
+                  ['All accounts', activeReport ? '#credit-accounts' : '#credit-reports'],
+                  ['Credit enquiries', activeReport ? '#credit-enquiries' : '#credit-reports'],
+                  ['Payment history', activeReport ? '#payment-history' : '#credit-reports'],
+                  ['Personal details', activeReport ? '#personal-details' : '#my-profile'],
+                ].map(([section, target]) => <a href={target} key={section} onClick={() => setActiveNav(target)}>{section}</a>)}
+              </div>}
+            </Fragment>
           ))}
         </nav>
         <div className="dashboard-support">
@@ -1970,6 +1987,13 @@ function DashboardPage({ user, onLogout }: { user: AuthUser; onLogout: () => voi
                     <strong>Your credit score</strong>
                     <span className="score-report-date"><Clock3 /> Updated {formatDate(activeReport.report_date)}{activeReport.is_demo ? ' · Sample' : ''}</span>
                   </div>
+                  {completedReports.length > 1 && <div className="dashboard-bureau-tabs" role="tablist" aria-label="Choose a credit bureau">
+                    {completedReports.map((report) => (
+                      <button key={report.bureau} type="button" role="tab" aria-selected={report.bureau === activeBureau} className={report.bureau === activeBureau ? 'active' : ''} onClick={() => setSelectedBureau(report.bureau)}>
+                        {bureauName(report.bureau)}
+                      </button>
+                    ))}
+                  </div>}
                   <div className="dashboard-score-area">
                     <div className={`dashboard-gauge score-band-${scoreBandTone(activeReport.score_band)}`} aria-label={`Credit score ${activeReport.credit_score ?? 'unavailable'} out of 900`}>
                       <div className="dashboard-gauge-track" />
@@ -1979,8 +2003,12 @@ function DashboardPage({ user, onLogout }: { user: AuthUser; onLogout: () => voi
                       <span className="gauge-min">300</span><span className="gauge-max">900</span>
                     </div>
                     <div className="dashboard-score-copy">
-                      <strong><ShieldCheck /> {bureauName(activeReport.bureau)}</strong>
-                      <p>{activeReport.credit_score ? 'This is your latest score from this credit bureau.' : 'Your score details are available in the full report.'}</p>
+                      <strong><ShieldCheck /> {activeReport.score_band ? `Your score is ${activeReport.score_band.toLowerCase()}` : bureauName(activeReport.bureau)}</strong>
+                      <p>{activeReport.overdue_accounts
+                        ? `${activeReport.overdue_accounts} account${activeReport.overdue_accounts === 1 ? '' : 's'} reported overdue. Review your account details and payment history below.`
+                        : activeReport.credit_score
+                          ? `Your ${bureauName(activeReport.bureau)} report is ready. Explore the summary and account details below.`
+                          : 'Your score details are available in the full report.'}</p>
                       <span>Score range <b>300–900</b></span>
                     </div>
                   </div>
@@ -1989,20 +2017,37 @@ function DashboardPage({ user, onLogout }: { user: AuthUser; onLogout: () => voi
               : <article className="dashboard-card empty-report-card">
                   <div className="empty-dashboard-state"><FileSearch /><strong>Your credit picture starts here</strong><span>Choose a bureau to securely request your report. We’ll help you understand the information and decide what to focus on.</span></div>
                 </article>}
-            <article className="dashboard-card dashboard-guidance-card">
-              <span className="dashboard-guidance-label"><Sparkles /> YOUR NEXT STEP</span>
-              <div className="dashboard-guidance-icon"><ShieldCheck /></div>
-              <h2>{activeReport ? 'Let’s make sense of your report' : 'We’ll guide you from here'}</h2>
-              <p>{activeReport
-                ? 'Your report has the details behind your score. Review your accounts and enquiries, and we’ll help you understand what stands out.'
-                : 'Start with a credit report. Score Now will help you understand your credit profile and find a clear next step.'}</p>
-              <ul>
-                <li><Check /> Clear explanations, not confusing jargon</li>
-                <li><Check /> Guidance based on your report details</li>
-                <li><Check /> Support from our team when you need it</li>
-              </ul>
-              <a className="dashboard-guidance-action" href={activeReport ? '#my-report' : '#credit-reports'}>{activeReport ? 'Review my report' : 'Choose a credit report'} <ArrowRight /></a>
-              <small><LockKeyhole /> Your report stays private in your account.</small>
+            <article className="dashboard-card dashboard-insights-card" id="score-insights">
+              <div className="dashboard-card-heading">
+                <strong><Lightbulb /> What’s affecting your score?</strong>
+                {activeReport && <a href="#my-report">View report <ArrowRight /></a>}
+              </div>
+              {activeReportDetail?.scoreFactors?.length ? (
+                <ul className="dashboard-factor-list">
+                  {activeReportDetail.scoreFactors.slice(0, 4).map((factor) => (
+                    <li key={factor.text} className={factor.impact}>
+                      <span className="dashboard-factor-icon">{factor.impact === 'negative' ? <ArrowRight /> : <Check />}</span>
+                      <div><strong>{factor.text}</strong>{factor.tip && <small>{factor.tip}</small>}</div>
+                    </li>
+                  ))}
+                </ul>
+              ) : activeReport ? (
+                <div className="dashboard-insights-empty">
+                  <span><ShieldCheck /></span>
+                  <strong>{activeReport.overdue_accounts ? 'Review your reported overdue accounts' : 'Your report is ready to explore'}</strong>
+                  <p>{activeReport.overdue_accounts
+                    ? `${activeReport.overdue_accounts} overdue account${activeReport.overdue_accounts === 1 ? '' : 's'} reported by ${bureauName(activeReport.bureau)}. See the account details and payment history for context.`
+                    : 'Open your detailed report to review account information, enquiries, and payment history.'}</p>
+                  <a href="#my-report">Explore report insights <ArrowRight /></a>
+                </div>
+              ) : (
+                <div className="dashboard-insights-empty">
+                  <span><FileSearch /></span>
+                  <strong>Your report insights will appear here</strong>
+                  <p>Get a credit report to see the account details and factors available from your bureau.</p>
+                  <a href="#credit-reports">Choose a bureau <ArrowRight /></a>
+                </div>
+              )}
             </article>
           </section>
 
@@ -2012,6 +2057,37 @@ function DashboardPage({ user, onLogout }: { user: AuthUser; onLogout: () => voi
             <article className="dashboard-card dashboard-metric"><span className="dashboard-metric-icon gold"><BadgeIndianRupee /></span><div><small>Outstanding balance</small><strong>{activeReport.total_outstanding === null ? '—' : formatMoney(Number(activeReport.total_outstanding))}</strong><span>Across reported accounts</span></div></article>
             <article className="dashboard-card dashboard-metric"><span className={`dashboard-metric-icon ${activeReport.overdue_accounts ? 'red' : 'green'}`}><AlertTriangle /></span><div><small>Overdue accounts</small><strong>{activeReport.overdue_accounts ?? '—'}</strong><span>As shown by {bureauName(activeReport.bureau)}</span></div></article>
           </section>}
+
+          <section className="dashboard-card bureau-comparison" id="bureau-comparison">
+            <div className="dashboard-card-heading">
+              <strong><BarChart3 /> Compare your credit reports</strong>
+              <small>Scores shown only for reports you’ve received</small>
+            </div>
+            <div className="bureau-comparison-scroll">
+              <table>
+                <thead><tr><th scope="col">Credit bureau</th>{bureauCatalog.map((bureau) => <th scope="col" key={bureau.id}><span>{bureau.name}</span></th>)}</tr></thead>
+                <tbody>
+                  <tr><th scope="row">Latest score</th>{bureauCatalog.map((bureau) => {
+                    const report = reportFor(bureau.id)
+                    return <td key={bureau.id}>{report?.status === 'completed' ? <button type="button" onClick={() => { setSelectedBureau(bureau.id); document.getElementById('dashboard-overview')?.scrollIntoView({ behavior: 'smooth', block: 'start' }) }}>{report.credit_score ?? '—'}</button> : <span>{report?.status === 'processing' ? 'Updating…' : '—'}</span>}</td>
+                  })}</tr>
+                  <tr><th scope="row">Report date</th>{bureauCatalog.map((bureau) => {
+                    const report = reportFor(bureau.id)
+                    return <td key={bureau.id}>{report?.status === 'completed' ? formatDate(report.report_date) : '—'}</td>
+                  })}</tr>
+                  <tr><th scope="row">Accounts</th>{bureauCatalog.map((bureau) => {
+                    const report = reportFor(bureau.id)
+                    return <td key={bureau.id}>{report?.status === 'completed' ? report.total_accounts ?? '—' : '—'}</td>
+                  })}</tr>
+                  <tr><th scope="row">Report status</th>{bureauCatalog.map((bureau) => {
+                    const report = reportFor(bureau.id)
+                    return <td key={bureau.id}><span className={`comparison-status ${report?.status === 'completed' ? 'ready' : report?.status === 'processing' ? 'pending' : report?.status === 'failed' ? 'failed' : ''}`}>{report?.status === 'completed' ? 'Ready' : report?.status === 'processing' ? 'Processing' : report?.status === 'failed' ? 'Unavailable' : 'Not requested'}</span></td>
+                  })}</tr>
+                </tbody>
+              </table>
+            </div>
+            <a className="bureau-comparison-link" href="#credit-reports">Manage credit reports <ArrowRight /></a>
+          </section>
 
           <section className="dashboard-card bureau-section" id="credit-reports">
             <div className="dashboard-card-heading"><strong>Your Credit Reports</strong><small><LockKeyhole /> ₹{price} per report · secure payment by Razorpay</small></div>
@@ -2052,7 +2128,7 @@ function DashboardPage({ user, onLogout }: { user: AuthUser; onLogout: () => voi
             {options && !options.paymentsEnabled && <p className="bureau-note">Online payments are being set up. Please check back shortly.</p>}
           </section>
 
-          {activeReport && <div id="my-report" className="dashboard-report-anchor"><ReportDetailView key={activeReport.request_id} user={user} requestId={activeReport.request_id} /></div>}
+          {activeReport && <div id="my-report" className="dashboard-report-anchor"><ReportDetailView key={activeReport.request_id} user={user} requestId={activeReport.request_id} onLoaded={handleReportDetailLoaded} /></div>}
 
           <section className="dashboard-grid dashboard-grid-bottom learning-only" id="credit-learning">
             <article className="dashboard-card learning-card"><div className="dashboard-card-heading"><strong><BookOpen /> Improve your credit</strong><span className="learning-count">3 quick guides</span></div><div className="learning-list"><div><span>5 min</span><p><strong>5 Ways to Improve Your Credit Score</strong><small>Simple tips to build a stronger credit profile.</small></p></div><div><span>4 min</span><p><strong>What is a Good Credit Score?</strong><small>Understand score ranges and what they mean.</small></p></div><div><span>6 min</span><p><strong>How Credit Enquiries Affect Your Score</strong><small>Learn how to manage credit applications.</small></p></div></div></article>
