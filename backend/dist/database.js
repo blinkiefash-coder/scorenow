@@ -33,6 +33,8 @@ export const initializeDatabase = async () => {
     // Additive column on the existing otp_verifications table so an OTP request
     // can also be delivered by email (mobile stays required, matching `users.mobile`).
     await pool.query(`ALTER TABLE otp_verifications ADD COLUMN IF NOT EXISTS email TEXT`);
+    await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS password_salt TEXT`);
+    await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS password_hash TEXT`);
     await pool.query(`ALTER TABLE assessment_submissions ADD COLUMN IF NOT EXISTS user_id UUID REFERENCES users(id)`);
     await pool.query(`ALTER TABLE website_inquiries ADD COLUMN IF NOT EXISTS user_id UUID REFERENCES users(id)`);
     await pool.query(`ALTER TABLE payments ADD COLUMN IF NOT EXISTS report_bureau TEXT`);
@@ -582,8 +584,30 @@ export const upsertUserByMobile = async ({ mobile, fullName, email, }) => {
     return user;
 };
 export const findUserByEmail = async (email) => {
-    const { rows } = await pool.query(`SELECT id, mobile, email, full_name, email_verified FROM users WHERE email = $1 AND status = 'active' AND role = 'customer'`, [email]);
+    const { rows } = await pool.query(`SELECT id, mobile, email, full_name, email_verified FROM users WHERE LOWER(email) = $1 AND status = 'active' AND role = 'customer'`, [email]);
     return rows[0] ?? null;
+};
+export const setCustomerPassword = async (userId, email, password) => {
+    const salt = randomBytes(16).toString("hex");
+    const passwordHash = scryptSync(password, salt, 64).toString("hex");
+    const { rows } = await pool.query(`UPDATE users SET email = COALESCE(email, $2), password_salt = $3, password_hash = $4, updated_at = NOW()
+     WHERE id = $1 AND role = 'customer' AND status = 'active'
+       AND (email IS NULL OR LOWER(email) = $2)
+     RETURNING id`, [userId, email, salt, passwordHash]);
+    return Boolean(rows[0]);
+};
+export const authenticateCustomerByEmail = async (email, password) => {
+    const { rows } = await pool.query(`SELECT id, mobile, email, full_name, password_salt, password_hash
+     FROM users WHERE LOWER(email) = $1 AND status = 'active' AND role = 'customer'`, [email]);
+    const user = rows[0];
+    if (!user?.password_salt || !user.password_hash || !/^[0-9a-f]{32}$/.test(user.password_salt) ||
+        !/^[0-9a-f]{128}$/.test(user.password_hash))
+        return null;
+    const candidate = scryptSync(password, user.password_salt, 64);
+    const expected = Buffer.from(user.password_hash, "hex");
+    if (!timingSafeEqual(candidate, expected))
+        return null;
+    return { id: user.id, mobile: user.mobile, email: user.email, full_name: user.full_name };
 };
 export const markEmailVerified = async (userId) => {
     const { rows } = await pool.query(`UPDATE users SET email_verified = TRUE, updated_at = NOW() WHERE id = $1
