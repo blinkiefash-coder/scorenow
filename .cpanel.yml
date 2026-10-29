@@ -6,6 +6,8 @@ deployment:
     - /bin/mkdir -p /home/spjheceg/public_html/ /home/spjheceg/scorenow-api/dist/
     - /bin/cp -R frontend/dist/. /home/spjheceg/public_html/
     - /bin/cp -R backend/dist/. /home/spjheceg/scorenow-api/dist/
+    - /bin/mkdir -p /home/spjheceg/scorenow-api/assets/
+    - /bin/cp -R backend/assets/. /home/spjheceg/scorenow-api/assets/
     - /bin/cp backend/package.json /home/spjheceg/scorenow-api/package.json
     - /bin/cp backend/package-lock.json /home/spjheceg/scorenow-api/package-lock.json
     - /bin/cp backend/cpanel-app.js /home/spjheceg/scorenow-api/app.js

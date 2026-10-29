@@ -1,11 +1,11 @@
-import { Fragment, useEffect, useRef, useState, type CSSProperties, type FormEvent } from 'react'
+import { Fragment, useEffect, useRef, useState, type CSSProperties, type FormEvent, type MouseEvent as ReactMouseEvent } from 'react'
 import {
   AlertTriangle, ArrowLeft, ArrowRight, BadgeIndianRupee, BarChart3,
   Building2, CalendarDays, Check, ChevronDown, CircleHelp, Clock3, CreditCard, Download, ExternalLink,
-  Eye, EyeOff, FileCheck2, FileSearch, Gift, Handshake, Headphones,
-  Gauge, House, Lightbulb, LockKeyhole, Mail, MapPin, Menu, MessageCircle, Pause,
-  Phone, Play, RotateCcw, Search, Settings, ShieldCheck, Smartphone, Sparkles, Star,
-  TrendingUp, Users, Volume2, VolumeX, UserRound, WalletCards, X, Zap,
+  Copy, Eye, EyeOff, FileCheck2, FileSearch, Gift, Handshake, Headphones,
+  Gauge, House, Landmark, Lightbulb, LockKeyhole, Mail, MapPin, Menu, MessageCircle, Pause,
+  PiggyBank, Percent, Phone, Play, RotateCcw, Search, Settings, ShieldCheck, Smartphone, Sparkles, Star,
+  ArrowUpDown, ArrowUpRight, ArrowDownLeft, Bell, Info, Target, TrendingUp, Users, Volume2, VolumeX, UserRound, WalletCards, X, Zap,
 } from 'lucide-react'
 import './App.css'
 import { resetFirebaseRecaptcha, sendFirebasePhoneOtp, type ConfirmationResult } from './firebase.ts'
@@ -1390,12 +1390,324 @@ const accountFilters: { id: AccountFilter; label: string; matches: (account: Rep
   { id: 'closed', label: 'Closed', matches: (account) => account.status === 'closed' },
 ]
 
+type LoanFilter = 'all' | 'defaulted' | 'running' | 'closed'
+
+const isDefaulted = (account: ReportAccount) => needsAttention(account)
+const isRunning = (account: ReportAccount) => account.status === 'active' && !isDefaulted(account)
+const loanFilters: { id: LoanFilter; label: string; matches: (account: ReportAccount) => boolean }[] = [
+  { id: 'all', label: 'All loans', matches: () => true },
+  { id: 'defaulted', label: 'Defaulted', matches: isDefaulted },
+  { id: 'running', label: 'Running', matches: isRunning },
+  { id: 'closed', label: 'Closed', matches: (account) => account.status === 'closed' && !isDefaulted(account) },
+]
+
+function LoanPaymentPage({ user, report, onGetReport }: { user: AuthUser; report: BureauReport | undefined; onGetReport: () => void }) {
+  const requestId = report?.request_id
+  const [accounts, setAccounts] = useState<ReportAccount[] | null>(null)
+  const [error, setError] = useState('')
+  const [tab, setTab] = useState<LoanFilter>('all')
+  const [search, setSearch] = useState('')
+  const [notice, setNotice] = useState('')
+  const [copied, setCopied] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (!requestId) return
+    let cancelled = false
+    fetch(`${apiUrl}/api/reports/${requestId}`, { headers: authHeaders(user) })
+      .then(async (response) => {
+        const result = await response.json() as ReportDetail & { message?: string }
+        if (!response.ok) throw new Error(result.message || 'Unable to load your loans.')
+        if (!cancelled) setAccounts(result.accounts)
+      })
+      .catch((loadError: unknown) => { if (!cancelled) setError(loadError instanceof Error ? loadError.message : 'Unable to load your loans.') })
+    return () => { cancelled = true }
+  }, [requestId, user])
+
+  const comingSoon = () => setNotice('Online loan payments are coming soon. Please contact the lender directly to make a payment.')
+  const copyNumber = (value: string) => {
+    void navigator.clipboard?.writeText(value).then(() => {
+      setCopied(value)
+      window.setTimeout(() => setCopied(null), 1500)
+    }).catch(() => undefined)
+  }
+
+  const loans = accounts ?? []
+  const defaulted = loans.filter(isDefaulted)
+  const running = loans.filter(isRunning)
+  const totalEmi = running.concat(defaulted.filter((account) => account.status === 'active')).reduce((sum, account) => sum + (account.emiAmount ?? 0), 0)
+  const totalOverdue = defaulted.reduce((sum, account) => sum + (account.overdueAmount ?? 0), 0)
+  const query = search.trim().toLowerCase()
+  const activeFilter = loanFilters.find((item) => item.id === tab)!
+  const visible = loans
+    .filter((account) => activeFilter.matches(account) && (!query || account.lender.toLowerCase().includes(query) || (account.accountNumber ?? '').toLowerCase().includes(query)))
+    .sort((a, b) => Number(isDefaulted(b)) - Number(isDefaulted(a)))
+
+  const stats = [
+    { tone: 'blue', icon: WalletCards, label: 'Total loans', value: String(loans.length), note: 'Across all lenders' },
+    { tone: 'green', icon: Check, label: 'Running loans', value: String(running.length), note: 'Paid on track' },
+    { tone: 'gold', icon: BadgeIndianRupee, label: 'Total monthly EMI', value: formatMoney(totalEmi), note: 'Across active loans' },
+    { tone: 'red', icon: Clock3, label: 'Defaulted / overdue', value: formatMoney(totalOverdue), note: `${defaulted.length} loan${defaulted.length === 1 ? '' : 's'} need payment` },
+  ]
+
+  return (
+    <section className="loan-payment" id="loan-payment">
+      <div className="loan-hero">
+        <div className="loan-hero-title"><span><CreditCard /></span><div><h2>Loan Payment</h2><p>Track and manage all your loan repayments in one place.</p></div></div>
+        <div className="loan-hero-tip"><Lightbulb /><div><strong>Why timely payments matter?</strong><p>Paying your EMIs on time helps maintain a good credit score and improves your chances of getting better loan offers in the future.</p><a href="#credit-learning" onClick={onGetReport}>Learn more <ArrowRight /></a></div></div>
+      </div>
+
+      {!report && <article className="dashboard-card empty-report-card"><div className="empty-dashboard-state"><FileSearch /><strong>Get a credit report to see your loans</strong><span>Your running and defaulted loans appear here once you have a credit report.</span><a className="dashboard-score-cta" href="#credit-reports" onClick={onGetReport}>Get a credit report <ArrowRight /></a></div></article>}
+      {error && <p className="dashboard-notice error">{error}</p>}
+      {report && !accounts && !error && <div className="dashboard-card report-loading"><RotateCcw /> Loading your loans…</div>}
+      {accounts && <>
+        <div className="loan-stats">{stats.map(({ tone, icon: Icon, label, value, note }) => (
+          <article className={`loan-stat ${tone}`} key={label}><span className="loan-stat-icon"><Icon /></span><div><small>{label}</small><strong>{value}</strong><span>{note}</span></div></article>
+        ))}</div>
+
+        <div className="dashboard-card loan-table-card">
+          <div className="loan-toolbar">
+            <div className="loan-tabs" role="tablist" aria-label="Filter loans">
+              {loanFilters.map((filter) => <button type="button" role="tab" aria-selected={tab === filter.id} className={tab === filter.id ? 'active' : ''} key={filter.id} onClick={() => setTab(filter.id)}>{filter.label} <b>{loans.filter(filter.matches).length}</b></button>)}
+            </div>
+            <label className="loan-search"><Search aria-hidden="true" /><span className="sr-only">Search loans</span><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search by lender or account number…" /></label>
+          </div>
+          {notice && <div className="credit-account-pay-notice" role="status"><CircleHelp /><span>{notice}</span><button type="button" onClick={() => setNotice('')} aria-label="Dismiss message"><X /></button></div>}
+          {visible.length ? <div className="loan-table-scroll"><table className="loan-table">
+            <thead><tr><th>Lender</th><th>Loan type</th><th>Account no.</th><th>EMI amount</th><th>Last payment</th><th>Status</th><th>Outstanding</th><th>Overdue</th><th>Action</th></tr></thead>
+            <tbody>{visible.map((account, index) => {
+              const flag = accountFlag(account)
+              const defaultedLoan = isDefaulted(account)
+              const number = account.accountNumber
+              return <tr key={accountKey(account, index)}>
+                <td><div className="credit-account-lender"><span className={`credit-account-avatar tone-${index % 4}`}>{account.lender.trim().charAt(0).toUpperCase() || '?'}</span><span><strong>{account.lender}</strong></span></div></td>
+                <td>{account.type}</td>
+                <td>{number ? <span className="loan-account-number">•••• {number.slice(-4)}<button type="button" onClick={() => copyNumber(number)} aria-label={`Copy account number for ${account.lender}`}>{copied === number ? <Check /> : <Copy />}</button></span> : '—'}</td>
+                <td>{formatMoney(account.emiAmount)}</td>
+                <td>{formatDate(account.lastPaymentOn)}</td>
+                <td><span className={`account-chip ${flag.tone}`}>{flag.label}</span></td>
+                <td>{formatMoney(account.currentBalance)}</td>
+                <td className={(account.overdueAmount ?? 0) > 0 ? 'is-bad' : ''}>{formatMoney(account.overdueAmount)}</td>
+                <td>{defaultedLoan || account.status === 'active' ? <button type="button" className={`loan-pay-button${defaultedLoan ? ' primary' : ''}`} onClick={comingSoon}>Pay now</button> : '—'}</td>
+              </tr>
+            })}</tbody>
+          </table></div> : <p className="report-empty">{loans.length ? 'No loans match your filters.' : 'No loan accounts were found on your report.'}</p>}
+        </div>
+
+        <div className="loan-footer-cards">
+          <article className="tone-blue"><span className="loan-footer-icon"><CalendarDays /></span><div><strong>Set up auto-pay</strong><small>Never miss a payment. Set up automatic EMI payments for your loans.</small></div><button type="button" onClick={comingSoon}>Enable auto-pay <ArrowRight /></button></article>
+          <article className="tone-green"><span className="loan-footer-icon"><BarChart3 /></span><div><strong>Payment history</strong><small>View your past payments and on-time record for each account.</small></div><a href="#payment-history" onClick={onGetReport}>View history <ArrowRight /></a></article>
+          <article className="tone-violet"><span className="loan-footer-icon"><Headphones /></span><div><strong>Need help with payments?</strong><small>Contact our support team for any loan payment related queries.</small></div><a href="#help-support" onClick={onGetReport}>Get support <ArrowRight /></a></article>
+        </div>
+      </>}
+    </section>
+  )
+}
+
+type FdPlan = { bank: string; rate: number; min: number; max: string; minMonths: number; maxMonths: number; tenure: string; payout: string }
+
+// Indicative rates for display only; they are not live bank offers.
+const fdPlans: FdPlan[] = [
+  { bank: 'ICICI Bank', rate: 7.25, min: 5000, max: '₹5 Crore', minMonths: 6, maxMonths: 120, tenure: '6 months – 10 years', payout: 'At maturity / Monthly' },
+  { bank: 'SBI', rate: 7.1, min: 5000, max: '₹5 Crore', minMonths: 0, maxMonths: 120, tenure: '7 days – 10 years', payout: 'Monthly / Quarterly' },
+  { bank: 'HDFC Bank', rate: 7.4, min: 5000, max: '₹5 Crore', minMonths: 6, maxMonths: 120, tenure: '6 months – 10 years', payout: 'Monthly / At maturity' },
+  { bank: 'Axis Bank', rate: 7.3, min: 5000, max: '₹5 Crore', minMonths: 6, maxMonths: 120, tenure: '6 months – 10 years', payout: 'Monthly / Quarterly' },
+  { bank: 'Kotak Mahindra Bank', rate: 7.2, min: 5000, max: '₹5 Crore', minMonths: 6, maxMonths: 120, tenure: '6 months – 10 years', payout: 'At maturity' },
+  { bank: 'IndusInd Bank', rate: 7.15, min: 5000, max: '₹5 Crore', minMonths: 6, maxMonths: 120, tenure: '6 months – 10 years', payout: 'Monthly / At maturity' },
+]
+const fdTenures = [
+  { label: '6 Months', months: 6 }, { label: '1 Year', months: 12 }, { label: '2 Years', months: 24 },
+  { label: '3 Years', months: 36 }, { label: '5 Years', months: 60 }, { label: '10 Years', months: 120 },
+]
+
+function FixedDepositsPage() {
+  const [tenure, setTenure] = useState(12)
+  const [descending, setDescending] = useState(true)
+  const [notice, setNotice] = useState('')
+
+  const visible = fdPlans
+    .filter((plan) => tenure >= plan.minMonths && tenure <= plan.maxMonths)
+    .sort((a, b) => (descending ? b.rate - a.rate : a.rate - b.rate))
+  const topRate = Math.max(...fdPlans.map((plan) => plan.rate))
+  const minInvestment = Math.min(...fdPlans.map((plan) => plan.min))
+
+  const stats = [
+    { tone: 'blue', icon: Percent, label: 'Top interest rate', value: `${topRate.toFixed(2)}% p.a.`, note: 'Across partner banks' },
+    { tone: 'green', icon: Landmark, label: 'Partner banks', value: String(fdPlans.length), note: 'RBI regulated banks' },
+    { tone: 'gold', icon: Clock3, label: 'Tenure options', value: '6 months – 10 years', note: 'Flexible plans' },
+    { tone: 'violet', icon: ShieldCheck, label: 'Minimum investment', value: formatMoney(minInvestment), note: 'Start investing easily' },
+  ]
+
+  return (
+    <section className="loan-payment fd-page" id="fixed-deposits">
+      <div className="loan-hero fd-hero">
+        <div className="fd-hero-main">
+          <div className="loan-hero-title"><span><PiggyBank /></span><div><h2>Fixed Deposits</h2><p>Invest safely and grow your savings with trusted bank FDs.</p></div></div>
+          <ul className="fd-perks">
+            <li><ShieldCheck /><span><strong>Safe &amp; Secure</strong><small>Invest with trusted banks</small></span></li>
+            <li><Percent /><span><strong>Attractive Returns</strong><small>Higher than savings account</small></span></li>
+            <li><CalendarDays /><span><strong>Flexible Tenures</strong><small>Choose what suits your goals</small></span></li>
+          </ul>
+        </div>
+        <div className="loan-hero-tip fd-hero-tip"><Gift /><div><strong>Secure your future with Fixed Deposits</strong><ul><li><Check /> Predictable returns</li><li><Check /> Multiple tenure options</li><li><Check /> Invest with leading banks</li></ul></div></div>
+      </div>
+
+      <div className="loan-stats">{stats.map(({ tone, icon: Icon, label, value, note }) => (
+        <article className={`loan-stat ${tone}`} key={label}><span className="loan-stat-icon"><Icon /></span><div><small>{label}</small><strong>{value}</strong><span>{note}</span></div></article>
+      ))}</div>
+
+      <div className="dashboard-card loan-table-card">
+        <div className="loan-toolbar">
+          <div className="fd-table-title"><span><WalletCards /></span><div><strong>Compare Fixed Deposit Plans</strong><small>Check and compare FD interest rates from leading banks.</small></div></div>
+          <div className="fd-controls">
+            <label className="fd-select"><small>Select tenure</small><select value={tenure} onChange={(event) => setTenure(Number(event.target.value))}>{fdTenures.map((item) => <option value={item.months} key={item.months}>{item.label}</option>)}</select></label>
+            <button type="button" className="fd-sort" onClick={() => setDescending(!descending)}><ArrowUpDown /> Sort by interest rate {descending ? '↓' : '↑'}</button>
+          </div>
+        </div>
+        {notice && <div className="credit-account-pay-notice" role="status"><CircleHelp /><span>{notice}</span><button type="button" onClick={() => setNotice('')} aria-label="Dismiss message"><X /></button></div>}
+        {visible.length ? <div className="loan-table-scroll"><table className="loan-table">
+          <thead><tr><th>Bank</th><th>Interest rate (p.a.)</th><th>Minimum investment</th><th>Maximum investment</th><th>Tenure</th><th>Payout frequency</th><th>Action</th></tr></thead>
+          <tbody>{visible.map((plan, index) => <tr key={plan.bank}>
+            <td><div className="credit-account-lender"><span className={`credit-account-avatar tone-${index % 4}`}>{plan.bank.charAt(0)}</span><span><strong>{plan.bank}</strong></span></div></td>
+            <td><strong>{plan.rate.toFixed(2)}%</strong></td>
+            <td>{formatMoney(plan.min)}</td>
+            <td>{plan.max}</td>
+            <td>{plan.tenure}</td>
+            <td>{plan.payout}</td>
+            <td><button type="button" className="loan-pay-button primary" onClick={() => setNotice(`Online FD booking with ${plan.bank} is coming soon. Please contact the bank directly to invest.`)}>Invest now <ArrowRight /></button></td>
+          </tr>)}</tbody>
+        </table></div> : <p className="report-empty">No banks offer the selected tenure.</p>}
+        <p className="fd-disclaimer">Interest rates are indicative and may change. Please confirm the latest rate and terms with the bank before investing.</p>
+      </div>
+    </section>
+  )
+}
+
+type CardCategory = 'all' | 'rupay' | 'free' | 'fd'
+type CardOffer = { bank: string; name: string; network: 'Visa' | 'Mastercard' | 'RuPay'; perk: string; tags: string[]; blurb: string; categories: CardCategory[]; gradient: string }
+
+// Sample catalogue for display only; fees, rewards and eligibility are set by each issuer.
+const cardOffers: CardOffer[] = [
+  { bank: 'HDFC Bank', name: 'HDFC Millennia Credit Card', network: 'Visa', perk: '5% Cashback', tags: ['Lifestyle'], blurb: '5% cashback on top brands, dining, travel and more.', categories: ['all'], gradient: 'linear-gradient(135deg,#0d2a5c,#2d6bbd)' },
+  { bank: 'SBI', name: 'SBI Cashback Card', network: 'Visa', perk: '5% Cashback', tags: ['Online Shopping'], blurb: '5% cashback on online spends, no annual fee.', categories: ['all'], gradient: 'linear-gradient(135deg,#3b1a6e,#8a3fb8)' },
+  { bank: 'Axis Bank', name: 'Axis ACE Credit Card', network: 'Visa', perk: '2% Cashback', tags: ['Fuel & Utilities'], blurb: '2% cashback on fuel, utilities and Google Pay bill payments.', categories: ['all'], gradient: 'linear-gradient(135deg,#8a1538,#d63a63)' },
+  { bank: 'ICICI Bank', name: 'ICICI Coral Credit Card', network: 'Visa', perk: '4X Rewards', tags: ['Dining & Travel'], blurb: 'Get 4X rewards on dining, travel and entertainment.', categories: ['all'], gradient: 'linear-gradient(135deg,#a3201b,#e4572e)' },
+  { bank: 'Utkarsh SFB', name: 'Utkarsh SuperMoney RuPay Credit Card', network: 'RuPay', perk: 'UPI Enabled', tags: ['RuPay'], blurb: 'Link to UPI and earn rewards on everyday payments.', categories: ['rupay'], gradient: 'linear-gradient(135deg,#2a2370,#5b4bd6)' },
+  { bank: 'Kotak Mahindra Bank', name: 'Kotak 811 #DreamDifferent Card', network: 'Visa', perk: 'Lifetime Free', tags: ['No annual fee'], blurb: 'No joining or annual fee, with rewards on everyday spends.', categories: ['free'], gradient: 'linear-gradient(135deg,#7a1020,#c8283f)' },
+  { bank: 'IDFC FIRST Bank', name: 'IDFC FIRST Wow! Credit Card', network: 'Visa', perk: 'Against FD', tags: ['FD-backed'], blurb: 'Get a credit card against your fixed deposit, no income proof needed.', categories: ['fd'], gradient: 'linear-gradient(135deg,#6b1230,#b8264f)' },
+]
+
+const cardCategories: { id: CardCategory; icon: typeof CreditCard; title: string; sub: string; tone: string }[] = [
+  { id: 'all', icon: CreditCard, title: 'Credit Cards', sub: 'Rewards, travel, lifestyle & more', tone: 'blue' },
+  { id: 'rupay', icon: Landmark, title: 'RuPay Credit Cards', sub: 'Safe. Secure. Made for India.', tone: 'green' },
+  { id: 'free', icon: Percent, title: 'Lifetime Free Cards', sub: 'No joining or annual fees', tone: 'red' },
+  { id: 'fd', icon: PiggyBank, title: 'FD Credit Cards', sub: 'Get a credit card against FD', tone: 'violet' },
+]
+
+function CreditCardsPage() {
+  const [category, setCategory] = useState<CardCategory>('all')
+  const [openDetails, setOpenDetails] = useState<string | null>(null)
+  const [notice, setNotice] = useState('')
+  const [applications, setApplications] = useState<{ name: string; gradient: string; network: string }[]>([
+    { name: 'Utkarsh SuperMoney RuPay Credit Card', gradient: 'linear-gradient(135deg,#2a2370,#5b4bd6)', network: 'RuPay' },
+  ])
+  const [spendAccount, setSpendAccount] = useState('all')
+  const [hideAmounts, setHideAmounts] = useState(false)
+  const applyFor = (card: CardOffer) => {
+    setApplications((current) => (current.some((item) => item.name === card.name) ? current : [...current, { name: card.name, gradient: card.gradient, network: card.network }]))
+    setNotice(`Your application for ${card.name} is saved under Action needed. Online submission is coming soon, so please finish it on ${card.bank}’s website.`)
+  }
+  const [yesterday] = useState(() => new Date(Date.now() - 86400000).toLocaleDateString('en-IN', { weekday: 'long', day: '2-digit', month: 'short', year: 'numeric' }))
+  const money = (value: number) => (hideAmounts ? '₹ ••••' : formatMoney(value))
+  const cards = cardOffers.filter((card) => category === 'all' || card.categories.includes(category))
+
+  return (
+    <section className="loan-payment cards-page" id="credit-cards">
+      <div className="loan-hero cards-hero">
+        <div className="fd-hero-main">
+          <div className="loan-hero-title"><span><CreditCard /></span><div><h2>Credit Cards</h2><p>Compare and apply for the best credit cards for your lifestyle.</p></div></div>
+          <ul className="fd-perks">
+            <li><Gift /><span><strong>Exclusive offers</strong><small>Get the best deals &amp; rewards</small></span></li>
+            <li><Zap /><span><strong>Zero hassle</strong><small>100% online application</small></span></li>
+            <li><Target /><span><strong>Personalised picks</strong><small>Cards based on your profile</small></span></li>
+          </ul>
+        </div>
+        <div className="cards-hero-art" aria-hidden="true"><i className="back"><b>HDFC BANK</b></i><i className="front"><b>VISA</b></i></div>
+        <div className="cards-featured-banner">
+          <div className="cards-banner-art" aria-hidden="true"><i /><u /><u /></div>
+          <span className="cards-featured-tag"><Star /> Featured</span>
+          <strong>Lifetime Free Credit Cards</strong>
+          <p>No joining fees, no annual fees. More savings for you.</p>
+          <button type="button" onClick={() => { setCategory('free'); document.getElementById('featured-cards')?.scrollIntoView({ behavior: 'smooth' }) }}>Explore cards <ArrowRight /></button>
+        </div>
+      </div>
+
+      <div className="cards-categories" role="tablist" aria-label="Card categories">
+        {cardCategories.map(({ id, icon: Icon, title, sub, tone }) => (
+          <button type="button" role="tab" aria-selected={category === id} className={`cards-category ${tone}${category === id ? ' active' : ''}`} key={id} onClick={() => setCategory(id)}>
+            <span className="loan-stat-icon"><Icon /></span><span className="cards-category-text"><strong>{title}</strong><small>{sub}</small></span><ArrowRight />
+          </button>
+        ))}
+      </div>
+
+      <div className="dashboard-card cards-featured" id="featured-cards">
+        <div className="cards-featured-head">
+          <div className="fd-table-title"><span className="gold-icon"><Star /></span><div><strong>{category === 'all' ? 'Featured Credit Cards' : cardCategories.find((item) => item.id === category)!.title}</strong><small>Handpicked cards with great rewards and benefits.</small></div></div>
+          {category !== 'all' && <button type="button" className="cards-view-all" onClick={() => setCategory('all')}>View all cards <ArrowRight /></button>}
+        </div>
+        {notice && <div className="credit-account-pay-notice" role="status"><CircleHelp /><span>{notice}</span><button type="button" onClick={() => setNotice('')} aria-label="Dismiss message"><X /></button></div>}
+        {cards.length ? <div className="cards-grid">{cards.map((card) => (
+          <article className="credit-offer" key={card.name}>
+            <div className="credit-offer-top">
+              <div className="credit-offer-visual" style={{ background: card.gradient }}><small>{card.bank}</small><i className="chip" /><b>{card.network}</b></div>
+              <div className="credit-offer-head"><small>{card.bank}</small><strong>{card.name}</strong><div className="credit-offer-tags"><span className="perk">{card.perk}</span>{card.tags.map((tag) => <span key={tag}>{tag}</span>)}</div></div>
+            </div>
+            <p>{card.blurb}</p>
+            {openDetails === card.name && <p className="credit-offer-details">Joining fee, annual fee, reward rates and eligibility are decided by {card.bank} and may change. Check the issuer’s latest terms before applying.</p>}
+            <div className="credit-offer-actions">
+              <button type="button" className="loan-pay-button" onClick={() => applyFor(card)}>Apply Now <ArrowRight /></button>
+              <button type="button" className="credit-offer-link" aria-expanded={openDetails === card.name} onClick={() => setOpenDetails(openDetails === card.name ? null : card.name)}>{openDetails === card.name ? 'Hide Details' : 'View Details'}</button>
+            </div>
+          </article>
+        ))}</div> : <p className="report-empty">No cards in this category yet.</p>}
+      </div>
+
+      <div className="cards-bottom">
+        <div className="dashboard-card cards-action">
+          <div className="cards-section-head"><div className="cards-section-title"><Bell /><strong>Action needed</strong>{applications.length > 0 && <span className="cards-count">{applications.length}</span>}</div></div>
+          {applications.length ? <div className="cards-action-list">{applications.map((item) => (
+            <div className="cards-action-item" key={item.name}>
+              <span className="cards-action-card" style={{ background: item.gradient }} />
+              <div><span className="cards-pending-tag">APPLICATION PENDING</span><strong>{item.name}</strong><small>Complete your application to get your card.</small></div>
+              <button type="button" onClick={() => setNotice(`Continuing ${item.name} online is coming soon. Please finish the application on the bank’s website.`)}>Continue <ArrowRight /></button>
+            </div>
+          ))}</div> : <p className="report-empty">Nothing needs your attention right now.</p>}
+        </div>
+        <div className="dashboard-card cards-spend">
+          <div className="cards-section-head">
+            <div className="cards-section-title"><BarChart3 /><div><strong>Spend Summary</strong><small>{yesterday}</small></div></div>
+            <div className="cards-spend-tools">
+              <select value={spendAccount} onChange={(event) => setSpendAccount(event.target.value)} aria-label="Account"><option value="all">All accounts</option><option value="savings">Savings account</option></select>
+              <button type="button" onClick={() => setHideAmounts(!hideAmounts)} aria-label={hideAmounts ? 'Show amounts' : 'Hide amounts'}>{hideAmounts ? <EyeOff /> : <Eye />}</button>
+            </div>
+          </div>
+          <div className="cards-spend-grid">
+            <div className="money-in"><span><ArrowDownLeft /></span><div><small>Money In</small><strong>{money(40000)}</strong><em>2 Credit transactions</em></div></div>
+            <div className="money-out"><span><ArrowUpRight /></span><div><small>Money Out</small><strong>{money(0)}</strong><em>0 Debit transactions</em></div></div>
+          </div>
+          <p className="cards-spend-note"><Info /> Sample figures for preview. Connect your accounts to see your real spending insights.</p>
+        </div>
+      </div>
+    </section>
+  )
+}
+
 function ReportDetailView({ user, requestId }: { user: AuthUser; requestId: string }) {
   const [detail, setDetail] = useState<ReportDetail | null>(null)
   const [error, setError] = useState('')
   const [accountFilter, setAccountFilter] = useState<AccountFilter>('all')
   const [accountSearch, setAccountSearch] = useState('')
   const [expandedAccount, setExpandedAccount] = useState<string | null>(null)
+  const [paySoonAccount, setPaySoonAccount] = useState<string | null>(null)
   const [downloading, setDownloading] = useState(false)
   const [downloadError, setDownloadError] = useState('')
 
@@ -1538,7 +1850,9 @@ function ReportDetailView({ user, requestId }: { user: AuthUser; requestId: stri
                   <div className="credit-account-field account-number-field"><small>Account no.</small><strong>{account.accountNumber ? `•••• ${account.accountNumber.slice(-4)}` : '—'}</strong></div>
                   <div className="credit-account-field"><small>Status</small><span className={`account-chip ${flag.tone}`}>{flag.label}</span></div>
                   <div className="credit-account-field"><small>Outstanding</small><strong>{formatMoney(account.currentBalance)}</strong></div>
-                  <div className="credit-account-field"><small>Overdue</small><strong className={(account.overdueAmount ?? 0) > 0 ? 'is-bad' : 'is-good'}>{formatMoney(account.overdueAmount)}</strong></div>
+                  <div className="credit-account-field overdue-account-field"><small>Overdue</small><strong className={(account.overdueAmount ?? 0) > 0 ? 'is-bad' : 'is-good'}>{formatMoney(account.overdueAmount)}</strong>
+                    {(account.overdueAmount ?? 0) > 0 && <button className="credit-account-pay-now" type="button" onClick={() => setPaySoonAccount(paySoonAccount === key ? null : key)}>Pay now <ArrowRight /></button>}
+                  </div>
                   <div className="credit-account-field"><small>Last payment</small><strong>{formatDate(account.lastPaymentOn)}</strong></div>
                   <button
                     className="credit-account-toggle"
@@ -1548,7 +1862,8 @@ function ReportDetailView({ user, requestId }: { user: AuthUser; requestId: stri
                     onClick={() => setExpandedAccount(expanded ? null : key)}
                   ><ChevronDown /></button>
                 </div>
-                {expanded && <div className="credit-account-details">
+                  {paySoonAccount === key && <div className="credit-account-pay-notice" role="status"><CircleHelp /><span>Online loan payments are coming soon. Please contact the lender directly to make a payment.</span><button type="button" onClick={() => setPaySoonAccount(null)} aria-label="Dismiss payment availability message"><X /></button></div>}
+                  {expanded && <div className="credit-account-details">
                   {alertText && <div className="credit-account-alert"><AlertTriangle /><span>{alertText}</span></div>}
                   <dl className="credit-account-extra">
                     <div><dt>Outstanding</dt><dd>{formatMoney(account.currentBalance)}</dd></div>
@@ -1918,7 +2233,30 @@ function DashboardPage({ user, onLogout }: { user: AuthUser; onLogout: () => voi
   const [downloadingReport, setDownloadingReport] = useState(false)
   const [downloadReportError, setDownloadReportError] = useState('')
   const [selectedBureau, setSelectedBureau] = useState<BureauId | null>(null)
-  const [activeNav, setActiveNav] = useState('#dashboard-overview')
+  type DashboardPage = 'overview' | 'loans' | 'fd' | 'cards'
+  const standalonePages: Record<string, DashboardPage> = { '#loan-payment': 'loans', '#fixed-deposits': 'fd', '#credit-cards': 'cards' }
+  const initialHash = standalonePages[window.location.hash] ? window.location.hash : '#dashboard-overview'
+  const [activeNav, setActiveNav] = useState(initialHash)
+  const [page, setPage] = useState<DashboardPage>(standalonePages[initialHash] ?? 'overview')
+  const [insightsOpen, setInsightsOpen] = useState(false)
+  const [mobileNavOpen, setMobileNavOpen] = useState(false)
+  const openNav = (event: ReactMouseEvent<HTMLAnchorElement>, href: string) => {
+    setActiveNav(href)
+    const standalone = standalonePages[href]
+    if (standalone) {
+      event.preventDefault()
+      window.history.replaceState(null, '', href)
+      setPage(standalone)
+      window.scrollTo({ top: 0 })
+    } else if (page !== 'overview' && href.startsWith('#')) {
+      event.preventDefault()
+      window.history.replaceState(null, '', href)
+      setPage('overview')
+      window.setTimeout(() => document.getElementById(href.slice(1))?.scrollIntoView(), 0)
+    } else if (href.startsWith('#')) {
+      setPage('overview')
+    }
+  }
   const [notice, setNotice] = useState<{ tone: 'info' | 'success' | 'error'; text: string } | null>(null)
   const [simCheckout, setSimCheckout] = useState<SimulatedCheckoutState | null>(null)
   const firstName = user.full_name.trim().split(' ')[0] || 'there'
@@ -2055,10 +2393,18 @@ function DashboardPage({ user, onLogout }: { user: AuthUser; onLogout: () => voi
     { icon: FileCheck2, label: 'Download report', href: activeReport ? '#my-report' : '#credit-reports' },
     { icon: Lightbulb, label: 'Report insights', href: '#score-insights' },
     { icon: TrendingUp, label: 'Improve score', href: '#credit-learning' },
-    { icon: Gift, label: 'Offers', href: '/#plans', external: true },
+    { icon: CreditCard, label: 'Loan payment', href: '#loan-payment' },
+    { icon: PiggyBank, label: 'Fixed deposits', href: '#fixed-deposits' },
+    { icon: CreditCard, label: 'Credit cards', href: '#credit-cards' },
+    { icon: Gift, label: 'Offers', href: '#fixed-deposits' },
     { icon: UserRound, label: 'My profile', href: '#my-profile' },
     { icon: Settings, label: 'Settings', href: '#settings' },
     { icon: CircleHelp, label: 'Help & support', href: '#help-support' },
+  ]
+
+  const reportSubnav: [string, string][] = [
+    ['All accounts', activeReport ? '#credit-accounts' : '#credit-reports'],
+    ['Credit enquiries', activeReport ? '#credit-enquiries' : '#credit-reports'],
   ]
 
   const applyReportResult = (result: DashboardStatus, bureau: BureauId) => {
@@ -2191,24 +2537,6 @@ function DashboardPage({ user, onLogout }: { user: AuthUser; onLogout: () => voi
     }
   }
 
-  const loadDemoReport = async (bureau: BureauId) => {
-    setBusyBureau(bureau)
-    setNotice(null)
-    try {
-      const response = await fetch(`${apiUrl}/api/reports/demo`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...authHeaders(user) },
-        body: JSON.stringify({ bureau }),
-      })
-      const result = await response.json() as DashboardStatus & { message?: string }
-      if (!response.ok) throw new Error(result.message || 'Unable to load a demo report.')
-      applyReportResult(result, bureau)
-    } catch (error) {
-      setNotice({ tone: 'error', text: error instanceof Error ? error.message : 'Unable to load a demo report.' })
-    } finally {
-      setBusyBureau(null)
-    }
-  }
   const scoreProgress = activeReport?.credit_score
     ? Math.max(0, Math.min(1, (activeReport.credit_score - 300) / 600))
     : 0.5
@@ -2220,45 +2548,54 @@ function DashboardPage({ user, onLogout }: { user: AuthUser; onLogout: () => voi
   return (
     <div className="dashboard-shell">
       <a className="dashboard-skip-link" href="#dashboard-main">Skip to dashboard content</a>
-      <aside className="dashboard-sidebar">
-        <Brand href="/" />
-        <nav aria-label="Dashboard navigation">
-          {sidebarItems.map(({ icon: Icon, label, href, external }) => (
-            <Fragment key={label}>
-              <a href={href} className={activeNav === href ? 'active' : ''} aria-current={activeNav === href ? 'page' : undefined} onClick={() => setActiveNav(href)}><Icon /><span>{label}</span>{!external && <ArrowRight />}</a>
-              {label === 'Report insights' && <div className="dashboard-sidebar-subnav" aria-label="Report sections">
-                {[
-                  ['All accounts', activeReport ? '#credit-accounts' : '#credit-reports'],
-                  ['Credit enquiries', activeReport ? '#credit-enquiries' : '#credit-reports'],
-                  ['Payment history', activeReport ? '#payment-history' : '#credit-reports'],
-                  ['Personal details', activeReport ? '#personal-details' : '#my-profile'],
-                ].map(([section, target]) => <a href={target} key={section} onClick={() => setActiveNav(target)}>{section}</a>)}
-              </div>}
-            </Fragment>
-          ))}
-        </nav>
-        <div className="dashboard-support">
-          <span><MessageCircle /></span>
-          <strong>Have questions?</strong>
-          <p>Get expert support for your credit report, disputes, or loan options.</p>
-          <a href="#help-support" onClick={() => setActiveNav('#help-support')}>Contact Support <ArrowRight /></a>
+      {mobileNavOpen && <button className="dashboard-nav-backdrop" type="button" aria-label="Close menu" onClick={() => setMobileNavOpen(false)} />}
+      <aside className={`dashboard-sidebar${mobileNavOpen ? ' is-open' : ''}`} id="dashboard-sidebar">
+        <div className="dashboard-sidebar-head">
+          <Brand href="/" />
+          <button className="dashboard-nav-close" type="button" aria-label="Close menu" onClick={() => setMobileNavOpen(false)}><X /></button>
         </div>
+        <nav aria-label="Dashboard navigation" onClick={(event) => { if ((event.target as HTMLElement).closest('a:not(.has-subnav)')) setMobileNavOpen(false) }}>
+          {sidebarItems.map(({ icon: Icon, label, href, external }) => {
+            const subItems = label === 'Report insights' ? reportSubnav : []
+            const expandable = subItems.length > 0
+            const expanded = expandable && insightsOpen
+            return (
+              <Fragment key={label}>
+                <a
+                  href={href}
+                  className={`${activeNav === href || (expandable && subItems.some(([, target]) => target === activeNav)) ? 'active' : ''}${expandable ? ' has-subnav' : ''}${expanded ? ' expanded' : ''}`}
+                  aria-current={activeNav === href ? 'page' : undefined}
+                  aria-expanded={expandable ? expanded : undefined}
+                  aria-controls={expandable ? 'report-insights-subnav' : undefined}
+                  onClick={(event) => { if (expandable) setInsightsOpen(!insightsOpen); openNav(event, href) }}
+                ><Icon /><span>{label}</span>{expandable ? <ChevronDown className="subnav-chevron" /> : !external && <ArrowRight />}</a>
+                {expandable && <div className={`dashboard-sidebar-subnav-wrap${expanded ? ' open' : ''}`} id="report-insights-subnav">
+                  <div className="dashboard-sidebar-subnav" aria-label="Report sections">
+                    {subItems.map(([section, target]) => <a href={target} key={section} tabIndex={expanded ? 0 : -1} className={activeNav === target ? 'active' : ''} onClick={(event) => openNav(event, target)}>{section}</a>)}
+                  </div>
+                </div>}
+              </Fragment>
+            )
+          })}
+        </nav>
       </aside>
 
       <main className="dashboard-main" id="dashboard-main">
         <header className="dashboard-topbar">
-          <div className="dashboard-page-heading"><span>Score Now <b>/</b> Credit workspace</span><strong>Your dashboard</strong></div>
+          <button className="dashboard-menu-button" type="button" aria-label="Open menu" aria-expanded={mobileNavOpen} aria-controls="dashboard-sidebar" onClick={() => setMobileNavOpen(true)}><Menu /></button>
+          <div className="dashboard-page-heading"><span>Score Now <b>/</b> {page === 'fd' ? 'Investment products' : page === 'cards' ? 'Credit cards' : 'Credit workspace'}</span><strong>{{ loans: 'Loan payment', fd: 'Fixed deposits', cards: 'Credit Cards', overview: 'Your dashboard' }[page]}</strong></div>
           <div className="dashboard-top-actions">
             <span className="dashboard-updated">{activeReport ? <>Last updated <strong>{formatDate(activeReport.report_date)}</strong></> : 'Your credit workspace'}</span>
             <button className="dashboard-refresh-button" type="button" onClick={() => void loadStatus(true)} disabled={refreshing}>
               <RotateCcw className={refreshing ? 'spin' : ''} />{refreshing ? 'Refreshing…' : 'Refresh dashboard'}
             </button>
-            <a className="dashboard-score-cta" href="#credit-reports">Get a credit report <ArrowRight /></a>
+            <a className="dashboard-score-cta" href="#credit-reports" onClick={(event) => openNav(event, '#credit-reports')}>Get a credit report <ArrowRight /></a>
             <AuthAvatarButton user={user} onClick={() => undefined} onLogout={onLogout} />
           </div>
         </header>
 
         <div className="dashboard-content">
+          {page === 'loans' ? <LoanPaymentPage user={user} report={activeReport} onGetReport={() => setPage('overview')} /> : page === 'fd' ? <FixedDepositsPage /> : page === 'cards' ? <CreditCardsPage /> : <>
           <div className="dashboard-welcome">
             <div><span className="dashboard-kicker">YOUR CREDIT WORKSPACE</span><h1>{greeting}, {firstName}! <span>👋</span></h1><p>{completedReports.length ? 'Your credit picture, with Score Now here to help you understand what comes next.' : 'Start with a report. We’ll help you understand it and guide you through what to do next.'}</p></div>
           </div>
@@ -2272,13 +2609,23 @@ function DashboardPage({ user, onLogout }: { user: AuthUser; onLogout: () => voi
                     <strong>Your credit score</strong>
                     <span className="score-report-date"><Clock3 /> Updated {formatDate(activeReport.report_date)}{activeReport.is_demo ? ' · Sample' : ''}</span>
                   </div>
-                  {completedReports.length > 1 && <div className="dashboard-bureau-tabs" role="tablist" aria-label="Choose a credit bureau">
-                    {completedReports.map((report) => (
-                      <button key={report.bureau} type="button" role="tab" aria-selected={report.bureau === activeBureau} className={report.bureau === activeBureau ? 'active' : ''} onClick={() => setSelectedBureau(report.bureau)}>
-                        {bureauName(report.bureau)}
-                      </button>
-                    ))}
-                  </div>}
+                  <div className="score-card-meta-row">
+                    {completedReports.length > 1 && <div className="dashboard-bureau-tabs" role="tablist" aria-label="Choose a credit bureau">
+                      {completedReports.map((report) => (
+                        <button key={report.bureau} type="button" role="tab" aria-selected={report.bureau === activeBureau} className={report.bureau === activeBureau ? 'active' : ''} onClick={() => setSelectedBureau(report.bureau)}>
+                          {bureauName(report.bureau)}
+                        </button>
+                      ))}
+                    </div>}
+                    <span className={`score-status-label score-band-${scoreBandTone(activeReport.score_band)}`}>
+                      {scoreBandTone(activeReport.score_band) === 'excellent' || scoreBandTone(activeReport.score_band) === 'good'
+                        ? <Check aria-hidden="true" />
+                        : scoreBandTone(activeReport.score_band) === 'fair' || scoreBandTone(activeReport.score_band) === 'attention'
+                          ? <AlertTriangle aria-hidden="true" />
+                          : <CircleHelp aria-hidden="true" />}
+                      {activeReport.score_band || 'Score available'}
+                    </span>
+                  </div>
                   <div className="score-card-body">
                     <div className={`dashboard-gauge score-band-${scoreBandTone(activeReport.score_band)}`} aria-label={`Credit score ${activeReport.credit_score ?? 'unavailable'} out of 900`}>
                       <div className="dashboard-gauge-track"><div className="dashboard-gauge-needle" style={scoreMarkerPosition} /></div>
@@ -2286,7 +2633,6 @@ function DashboardPage({ user, onLogout }: { user: AuthUser; onLogout: () => voi
                       <span className="gauge-min">300</span><span className="gauge-max">900</span>
                     </div>
                     <div className="dashboard-score-copy">
-                      <span className={`score-status-label score-band-${scoreBandTone(activeReport.score_band)}`}>{activeReport.score_band || 'Score available'}</span>
                       <strong>{activeReport.overdue_accounts
                         ? `${activeReport.overdue_accounts} account${activeReport.overdue_accounts === 1 ? '' : 's'} need attention`
                         : activeReport.score_band?.toLowerCase().includes('needs attention')
@@ -2373,7 +2719,6 @@ function DashboardPage({ user, onLogout }: { user: AuthUser; onLogout: () => voi
                       {report?.status === 'failed'
                         ? <button type="button" className="button button-primary" disabled={Boolean(busyBureau)} onClick={() => void retryReport(report)}>{busy ? 'Fetching…' : <>Retry free <RotateCcw /></>}</button>
                         : <button type="button" className="button button-primary" disabled={!canBuy} onClick={() => void buyReport(bureau.id)}>{busy ? 'Processing…' : report?.status === 'completed' ? `Refresh · ₹${price}` : `Get report · ₹${price}`}</button>}
-                      {options?.demoMode && <button type="button" className="button button-outline" disabled={Boolean(busyBureau)} onClick={() => void loadDemoReport(bureau.id)}>Load demo</button>}
                     </div>
                     {diagnostics && <details className="bureau-diagnostics">
                       <summary>View API request and response</summary>
@@ -2487,6 +2832,7 @@ function DashboardPage({ user, onLogout }: { user: AuthUser; onLogout: () => voi
               <a className="help-option" href="mailto:info@scorenow.in"><Mail /><span><strong>Email us</strong><small>info@scorenow.in</small></span><ArrowRight /></a>
             </div>
           </section>
+          </>}
         </div>
       </main>
       {simCheckout && <SimulatedCheckout
@@ -3694,7 +4040,8 @@ function App() {
         ? 'Securely request a CIBIL credit report through Score Now. This private report request page is restricted to authorised use.'
         : 'Get practical credit score and credit report guidance in India. Score Now helps you understand CIBIL reports, identify errors, and plan next steps.'
     const canonicalUrl = `https://scorenow.in${pathname || '/'}`
-    const robotsContent = isCreditScorePage || isAdminPage ? 'noindex,nofollow,noarchive' : 'index,follow,max-image-preview:large'
+    const isDashboardPage = pathname === '/dashboard'
+    const robotsContent = isCreditScorePage || isAdminPage || isDashboardPage ? 'noindex,nofollow,noarchive' : 'index,follow,max-image-preview:large'
 
     document.title = title
     const updateMeta = (selector: string, attribute: string, value: string) => {

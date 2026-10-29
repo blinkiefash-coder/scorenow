@@ -1,4 +1,7 @@
 User-agent: *
 Allow: /
+Disallow: /admin
+Disallow: /dashboard
+Disallow: /creditscore
 
 Sitemap: https://scorenow.in/sitemap.xml
