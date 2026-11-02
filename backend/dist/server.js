@@ -6,7 +6,7 @@ import multer from "multer";
 import nodemailer from "nodemailer";
 import path from "node:path";
 import { BUREAUS, bureauNames, fetchBureauReport, downloadReportPdf, isBureau, isBureauAvailable, livePdfUrl, missingApplicantFields, scoreBand, stateCodes, } from "./bureaus.js";
-import { completeReportRequest, authenticateCustomerByEmail, authenticateDatabaseAdmin, createDemoReportRequest, createAdminReportAudit, addSupportTicketComment, createAdminSession, completeAdminReportAudit, createOtp, createCustomerInvitation, createAdminInvitation, acceptAdminInvitation, createReportPayment, createSession, failReportRequest, findReportPayment, findReportRequest, findSessionUser, findAdminSession, findUserByEmail, getApplicant, getAdminActivity, getAdminAnalytics, getAdminCustomers, getAdminReportDocument, getDashboardStatus, getReportDetail, getReportPdf, initializeDatabase, listAdminAccounts, listAdminUsers, listCustomerInvitations, listSupportTickets, markEmailVerified, markPaymentFailed, markPaymentPaidAndCreateRequest, recordPaymentFailure, markReportProcessing, revokeSession, revokeAdminSession, setAdminAccountStatus, setCustomerPassword, setCustomerAccountStatus, updateSupportTicket, createSupportTicket, cancelCustomerInvitation, saveAssessment, saveReportPdf, saveWebsiteInquiry, saveKycProfile, setUserEmailIfMissing, upsertUserByMobile, verifyOtp, } from "./database.js";
+import { completeReportRequest, authenticateCustomerByEmail, authenticateDatabaseAdmin, createDemoReportRequest, createAdminReportAudit, addSupportTicketComment, createAdminSession, completeAdminReportAudit, createOtp, createCustomerInvitation, createAdminInvitation, acceptAdminInvitation, createReportPayment, createSession, failReportRequest, findReportPayment, findReportRequest, findSessionUser, findAdminSession, findUserByEmail, getApplicant, getAdminActivity, getAdminAnalytics, getAdminCustomers, getAdminReportDocument, getDashboardStatus, getReportDetail, getReportPdf, initializeDatabase, listAdminAccounts, listAdminUsers, listCustomerInvitations, listSupportTickets, markEmailVerified, markPaymentFailed, markPaymentPaidAndCreateRequest, recordPaymentFailure, markReportProcessing, revokeSession, revokeAdminSession, setAdminAccountStatus, setCustomerPassword, setCustomerAccountStatus, updateSupportTicket, createSupportTicket, cancelCustomerInvitation, saveAssessment, saveReportPdf, saveWebsiteInquiry, saveKycProfile, setUserEmailIfMissing, upsertUserByMobile, verifyOtp, exportAdminActivity, recordAdminAudit, listAdminAudit, getAdminCustomerDetail, findCustomerForFollowUp, findAdminRetryableReport, getAdminAttention, getFailedOperations, getHealthStats, } from "./database.js";
 import { generateReportPdf } from "./reportPdf.js";
 import { verifyFirebaseGoogleToken, verifyFirebasePhoneToken } from "./firebaseAdmin.js";
 import { demoReportResponses, isReportsDemoMode } from "./demoReports.js";
@@ -51,6 +51,31 @@ const requireAdminRoles = (...roles) => (request, response, next) => {
         return;
     }
     next();
+};
+// Audit writes must never block or fail the admin action they describe.
+const auditAdmin = (request, response, action, target = {}) => {
+    void recordAdminAudit({
+        adminId: sessionAdminId(response) || "unknown",
+        action,
+        targetType: target.type ?? null,
+        targetId: target.id ?? null,
+        details: target.details ?? null,
+        ipAddress: requestIpAddress(request),
+    }).catch((error) => console.error("Admin audit write failed", error));
+};
+const activityFiltersFrom = (request) => ({
+    q: String(request.query.q || "").slice(0, 100),
+    paymentStatus: String(request.query.paymentStatus || ""),
+    reportStatus: String(request.query.reportStatus || ""),
+    bureau: String(request.query.bureau || ""),
+    from: String(request.query.from || ""),
+    to: String(request.query.to || ""),
+});
+const csvCell = (value) => {
+    const text = value === null || value === undefined ? "" : String(value);
+    // Prefix formula-leading characters so spreadsheets do not execute cell content.
+    const safe = /^[=+\-@\t\r]/.test(text) ? `'${text}` : text;
+    return /[",\n\r]/.test(safe) ? `"${safe.replaceAll('"', '""')}"` : safe;
 };
 const adminLoginAttempts = new Map();
 const MAX_ADMIN_LOGIN_ATTEMPTS = 5;
@@ -177,6 +202,8 @@ app.post("/api/admin/login", async (request, response) => {
             response.status(503).json({ message: "No administrator credentials are configured." });
             return;
         }
+        void recordAdminAudit({ adminId: submittedId.slice(0, 120) || "unknown", action: "login_failed", ipAddress })
+            .catch((error) => console.error("Admin audit write failed", error));
         response.status(401).json({ message: "Invalid admin credentials." });
         return;
     }
@@ -188,6 +215,8 @@ app.post("/api/admin/login", async (request, response) => {
         ipAddress,
         userAgent: request.get("user-agent"),
     });
+    void recordAdminAudit({ adminId: sessionAdmin.adminId, action: "login", ipAddress })
+        .catch((error) => console.error("Admin audit write failed", error));
     response.json({ token, adminId: sessionAdmin.adminId, role: sessionAdmin.role });
 });
 app.get("/api/admin/session", requireAdmin, (request, response) => {
@@ -200,11 +229,105 @@ app.get("/api/admin/activity", requireAdmin, requireAdminRoles("owner", "manager
         return;
     }
     try {
-        response.json(await getAdminActivity(page));
+        response.json(await getAdminActivity(page, activityFiltersFrom(request)));
     }
     catch (error) {
         console.error("Admin activity load failed", error);
         response.status(500).json({ message: "Unable to load admin activity." });
+    }
+});
+app.get("/api/admin/activity/export", requireAdmin, requireAdminRoles("owner", "manager"), async (request, response) => {
+    try {
+        const filters = activityFiltersFrom(request);
+        const rows = await exportAdminActivity(filters);
+        const header = ["Payment ID", "Customer", "Mobile (last 4)", "Bureau", "Payment status", "Gateway", "Amount (INR)", "Report status", "Failure reason", "Created at"];
+        const lines = rows.map((row) => [row.payment_id, row.customer, row.mobile_last4, row.bureau, row.payment_status, row.gateway,
+            row.amount, row.report_status ?? "not requested", row.failure_reason, new Date(row.created_at).toISOString()].map(csvCell).join(","));
+        auditAdmin(request, response, "activity_exported", { details: { rows: rows.length, ...filters } });
+        response.set({
+            "Content-Type": "text/csv; charset=utf-8",
+            "Content-Disposition": `attachment; filename="scorenow-activity-${new Date().toISOString().slice(0, 10)}.csv"`,
+            "Cache-Control": "private, no-store",
+        }).send([header.join(","), ...lines].join("\n"));
+    }
+    catch (error) {
+        console.error("Admin activity export failed", error);
+        response.status(500).json({ message: "Unable to export activity." });
+    }
+});
+app.get("/api/admin/attention", requireAdmin, async (_request, response) => {
+    try {
+        response.json(await getAdminAttention());
+    }
+    catch (error) {
+        console.error("Admin attention load failed", error);
+        response.status(500).json({ message: "Unable to load items needing attention." });
+    }
+});
+app.get("/api/admin/failed-operations", requireAdmin, requireAdminRoles("owner", "manager"), async (_request, response) => {
+    try {
+        response.json(await getFailedOperations());
+    }
+    catch (error) {
+        console.error("Admin failed operations load failed", error);
+        response.status(500).json({ message: "Unable to load failed operations." });
+    }
+});
+app.post("/api/admin/report-requests/:id/retry", requireAdmin, requireAdminRoles("owner", "manager"), async (request, response) => {
+    const requestId = String(request.params.id);
+    if (!/^[0-9a-f-]{36}$/i.test(requestId)) {
+        response.status(400).json({ message: "Choose a valid report request." });
+        return;
+    }
+    const reportRequest = await findAdminRetryableReport(requestId);
+    if (!reportRequest) {
+        response.status(409).json({ message: "Only failed or stuck paid report requests can be retried." });
+        return;
+    }
+    try {
+        await markReportProcessing(reportRequest.id);
+        await runReportFetch(reportRequest.user_id, reportRequest.id, reportRequest.bureau, requestIpAddress(request));
+        const updated = await findAdminRetryableReport(requestId);
+        const succeeded = !updated;
+        auditAdmin(request, response, "report_retried", { type: "customer", id: reportRequest.user_id, details: { requestId, bureau: reportRequest.bureau, succeeded } });
+        response.json({ ok: succeeded, message: succeeded ? "Report fetched successfully." : "The bureau still returned an error. Check the failure reason." });
+    }
+    catch (error) {
+        console.error("Admin report retry failed", error);
+        auditAdmin(request, response, "report_retried", { type: "customer", id: reportRequest.user_id, details: { requestId, bureau: reportRequest.bureau, succeeded: false } });
+        response.status(502).json({ message: "Unable to fetch the report right now." });
+    }
+});
+app.get("/api/admin/health", requireAdmin, requireAdminRoles("owner", "manager"), async (_request, response) => {
+    try {
+        const stats = await getHealthStats();
+        response.json({
+            ...stats,
+            environment: process.env.NODE_ENV || "development",
+            uptimeSeconds: Math.round(process.uptime()),
+            payments: { mode: isSimulatedPayments() ? "simulated" : "razorpay", razorpayConfigured: isRazorpayConfigured() },
+            reportsDemoMode: isReportsDemoMode(),
+            emailConfigured: Boolean(createMailTransport()),
+            bureauConfig: BUREAUS.map((id) => ({ bureau: id, name: bureauNames[id], configured: isBureauAvailable(id) })),
+        });
+    }
+    catch (error) {
+        console.error("Admin health check failed", error);
+        response.status(500).json({ message: "Database is not reachable." });
+    }
+});
+app.get("/api/admin/audit", requireAdmin, requireAdminRoles("owner", "manager"), async (request, response) => {
+    const page = Number(request.query.page ?? 1);
+    if (!Number.isSafeInteger(page) || page < 1) {
+        response.status(400).json({ message: "Choose a valid audit page." });
+        return;
+    }
+    try {
+        response.json(await listAdminAudit({ page, action: String(request.query.action || "").slice(0, 60), adminId: String(request.query.admin || "").slice(0, 120) }));
+    }
+    catch (error) {
+        console.error("Admin audit load failed", error);
+        response.status(500).json({ message: "Unable to load the audit log." });
     }
 });
 app.get("/api/admin/customers", requireAdmin, requireAdminRoles("owner", "manager", "support", "analyst"), async (request, response) => {
@@ -214,11 +337,61 @@ app.get("/api/admin/customers", requireAdmin, requireAdminRoles("owner", "manage
         return;
     }
     try {
-        response.json(await getAdminCustomers(String(request.query.q || "").slice(0, 100), page));
+        response.json(await getAdminCustomers(String(request.query.q || "").slice(0, 100), page, sessionAdminRole(response) === "analyst"));
     }
     catch (error) {
         console.error("Admin customer search failed", error);
         response.status(500).json({ message: "Unable to search customers." });
+    }
+});
+app.get("/api/admin/customers/:id", requireAdmin, requireAdminRoles("owner", "manager", "support"), async (request, response) => {
+    const userId = String(request.params.id);
+    if (!/^[0-9a-f-]{36}$/i.test(userId)) {
+        response.status(400).json({ message: "Choose a valid customer." });
+        return;
+    }
+    try {
+        const detail = await getAdminCustomerDetail(userId, sessionAdminRole(response) === "support");
+        if (!detail) {
+            response.status(404).json({ message: "Customer account not found." });
+            return;
+        }
+        response.json(detail);
+    }
+    catch (error) {
+        console.error("Admin customer detail failed", error);
+        response.status(500).json({ message: "Unable to load this customer." });
+    }
+});
+app.post("/api/admin/customers/:id/follow-up", requireAdmin, requireAdminRoles("owner", "manager", "support"), async (request, response) => {
+    const userId = String(request.params.id);
+    const note = String(request.body.note || "").trim();
+    if (!/^[0-9a-f-]{36}$/i.test(userId) || note.length < 3 || note.length > 2000) {
+        response.status(400).json({ message: "Add a follow-up note (3 to 2,000 characters)." });
+        return;
+    }
+    try {
+        const customer = await findCustomerForFollowUp(userId);
+        if (!customer) {
+            response.status(404).json({ message: "Customer account not found." });
+            return;
+        }
+        const stage = String(request.body.stage || "").slice(0, 60);
+        const ticketId = await createSupportTicket({
+            requesterName: customer.full_name,
+            requesterMobile: customer.mobile,
+            subject: `Follow-up${stage ? `: ${stage}` : ""}`.slice(0, 180),
+            message: note,
+            priority: "normal",
+            createdBy: `admin:${sessionAdminId(response)}`,
+            userId,
+        });
+        auditAdmin(request, response, "customer_follow_up", { type: "customer", id: userId, details: { ticketId, stage } });
+        response.status(201).json({ ticketId, message: "Follow-up ticket created in Helpline tickets." });
+    }
+    catch (error) {
+        console.error("Admin follow-up creation failed", error);
+        response.status(500).json({ message: "Unable to create the follow-up." });
     }
 });
 app.get("/api/admin/customer-accounts", requireAdmin, requireAdminRoles("owner", "manager"), async (_request, response) => {
@@ -247,6 +420,7 @@ app.post("/api/admin/customer-invitations", requireAdmin, requireAdminRoles("own
             email,
             invitedBy: sessionAdminId(response),
         });
+        auditAdmin(request, response, "customer_invited", { type: "customer_invitation", id: String(invitationId), details: { fullName, mobileLast4: mobile.slice(-4) } });
         response.status(201).json({
             invitationId,
             message: "Invitation recorded. The customer should sign up with this mobile number and verify it by OTP.",
@@ -263,13 +437,19 @@ app.post("/api/admin/customer-invitations/:id/cancel", requireAdmin, requireAdmi
         response.status(404).json({ message: "Pending customer invitation not found." });
         return;
     }
+    auditAdmin(request, response, "customer_invitation_cancelled", { type: "customer_invitation", id: String(request.params.id) });
     response.json({ ok: true });
 });
 app.patch("/api/admin/customers/:id/status", requireAdmin, requireAdminRoles("owner", "manager"), async (request, response) => {
     const userId = String(request.params.id);
     const status = request.body.status;
+    const reason = String(request.body.reason || "").trim().slice(0, 500);
     if (!/^[0-9a-f-]{36}$/i.test(userId) || !["active", "blocked"].includes(status)) {
         response.status(400).json({ message: "Choose a valid customer and status." });
+        return;
+    }
+    if (status === "blocked" && reason.length < 3) {
+        response.status(400).json({ message: "Give a reason for blocking this customer." });
         return;
     }
     const updated = await setCustomerAccountStatus(userId, status);
@@ -277,11 +457,12 @@ app.patch("/api/admin/customers/:id/status", requireAdmin, requireAdminRoles("ow
         response.status(404).json({ message: "Customer account not found." });
         return;
     }
+    auditAdmin(request, response, status === "blocked" ? "customer_blocked" : "customer_enabled", { type: "customer", id: userId, details: reason ? { reason } : undefined });
     response.json({ ok: true });
 });
-app.get("/api/admin/analytics", requireAdmin, requireAdminRoles("owner", "manager", "analyst"), async (_request, response) => {
+app.get("/api/admin/analytics", requireAdmin, requireAdminRoles("owner", "manager", "analyst"), async (request, response) => {
     try {
-        response.json(await getAdminAnalytics());
+        response.json(await getAdminAnalytics(Number(request.query.days) || 14));
     }
     catch (error) {
         console.error("Admin analytics load failed", error);
@@ -379,6 +560,7 @@ app.post("/api/admin/tickets/:id/comments", requireAdmin, requireAdminRoles("own
             response.status(404).json({ message: "Support ticket not found." });
             return;
         }
+        auditAdmin(request, response, "ticket_replied", { type: "ticket", id: ticketId });
         response.status(201).json({ ok: true });
     }
     catch (error) {
@@ -394,6 +576,7 @@ app.patch("/api/admin/tickets/:id", requireAdmin, requireAdminRoles("owner", "ma
         response.status(404).json({ message: "Support ticket not found or status is invalid." });
         return;
     }
+    auditAdmin(request, response, "ticket_updated", { type: "ticket", id: String(request.params.id), details: { status, assignedTo } });
     response.json({ ok: true });
 });
 app.get("/api/admin/team", requireAdmin, requireAdminRoles("owner"), async (_request, response) => {
@@ -416,6 +599,7 @@ app.post("/api/admin/team/invitations", requireAdmin, requireAdminRoles("owner")
     }
     try {
         const invite = await createAdminInvitation({ fullName, email, role, invitedBy: sessionAdminId(response) });
+        auditAdmin(request, response, "admin_invited", { type: "admin", id: email, details: { role } });
         const requestOrigin = request.get("origin");
         const requestAppUrl = requestOrigin && /^https?:\/\//i.test(requestOrigin) ? new URL(requestOrigin).origin : null;
         const baseUrl = process.env.ADMIN_APP_URL || requestAppUrl || `${request.protocol}://${request.get("host")}`;
@@ -460,10 +644,12 @@ app.patch("/api/admin/team/:email/status", requireAdmin, requireAdminRoles("owne
         response.status(404).json({ message: "Admin account not found." });
         return;
     }
+    auditAdmin(request, response, status === "disabled" ? "admin_disabled" : "admin_enabled", { type: "admin", id: email });
     response.json({ ok: true });
 });
 app.post("/api/admin/logout", requireAdmin, async (request, response) => {
     await revokeAdminSession(bearerToken(request));
+    auditAdmin(request, response, "logout");
     response.json({ ok: true });
 });
 app.post("/api/admin/reports", requireAdmin, requireAdminRoles("owner", "manager"), async (request, response) => {
@@ -511,6 +697,7 @@ app.post("/api/admin/reports", requireAdmin, requireAdminRoles("owner", "manager
         consentIpAddress,
         applicant,
     });
+    auditAdmin(request, response, "manual_bureau_check", { type: "admin_report", id: String(auditId), details: { bureau, mobileLast4: applicant.mobile.slice(-4), panLast4: applicant.pan.slice(-4) } });
     try {
         const result = await fetchBureauReport(bureau, applicant, consentIpAddress);
         if (!result.ok) {
