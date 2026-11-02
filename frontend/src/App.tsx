@@ -2462,7 +2462,6 @@ function DashboardPage({ user, onLogout }: { user: AuthUser; onLogout: () => voi
     { icon: CreditCard, label: 'Loan payment', href: '#loan-payment' },
     { icon: PiggyBank, label: 'Fixed deposits', href: '#fixed-deposits' },
     { icon: CreditCard, label: 'Credit cards', href: '#credit-cards' },
-    { icon: Gift, label: 'Offers', href: '#fixed-deposits' },
     { icon: UserRound, label: 'My profile', href: '#my-profile' },
     { icon: Settings, label: 'Settings', href: '#settings' },
     { icon: CircleHelp, label: 'Help & support', href: '#help-support' },
@@ -2716,10 +2715,6 @@ function DashboardPage({ user, onLogout }: { user: AuthUser; onLogout: () => voi
                         </div>
                         <span className="sc-gauge-min">300</span><span className="sc-gauge-max">900</span>
                       </div>
-                      <div className="sc-gauge-meta">
-                        <div className="sc-meta-item"><span className="sc-trend-badge">+50</span><small>vs last month</small></div>
-                        <div className="sc-meta-item"><span className="sc-progress-icon">📍</span><small>Good progress!</small><p>Keep going to reach Good range.</p></div>
-                      </div>
                     </div>
                     <div className="sc-copy">
                       <strong>{activeReport.overdue_accounts
@@ -2749,6 +2744,14 @@ function DashboardPage({ user, onLogout }: { user: AuthUser; onLogout: () => voi
                 <div><span className="dashboard-metric-icon blue"><Search /></span><strong>{activeReport.enquiries_last_6_months ?? '—'}</strong><small>Recent Enquiries</small></div>
                 <div><span className="dashboard-metric-icon gold"><BadgeIndianRupee /></span><strong>{activeReport.total_outstanding === null ? '—' : formatMoney(Number(activeReport.total_outstanding))}</strong><small>Outstanding</small></div>
               </div>
+              {reportInsights.length > 0 && <div className="qo-insights">
+                <strong><Lightbulb /> Key insights</strong>
+                <ul>
+                  {reportInsights.slice(0, 3).map(({ tone, text }) => (
+                    <li key={text} className={`qo-${tone}`}>{tone === 'warn' ? <AlertTriangle /> : tone === 'good' ? <Check /> : <Info />}<span>{text}</span></li>
+                  ))}
+                </ul>
+              </div>}
             </article>}
           </section>
 
@@ -3447,6 +3450,7 @@ type AdminActivity = {
     created_at: string
     paid_at: string | null
     failure_at: string | null
+    report_request_id: string | null
     report_status: string | null
     report_failure_reason: string | null
   }[]
@@ -3484,14 +3488,108 @@ type AdminCustomer = {
   latest_report_status: string | null
   last_login: string | null
   journey_stage: string
+  profile_complete?: boolean
 }
 
 type AdminTicket = SupportTicket
 
 type AdminAnalytics = {
   summary: Record<string, number>
-  trend: { day: string; signups: number; paid_orders: number; revenue: number; failed_attempts: number }[]
+  trend: { day: string; signups: number; paid_orders: number; revenue: number; failed_attempts: number; reports_completed: number; reports_failed: number }[]
   funnel: { step: string; count: number }[]
+  days: number
+  bureaus: { bureau: string; paid_orders: number; revenue: number; completed: number; failed: number }[]
+}
+
+type AdminSectionId = 'overview' | 'customers' | 'reports' | 'analytics' | 'tickets' | 'journey' | 'team' | 'failed' | 'health' | 'audit'
+
+type AdminAttention = {
+  failed_reports: number; stuck_reports: number; stuck_payments: number
+  open_tickets: number; unassigned_tickets: number; failed_admin_checks: number
+}
+
+type AdminCustomerDetail = {
+  customer: {
+    id: string; full_name: string; account_name: string; mobile: string; email: string | null; status: string; created_at: string
+    mobile_verified: boolean; email_verified: boolean; pan_last4: string | null; kyc_status: string | null
+    city: string | null; state: string | null; profile_complete: boolean; profile_updated_at: string | null
+  }
+  payments: { id: string; bureau: string | null; amount: string; status: string; gateway: string; failure_reason: string | null; created_at: string; paid_at: string | null }[]
+  reports: { id: string; bureau: string; status: string; failure_reason: string | null; requested_at: string; completed_at: string | null; credit_score: number | null; is_paid: boolean }[]
+  tickets: { id: string; subject: string; status: string; priority: string; created_at: string }[]
+  sessions: { created_at: string; expires_at: string; revoked_at: string | null; ip_address: string | null; user_agent: string | null }[]
+  adminActions: { admin_id: string; action: string; details: Record<string, unknown> | null; created_at: string }[]
+}
+
+type AdminFailedOperations = {
+  reports: { id: string; user_id: string; customer: string; mobile_last4: string; bureau: string; status: string; failure_reason: string | null; requested_at: string }[]
+  payments: { id: string; user_id: string; customer: string; mobile_last4: string; bureau: string | null; amount: string; gateway: string; failure_reason: string | null; created_at: string }[]
+  adminChecks: { id: string; full_name: string | null; mobile_last4: string; bureau: string; failure_reason: string | null; admin_id: string; created_at: string }[]
+}
+
+type AdminHealth = {
+  databaseLatencyMs: number
+  environment: string
+  uptimeSeconds: number
+  payments: { mode: string; razorpayConfigured: boolean }
+  reportsDemoMode: boolean
+  emailConfigured: boolean
+  bureauConfig: { bureau: string; name: string; configured: boolean }[]
+  recent: { failedReports24h: number; completedReports24h: number; failedPayments24h: number; paidPayments24h: number; lastSignup: string | null; lastPayment: string | null }
+  bureaus: { bureau: string; last_success: string | null; last_failure: string | null; last_failure_reason: string | null; failures_7d: number; successes_7d: number }[]
+}
+
+type AdminAuditLog = {
+  entries: { id: string; admin_id: string; action: string; target_type: string | null; target_id: string | null; details: Record<string, unknown> | null; ip_address: string | null; created_at: string }[]
+  actions: string[]
+  pagination: { page: number; pageSize: number; total: number }
+}
+
+const adminAuditLabels: Record<string, string> = {
+  login: 'Signed in', login_failed: 'Failed sign-in', logout: 'Signed out',
+  customer_blocked: 'Blocked customer', customer_enabled: 'Enabled customer', customer_invited: 'Invited customer',
+  customer_invitation_cancelled: 'Cancelled customer invite', customer_follow_up: 'Created follow-up',
+  report_retried: 'Retried report fetch', manual_bureau_check: 'Manual bureau check', activity_exported: 'Exported activity CSV',
+  ticket_updated: 'Updated ticket', ticket_replied: 'Replied to ticket',
+  admin_invited: 'Invited admin', admin_disabled: 'Disabled admin', admin_enabled: 'Enabled admin',
+}
+
+const adminAuditDetails = (details: Record<string, unknown> | null) => details
+  ? Object.entries(details).filter(([, value]) => value !== null && value !== undefined && value !== '').map(([key, value]) => `${key}: ${String(value)}`).join(' · ')
+  : ''
+
+const maskAdminMobile = (mobile: string) => mobile.length > 4 && !mobile.includes('•') ? `••••••${mobile.slice(-4)}` : mobile
+
+const adminBureauName = (bureau: string | null) => bureauCatalog.find((entry) => entry.id === bureau)?.name ?? bureau ?? '—'
+
+const formatAdminUptime = (seconds: number) => {
+  const days = Math.floor(seconds / 86400)
+  const hours = Math.floor((seconds % 86400) / 3600)
+  const minutes = Math.floor((seconds % 3600) / 60)
+  return days ? `${days}d ${hours}h` : hours ? `${hours}h ${minutes}m` : `${minutes}m`
+}
+
+function AdminTrendChart({ trend }: { trend: AdminAnalytics['trend'] }) {
+  const width = 1200
+  const height = 190
+  const gap = trend.length > 30 ? 2 : 5
+  const max = Math.max(1, ...trend.map((day) => day.revenue))
+  const barWidth = (width - gap * (trend.length - 1)) / Math.max(1, trend.length)
+  const labelEvery = Math.ceil(trend.length / 8)
+  return (
+    <svg className="admin-trend-chart" viewBox={`0 0 ${width} ${height + 24}`} role="img" aria-label="Daily paid revenue">
+      {[0.25, 0.5, 0.75, 1].map((fraction) => <line key={fraction} x1="0" x2={width} y1={height - fraction * (height - 10)} y2={height - fraction * (height - 10)} />)}
+      {trend.map((day, index) => {
+        const barHeight = day.revenue ? Math.max(3, (day.revenue / max) * (height - 10)) : 0
+        const x = index * (barWidth + gap)
+        return <g key={day.day}>
+          <rect x={x} y={height - barHeight} width={barWidth} height={barHeight} rx="3"><title>{`${formatDate(day.day)}: ${formatMoney(day.revenue)} · ${day.paid_orders} paid orders · ${day.signups} signups`}</title></rect>
+          {index % labelEvery === 0 && <text x={index === 0 ? x : x + barWidth / 2} y={height + 17} textAnchor={index === 0 ? 'start' : 'middle'}>{new Date(day.day).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}</text>}
+        </g>
+      })}
+      <text x="0" y="10" className="admin-trend-max">{formatMoney(max)}</text>
+    </svg>
+  )
 }
 
 type AdminTeamMember = { email: string; full_name: string; role: string; status: string; created_at: string }
@@ -3506,7 +3604,7 @@ function AdminPage() {
   const [token, setToken] = useState(() => sessionStorage.getItem('scorenow-admin-token') || '')
   const [adminId, setAdminId] = useState('')
   const [adminRole, setAdminRole] = useState<'owner' | 'manager' | 'support' | 'analyst'>('owner')
-  const [activeSection, setActiveSection] = useState<'overview' | 'customers' | 'reports' | 'analytics' | 'tickets' | 'journey' | 'team'>('overview')
+  const [activeSection, setActiveSection] = useState<AdminSectionId>('overview')
   const [authState, setAuthState] = useState<'checking' | 'signed-out' | 'signed-in'>(token ? 'checking' : 'signed-out')
   const [loginError, setLoginError] = useState('')
   const [reportError, setReportError] = useState('')
@@ -3539,6 +3637,32 @@ function AdminPage() {
   const [teamInviteToken, setTeamInviteToken] = useState(() => new URLSearchParams(window.location.search).get('invite') || '')
   const [teamNotice, setTeamNotice] = useState('')
   const [sectionLoading, setSectionLoading] = useState(true)
+  const [activityFilters, setActivityFilters] = useState({ paymentStatus: '', reportStatus: '', bureau: '', from: '', to: '' })
+  const [activityQuery, setActivityQuery] = useState('')
+  const [exportingActivity, setExportingActivity] = useState(false)
+  const [retryingId, setRetryingId] = useState('')
+  const [actionNotice, setActionNotice] = useState<{ tone: 'info' | 'error'; text: string } | null>(null)
+  const [attention, setAttention] = useState<AdminAttention | null>(null)
+  const [serviceMode, setServiceMode] = useState<{ paymentsMode: string; demoMode: boolean } | null>(null)
+  const [customerDetailId, setCustomerDetailId] = useState('')
+  const [customerDetail, setCustomerDetail] = useState<AdminCustomerDetail | null>(null)
+  const [customerDetailError, setCustomerDetailError] = useState('')
+  const [customerDetailRefresh, setCustomerDetailRefresh] = useState(0)
+  const [statusDialog, setStatusDialog] = useState<{ id: string; name: string; status: string } | null>(null)
+  const [followUpTarget, setFollowUpTarget] = useState<{ id: string; name: string; stage: string } | null>(null)
+  const [dialogBusy, setDialogBusy] = useState(false)
+  const [dialogError, setDialogError] = useState('')
+  const [analyticsDays, setAnalyticsDays] = useState(14)
+  const [journeyCustomers, setJourneyCustomers] = useState<AdminCustomer[]>([])
+  const [journeyStage, setJourneyStage] = useState('')
+  const [ticketAssignee, setTicketAssignee] = useState('')
+  const [ticketSearch, setTicketSearch] = useState('')
+  const [failedOps, setFailedOps] = useState<AdminFailedOperations | null>(null)
+  const [health, setHealth] = useState<AdminHealth | null>(null)
+  const [auditLog, setAuditLog] = useState<AdminAuditLog | null>(null)
+  const [auditAction, setAuditAction] = useState('')
+  const [auditAdminFilter, setAuditAdminFilter] = useState('')
+  const [auditPage, setAuditPage] = useState(1)
 
   const refreshActivity = () => {
     setActivityLoading(true)
@@ -3573,7 +3697,8 @@ function AdminPage() {
   useEffect(() => {
     if (authState !== 'signed-in' || !token || !['owner', 'manager'].includes(adminRole)) return
     let cancelled = false
-    fetch(`${apiUrl}/api/admin/activity?page=${activityPage}`, { headers: { Authorization: 'Bearer ' + token } })
+    const params = new URLSearchParams({ page: String(activityPage), q: activityQuery, ...activityFilters })
+    fetch(`${apiUrl}/api/admin/activity?${params}`, { headers: { Authorization: 'Bearer ' + token } })
       .then(async (response) => {
         const result = await response.json() as AdminActivity & { message?: string }
         if (response.status === 401) {
@@ -3594,7 +3719,72 @@ function AdminPage() {
         if (!cancelled) setActivityLoading(false)
       })
     return () => { cancelled = true }
-  }, [authState, token, activityRefresh, activityPage, adminRole])
+  }, [authState, token, activityRefresh, activityPage, adminRole, activityQuery, activityFilters])
+
+  useEffect(() => {
+    const next = activitySearch.trim()
+    if (next === activityQuery) return
+    const timer = window.setTimeout(() => {
+      setActivityLoading(true)
+      setActivityPage(1)
+      setActivityQuery(next)
+    }, 350)
+    return () => window.clearTimeout(timer)
+  }, [activitySearch, activityQuery])
+
+  useEffect(() => {
+    if (authState !== 'signed-in' || !token) return
+    let cancelled = false
+    fetch(`${apiUrl}/api/admin/attention`, { headers: { Authorization: 'Bearer ' + token } })
+      .then(async (response) => {
+        if (!response.ok) return
+        const result = await response.json() as AdminAttention
+        if (!cancelled) setAttention(result)
+      })
+      .catch(() => undefined)
+    return () => { cancelled = true }
+  }, [authState, token, activityRefresh, sectionRefresh, activeSection])
+
+  useEffect(() => {
+    if (authState !== 'signed-in') return
+    let cancelled = false
+    fetch(`${apiUrl}/api/reports/options`)
+      .then(async (response) => {
+        const result = await response.json() as { paymentsMode?: string; demoMode?: boolean }
+        if (!cancelled && response.ok) setServiceMode({ paymentsMode: result.paymentsMode || 'razorpay', demoMode: Boolean(result.demoMode) })
+      })
+      .catch(() => undefined)
+    return () => { cancelled = true }
+  }, [authState])
+
+  useEffect(() => {
+    if (!customerDetailId || !token) return
+    let cancelled = false
+    fetch(`${apiUrl}/api/admin/customers/${customerDetailId}`, { headers: { Authorization: 'Bearer ' + token } })
+      .then(async (response) => {
+        const result = await response.json() as AdminCustomerDetail & { message?: string }
+        if (!response.ok) throw new Error(result.message || 'Unable to load this customer.')
+        if (!cancelled) setCustomerDetail(result)
+      })
+      .catch((error: unknown) => {
+        if (!cancelled) setCustomerDetailError(error instanceof Error ? error.message : 'Unable to load this customer.')
+      })
+    return () => { cancelled = true }
+  }, [customerDetailId, token, customerDetailRefresh])
+
+  useEffect(() => {
+    if (!customerDetailId && !statusDialog && !followUpTarget) return
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return
+      if (statusDialog || followUpTarget) {
+        setStatusDialog(null)
+        setFollowUpTarget(null)
+        setDialogError('')
+      } else setCustomerDetailId('')
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [customerDetailId, statusDialog, followUpTarget])
 
   useEffect(() => {
     if (authState !== 'signed-in' || !token || activeSection === 'overview' || activeSection === 'reports') return
@@ -3617,7 +3807,7 @@ function AdminPage() {
           if (!cancelled) setCustomerInvitations(accounts.invitations || [])
         }
       } else if (activeSection === 'analytics' || activeSection === 'journey') {
-        const response = await fetch(`${apiUrl}/api/admin/analytics`, { headers })
+        const response = await fetch(`${apiUrl}/api/admin/analytics?days=${analyticsDays}`, { headers })
         const result = await response.json() as AdminAnalytics & { message?: string }
         if (!response.ok) throw new Error(result.message || 'Unable to load analytics.')
         if (!cancelled) setAnalytics(result)
@@ -3625,7 +3815,7 @@ function AdminPage() {
           const customersResponse = await fetch(`${apiUrl}/api/admin/customers?page=1`, { headers })
           const customerResult = await customersResponse.json() as { customers?: AdminCustomer[]; message?: string }
           if (!customersResponse.ok) throw new Error(customerResult.message || 'Unable to load customer journey.')
-          if (!cancelled) setCustomers(customerResult.customers || [])
+          if (!cancelled) setJourneyCustomers(customerResult.customers || [])
         }
       } else if (activeSection === 'tickets') {
         const response = await fetch(`${apiUrl}/api/admin/tickets?status=${encodeURIComponent(ticketStatus)}`, { headers })
@@ -3640,6 +3830,22 @@ function AdminPage() {
           setTeam(result.admins || [])
           setPrimaryAdmin(result.primaryAdmin || null)
         }
+      } else if (activeSection === 'failed') {
+        const response = await fetch(`${apiUrl}/api/admin/failed-operations`, { headers })
+        const result = await response.json() as AdminFailedOperations & { message?: string }
+        if (!response.ok) throw new Error(result.message || 'Unable to load failed operations.')
+        if (!cancelled) setFailedOps(result)
+      } else if (activeSection === 'health') {
+        const response = await fetch(`${apiUrl}/api/admin/health`, { headers })
+        const result = await response.json() as AdminHealth & { message?: string }
+        if (!response.ok) throw new Error(result.message || 'Unable to load system health.')
+        if (!cancelled) setHealth(result)
+      } else if (activeSection === 'audit') {
+        const params = new URLSearchParams({ page: String(auditPage), action: auditAction, admin: auditAdminFilter })
+        const response = await fetch(`${apiUrl}/api/admin/audit?${params}`, { headers })
+        const result = await response.json() as AdminAuditLog & { message?: string }
+        if (!response.ok) throw new Error(result.message || 'Unable to load the audit log.')
+        if (!cancelled) setAuditLog(result)
       }
     }
     void load().catch((error: unknown) => {
@@ -3648,7 +3854,7 @@ function AdminPage() {
       if (!cancelled) setSectionLoading(false)
     })
     return () => { cancelled = true }
-  }, [authState, token, activeSection, customerSearch, customerPage, ticketStatus, sectionRefresh, adminRole])
+  }, [authState, token, activeSection, customerSearch, customerPage, ticketStatus, sectionRefresh, adminRole, analyticsDays, auditPage, auditAction, auditAdminFilter])
 
   const signIn = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
@@ -3808,23 +4014,126 @@ function AdminPage() {
     }
   }
 
-  const updateCustomerStatus = async (customer: AdminCustomer) => {
-    setSectionLoading(true)
-    setSectionError('')
+  const openCustomerDetail = (customerId: string) => {
+    setCustomerDetail(null)
+    setCustomerDetailError('')
+    setCustomerDetailId(customerId)
+  }
+
+  const closeDialogs = () => {
+    setStatusDialog(null)
+    setFollowUpTarget(null)
+    setDialogError('')
+  }
+
+  const submitCustomerStatus = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    if (!statusDialog) return
+    const reason = String(new FormData(event.currentTarget).get('reason') || '').trim()
+    const nextStatus = statusDialog.status === 'blocked' ? 'active' : 'blocked'
+    setDialogBusy(true)
+    setDialogError('')
     try {
-      const response = await fetch(`${apiUrl}/api/admin/customers/${customer.id}/status`, {
+      const response = await fetch(`${apiUrl}/api/admin/customers/${statusDialog.id}/status`, {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ status: customer.status === 'blocked' ? 'active' : 'blocked' }),
+        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
+        body: JSON.stringify({ status: nextStatus, reason }),
       })
       const result = await response.json() as { message?: string }
       if (!response.ok) throw new Error(result.message || 'Unable to update this customer.')
+      setActionNotice({ tone: 'info', text: `${statusDialog.name} is now ${nextStatus === 'blocked' ? 'blocked' : 'active'}.` })
+      closeDialogs()
+      setSectionRefresh((refresh) => refresh + 1)
+      setCustomerDetailRefresh((refresh) => refresh + 1)
+    } catch (error) {
+      setDialogError(error instanceof Error ? error.message : 'Unable to update this customer.')
+    } finally {
+      setDialogBusy(false)
+    }
+  }
+
+  const submitFollowUp = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    if (!followUpTarget) return
+    const note = String(new FormData(event.currentTarget).get('note') || '').trim()
+    setDialogBusy(true)
+    setDialogError('')
+    try {
+      const response = await fetch(`${apiUrl}/api/admin/customers/${followUpTarget.id}/follow-up`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
+        body: JSON.stringify({ note, stage: followUpTarget.stage }),
+      })
+      const result = await response.json() as { message?: string }
+      if (!response.ok) throw new Error(result.message || 'Unable to create the follow-up.')
+      setActionNotice({ tone: 'info', text: result.message || 'Follow-up created.' })
+      closeDialogs()
+      setCustomerDetailRefresh((refresh) => refresh + 1)
       setSectionRefresh((refresh) => refresh + 1)
     } catch (error) {
-      setSectionError(error instanceof Error ? error.message : 'Unable to update this customer.')
+      setDialogError(error instanceof Error ? error.message : 'Unable to create the follow-up.')
     } finally {
-      setSectionLoading(false)
+      setDialogBusy(false)
     }
+  }
+
+  const retryReportRequest = async (requestId: string) => {
+    setRetryingId(requestId)
+    setActionNotice(null)
+    try {
+      const response = await fetch(`${apiUrl}/api/admin/report-requests/${requestId}/retry`, {
+        method: 'POST',
+        headers: { Authorization: 'Bearer ' + token },
+      })
+      const result = await response.json() as { ok?: boolean; message?: string }
+      if (!response.ok) throw new Error(result.message || 'Unable to retry this report.')
+      setActionNotice({ tone: result.ok ? 'info' : 'error', text: result.message || 'Retry finished.' })
+    } catch (error) {
+      setActionNotice({ tone: 'error', text: error instanceof Error ? error.message : 'Unable to retry this report.' })
+    } finally {
+      setRetryingId('')
+      refreshActivity()
+      setSectionRefresh((refresh) => refresh + 1)
+      setCustomerDetailRefresh((refresh) => refresh + 1)
+    }
+  }
+
+  const exportActivity = async () => {
+    setExportingActivity(true)
+    setActivityError('')
+    try {
+      const params = new URLSearchParams({ q: activityQuery, ...activityFilters })
+      const response = await fetch(`${apiUrl}/api/admin/activity/export?${params}`, { headers: { Authorization: 'Bearer ' + token } })
+      if (!response.ok) {
+        const result = await response.json().catch(() => null) as { message?: string } | null
+        throw new Error(result?.message || 'Unable to export activity.')
+      }
+      const url = URL.createObjectURL(await response.blob())
+      const link = document.createElement('a')
+      link.href = url
+      link.download = `scorenow-activity-${new Date().toISOString().slice(0, 10)}.csv`
+      link.click()
+      window.setTimeout(() => URL.revokeObjectURL(url), 1000)
+    } catch (error) {
+      setActivityError(error instanceof Error ? error.message : 'Unable to export activity.')
+    } finally {
+      setExportingActivity(false)
+    }
+  }
+
+  const updateActivityFilter = (key: keyof typeof activityFilters, value: string) => {
+    if (activityFilters[key] === value) return
+    setActivityLoading(true)
+    setActivityPage(1)
+    setActivityFilters((filters) => ({ ...filters, [key]: value }))
+  }
+
+  const clearActivityFilters = () => {
+    setActivityLoading(true)
+    setActivityPage(1)
+    setActivitySearch('')
+    setActivityQuery('')
+    setActivityFilters({ paymentStatus: '', reportStatus: '', bureau: '', from: '', to: '' })
   }
 
   const updateTicket = async (ticket: AdminTicket, status: AdminTicket['status'], assignedTo: string | null = ticket.assigned_to) => {
@@ -3916,41 +4225,75 @@ function AdminPage() {
   const activityTotalPages = activity
     ? Math.max(1, Math.ceil(Math.max(activity.pagination.totalPayments, activity.pagination.totalAdminReports) / activity.pagination.pageSize))
     : 1
-  const matchingPayments = (activity?.payments ?? []).filter((item) =>
-    `${item.full_name} ${item.mobile_last4} ${item.bureau ?? ''} ${item.status} ${item.report_status ?? ''}`
-      .toLowerCase().includes(searchTerm))
+  const matchingPayments = activity?.payments ?? []
   const matchingAdminReports = (activity?.adminReports ?? []).filter((item) =>
     `${item.full_name ?? ''} ${item.mobile_last4} ${item.bureau} ${item.status} ${item.admin_id}`
       .toLowerCase().includes(searchTerm))
 
+  const failedOpsCount = attention ? attention.failed_reports + attention.stuck_reports + attention.stuck_payments : 0
   const adminSections: {
-    id: 'overview' | 'customers' | 'reports' | 'analytics' | 'tickets' | 'journey' | 'team'
+    id: AdminSectionId
     label: string
     icon: typeof House
     roles: AdminRole[]
+    badge?: number
   }[] = [
     { id: 'overview', label: 'Overview', icon: House, roles: ['owner', 'manager'] },
     { id: 'customers', label: 'Customers', icon: Users, roles: ['owner', 'manager', 'support'] },
     { id: 'reports', label: 'Credit score checker', icon: FileSearch, roles: ['owner', 'manager'] },
     { id: 'analytics', label: 'Analytics', icon: BarChart3, roles: ['owner', 'manager', 'analyst'] },
-    { id: 'tickets', label: 'Helpline tickets', icon: MessageCircle, roles: ['owner', 'manager', 'support'] },
+    { id: 'tickets', label: 'Helpline tickets', icon: MessageCircle, roles: ['owner', 'manager', 'support'], badge: attention?.open_tickets },
     { id: 'journey', label: 'Signup journey', icon: TrendingUp, roles: ['owner', 'manager', 'analyst'] },
+    { id: 'failed', label: 'Failed operations', icon: AlertTriangle, roles: ['owner', 'manager'], badge: failedOpsCount },
+    { id: 'health', label: 'System health', icon: Gauge, roles: ['owner', 'manager'] },
+    { id: 'audit', label: 'Audit log', icon: ShieldCheck, roles: ['owner', 'manager'] },
     { id: 'team', label: 'Manage admins', icon: LockKeyhole, roles: ['owner'] },
   ]
   const visibleAdminSections = adminSections.filter((section) => section.roles.includes(adminRole))
-  const changeAdminSection = (section: typeof activeSection) => {
-    setActiveSection(section)
+  const changeAdminSection = (section: AdminSectionId) => {
     setSectionError('')
+    setActionNotice(null)
+    // Re-selecting the current section triggers a refresh instead of a loading state that never resolves.
+    if (section === activeSection) {
+      if (section === 'overview') refreshActivity()
+      else if (section !== 'reports') {
+        setSectionLoading(true)
+        setSectionRefresh((refresh) => refresh + 1)
+      }
+      return
+    }
+    setActiveSection(section)
     if (section !== 'overview' && section !== 'reports') setSectionLoading(true)
-    else setActivityLoading(true)
   }
+  const sectionHasData: Record<AdminSectionId, boolean> = {
+    overview: Boolean(activity), reports: Boolean(report), customers: customers.length > 0, analytics: Boolean(analytics),
+    journey: Boolean(analytics) && journeyCustomers.length > 0, tickets: tickets.length > 0, team: team.length > 0 || Boolean(primaryAdmin),
+    failed: Boolean(failedOps), health: Boolean(health), audit: Boolean(auditLog),
+  }
+  const sectionIsLoading = activeSection === 'overview' ? activityLoading : activeSection === 'reports' ? loading : sectionLoading
+  const canManageCustomers = adminRole === 'owner' || adminRole === 'manager'
+  const hasActivityFilters = Boolean(activityQuery || Object.values(activityFilters).some(Boolean))
+  const journeyStageCounts = journeyCustomers.reduce<Record<string, number>>((counts, customer) => ({ ...counts, [customer.journey_stage]: (counts[customer.journey_stage] || 0) + 1 }), {})
+  const visibleJourneyCustomers = journeyStage ? journeyCustomers.filter((customer) => customer.journey_stage === journeyStage) : journeyCustomers
+  const ticketQuery = ticketSearch.trim().toLowerCase()
+  const visibleTickets = tickets.filter((ticket) =>
+    (ticketAssignee === '' || (ticketAssignee === 'me' ? ticket.assigned_to === adminId : ticketAssignee === 'unassigned' ? !ticket.assigned_to : ticket.assigned_to === ticketAssignee)) &&
+    (!ticketQuery || `${ticket.subject} ${ticket.requester_name} ${ticket.requester_mobile} ${ticket.message}`.toLowerCase().includes(ticketQuery)))
+  const ticketAssignees = [...new Set(tickets.map((ticket) => ticket.assigned_to).filter((value): value is string => Boolean(value) && value !== adminId))]
+  const analyticsRevenue = analytics ? analytics.trend.reduce((sum, day) => sum + day.revenue, 0) : 0
+  const analyticsOrders = analytics ? analytics.trend.reduce((sum, day) => sum + day.paid_orders, 0) : 0
+  const analyticsReportsDone = analytics ? analytics.trend.reduce((sum, day) => sum + day.reports_completed, 0) : 0
+  const analyticsReportsFailed = analytics ? analytics.trend.reduce((sum, day) => sum + day.reports_failed, 0) : 0
+  const funnelStart = analytics?.funnel[0]?.count || 0
+  const funnelPaid = analytics?.funnel[3]?.count || 0
+  const auditTotalPages = auditLog ? Math.max(1, Math.ceil(auditLog.pagination.total / auditLog.pagination.pageSize)) : 1
   const customerTotalPages = Math.max(1, Math.ceil(customerTotal / 50))
 
   if (authState === 'checking') return <div className="admin-loading"><Spinner size={20} /> Verifying admin session…</div>
 
   return (
     <main className="admin-shell">
-      <header className="admin-header"><Brand href="/" /><div><span>SECURE OPERATIONS</span><strong>{authState === 'signed-in' ? adminId : 'Administrator access'}</strong></div>{authState === 'signed-in' && <button className="button button-outline" type="button" onClick={() => void signOut()}><LockKeyhole /> Sign out</button>}</header>
+      <header className="admin-header"><Brand href="/" />{authState === 'signed-in' && serviceMode && (serviceMode.paymentsMode === 'simulated' || serviceMode.demoMode) && <span className="admin-mode-badge" title="Payments or reports are not live. Revenue and reports shown may be test data."><AlertTriangle /> Test mode{serviceMode.paymentsMode === 'simulated' ? ' · simulated payments' : ''}{serviceMode.demoMode ? ' · demo reports' : ''}</span>}<div><span>SECURE OPERATIONS</span><strong>{authState === 'signed-in' ? adminId : 'Administrator access'}</strong></div>{authState === 'signed-in' && <button className="button button-outline" type="button" onClick={() => void signOut()}><LockKeyhole /> Sign out</button>}</header>
       {authState === 'signed-out' ? <section className="admin-login-wrap">
         {teamInviteToken ? <>
           <div className="admin-heading"><span>ADMIN INVITATION</span><h1>Set up your admin account</h1><p>Create your private password and 6-digit PIN to accept this one-time invitation.</p></div>
@@ -3973,19 +4316,38 @@ function AdminPage() {
       </section> : <div className="admin-layout">
         <aside className="admin-sidebar">
           <div className="admin-sidebar-identity"><span>ADMINISTRATOR</span><strong>{adminId}</strong><small>{adminRole}</small></div>
-          <nav aria-label="Admin sections">{visibleAdminSections.map((section) => { const Icon = section.icon; return <button key={section.id} type="button" className={activeSection === section.id ? 'active' : ''} onClick={() => changeAdminSection(section.id)}><Icon />{section.label}</button> })}</nav>
+          <nav aria-label="Admin sections">{visibleAdminSections.map((section) => { const Icon = section.icon; return <button key={section.id} type="button" className={activeSection === section.id ? 'active' : ''} onClick={() => changeAdminSection(section.id)}><Icon /><span>{section.label}</span>{Boolean(section.badge) && <em className="admin-nav-badge" aria-label={`${section.badge} need attention`}>{section.badge}</em>}</button> })}</nav>
           <p>Private operations workspace</p>
         </aside>
         <div className="admin-content">
-        {(activeSection === 'overview' ? activityLoading : activeSection === 'reports' ? loading : sectionLoading) && <div className="admin-data-loading" role="status"><Spinner size={18} /> Loading {activeSection === 'overview' ? 'activity' : activeSection === 'reports' ? 'the credit report' : activeSection === 'tickets' ? 'support tickets' : activeSection === 'customers' ? 'customer records' : activeSection === 'team' ? 'admin team' : 'analytics'} from the database…</div>}
+        {sectionIsLoading && !sectionHasData[activeSection] && <div className="admin-data-loading" role="status"><Spinner size={18} /> Loading {({ overview: 'activity', reports: 'the credit report', tickets: 'support tickets', customers: 'customer records', team: 'admin team', analytics: 'analytics', journey: 'the signup journey', failed: 'failed operations', health: 'system health', audit: 'the audit log' } as Record<AdminSectionId, string>)[activeSection]}…</div>}
+        {actionNotice && <p className={`dashboard-notice ${actionNotice.tone} admin-action-notice`} role="status">{actionNotice.text}<button type="button" aria-label="Dismiss" onClick={() => setActionNotice(null)}><X /></button></p>}
         {sectionError && activeSection !== 'overview' && <p className="dashboard-notice error" role="alert">{sectionError}</p>}
         {activeSection !== 'overview' && <div className="admin-section-actions"><button className="button button-outline" type="button" onClick={() => { setSectionLoading(true); setSectionRefresh((refresh) => refresh + 1) }} disabled={sectionLoading}><Spinner size={16} active={sectionLoading} /> {sectionLoading ? 'Refreshing…' : 'Refresh section'}</button></div>}
         {activeSection === 'overview' ? <>
         <div className="admin-heading"><span>SECURE OPERATIONS</span><h1>Admin overview</h1><p>Review customer activity, payment outcomes, and bureau report requests.</p></div>
         <section className="admin-activity" aria-label="Admin activity">
+          {attention && <div className="admin-attention" aria-label="Needs attention">
+            {attention.failed_reports + attention.stuck_reports > 0 && <button type="button" className="admin-attention-item danger" onClick={() => changeAdminSection('failed')}><AlertTriangle /><span><strong>{attention.failed_reports + attention.stuck_reports}</strong> paid report{attention.failed_reports + attention.stuck_reports === 1 ? '' : 's'} failed or stuck</span><ArrowRight /></button>}
+            {attention.stuck_payments > 0 && <button type="button" className="admin-attention-item warn" onClick={() => changeAdminSection('failed')}><Clock3 /><span><strong>{attention.stuck_payments}</strong> payment{attention.stuck_payments === 1 ? '' : 's'} pending over 30 min</span><ArrowRight /></button>}
+            {attention.open_tickets > 0 && <button type="button" className="admin-attention-item info" onClick={() => changeAdminSection('tickets')}><MessageCircle /><span><strong>{attention.open_tickets}</strong> open ticket{attention.open_tickets === 1 ? '' : 's'}{attention.unassigned_tickets ? ` · ${attention.unassigned_tickets} unassigned` : ''}</span><ArrowRight /></button>}
+            {attention.failed_admin_checks > 0 && <button type="button" className="admin-attention-item warn" onClick={() => changeAdminSection('failed')}><FileSearch /><span><strong>{attention.failed_admin_checks}</strong> manual bureau check{attention.failed_admin_checks === 1 ? '' : 's'} failed this week</span><ArrowRight /></button>}
+            {attention.failed_reports + attention.stuck_reports + attention.stuck_payments + attention.open_tickets + attention.failed_admin_checks === 0 && <span className="admin-attention-item ok"><Check /> All clear: nothing needs attention right now</span>}
+          </div>}
           <div className="admin-activity-toolbar">
-            <label className="admin-activity-search"><Search /><input aria-label="Search admin activity on this page" type="search" value={activitySearch} onChange={(event) => { setActivitySearch(event.target.value); setActivityPage(1) }} placeholder="Search this page by name, phone, bureau, or status" /></label>
-            <button className="button button-outline" type="button" onClick={refreshActivity} disabled={activityLoading}><Spinner size={16} active={activityLoading} /> {activityLoading ? 'Refreshing…' : 'Refresh activity'}</button>
+            <label className="admin-activity-search"><Search /><input aria-label="Search customer payments" type="search" value={activitySearch} onChange={(event) => setActivitySearch(event.target.value)} placeholder="Search by customer name, mobile, or email" /></label>
+            <div className="admin-toolbar-actions">
+              <button className="button button-outline" type="button" onClick={() => void exportActivity()} disabled={exportingActivity}><Download /> {exportingActivity ? 'Exporting…' : 'Export CSV'}</button>
+              <button className="button button-outline" type="button" onClick={refreshActivity} disabled={activityLoading}><Spinner size={16} active={activityLoading} /> {activityLoading ? 'Refreshing…' : 'Refresh'}</button>
+            </div>
+          </div>
+          <div className="admin-filter-bar" aria-label="Filter customer payments">
+            <label>Payment<select value={activityFilters.paymentStatus} onChange={(event) => updateActivityFilter('paymentStatus', event.target.value)}><option value="">All</option><option value="paid">Paid</option><option value="pending">Pending</option><option value="failed">Failed</option></select></label>
+            <label>Report<select value={activityFilters.reportStatus} onChange={(event) => updateActivityFilter('reportStatus', event.target.value)}><option value="">All</option><option value="completed">Completed</option><option value="processing">Processing</option><option value="failed">Failed</option><option value="none">Not requested</option></select></label>
+            <label>Bureau<select value={activityFilters.bureau} onChange={(event) => updateActivityFilter('bureau', event.target.value)}><option value="">All</option>{bureauCatalog.map((entry) => <option key={entry.id} value={entry.id}>{entry.name}</option>)}</select></label>
+            <label>From<input type="date" value={activityFilters.from} max={activityFilters.to || undefined} onChange={(event) => updateActivityFilter('from', event.target.value)} /></label>
+            <label>To<input type="date" value={activityFilters.to} min={activityFilters.from || undefined} onChange={(event) => updateActivityFilter('to', event.target.value)} /></label>
+            {hasActivityFilters && <button className="button button-outline admin-small-button" type="button" onClick={clearActivityFilters}><X /> Clear filters</button>}
           </div>
           {activityError && <p className="dashboard-notice error" role="alert">{activityError}</p>}
           {reportPdfError && <p className="dashboard-notice error" role="alert">{reportPdfError}</p>}
@@ -3996,9 +4358,9 @@ function AdminPage() {
             <article className="dashboard-card admin-stat"><FileCheck2 /><span>Paid report requests</span><strong>{activity.summary.reportRequests.toLocaleString('en-IN')}</strong><small>{activity.summary.failedReportRequests.toLocaleString('en-IN')} report fetches failed</small></article>
           </div>}
           <article className="dashboard-card admin-activity-card">
-            <div className="dashboard-card-heading"><strong>Customer payments &amp; reports</strong><small>50 per page</small></div>
+            <div className="dashboard-card-heading"><strong>Customer payments &amp; reports</strong><small>{activity ? `${activity.pagination.totalPayments.toLocaleString('en-IN')} ${hasActivityFilters ? 'matching' : 'total'} · 50 per page` : '50 per page'}</small></div>
             {!activity && !activityError ? <p className="admin-activity-empty">Loading customer activity…</p> : matchingPayments.length ? <div className="admin-table-wrap"><table className="admin-activity-table">
-              <thead><tr><th>Customer</th><th>Bureau</th><th>Payment</th><th>Report</th><th>Amount</th><th>Date</th></tr></thead>
+              <thead><tr><th>Customer</th><th>Bureau</th><th>Payment</th><th>Report</th><th>Amount</th><th>Date</th><th>Action</th></tr></thead>
               <tbody>{matchingPayments.map((item) => {
                 const bureauName = bureauCatalog.find((entry) => entry.id === item.bureau)?.name ?? item.bureau ?? '—'
                 const reportErrorMessage = item.report_failure_reason
@@ -4012,6 +4374,7 @@ function AdminPage() {
                   <td><span className={`admin-status ${item.report_status || 'pending'}`}>{item.report_status || 'Not requested'}</span>{reportErrorMessage && <small className="admin-activity-error" title={reportErrorMessage}>{reportErrorMessage}</small>}</td>
                   <td>{formatMoney(Number(item.amount) + Number(item.gst_amount))}</td>
                   <td>{formatAdminTimestamp(item.paid_at ?? item.failure_at ?? item.created_at)}</td>
+                  <td>{item.report_status === 'failed' && item.report_request_id ? <button className="button button-outline admin-small-button" type="button" disabled={retryingId === item.report_request_id} onClick={() => void retryReportRequest(item.report_request_id!)}><RotateCcw /> {retryingId === item.report_request_id ? 'Retrying…' : 'Retry report'}</button> : <span className="admin-muted">—</span>}</td>
                 </tr>
               })}</tbody>
             </table></div> : <p className="admin-activity-empty">{activity ? 'No matching payment activity found.' : 'Customer activity is not available yet.'}</p>}
@@ -4087,13 +4450,13 @@ function AdminPage() {
             {customers.length ? <div className="admin-table-wrap"><table className="admin-activity-table">
               <thead><tr><th>Customer</th><th>Mobile / Email</th><th>PAN</th><th>Journey step</th><th>Reports</th><th>Account</th><th>Manage</th></tr></thead>
               <tbody>{customers.map((customer) => <tr key={customer.id}>
-                <td><strong>{customer.full_name}</strong><small>Joined {formatAdminTimestamp(customer.created_at)}</small></td>
+                <td><button type="button" className="admin-link-button" onClick={() => openCustomerDetail(customer.id)}>{customer.full_name}</button><small>Joined {formatAdminTimestamp(customer.created_at)}</small></td>
                 <td>{customer.mobile}<small>{customer.email || 'No email on file'}</small></td>
                 <td>{customer.pan_last4 ? `••••••${customer.pan_last4}` : 'Not provided'}</td>
-                <td>{customer.journey_stage}<small>{customer.kyc_status ? `Profile: ${customer.kyc_status}` : 'Profile incomplete'}</small></td>
+                <td>{customer.journey_stage}<small>{customer.profile_complete ? `Profile complete · KYC ${customer.kyc_status || 'not started'}` : 'Profile incomplete'}</small></td>
                 <td>{customer.paid_payments} paid / {customer.total_payments} orders<small>{customer.latest_report_status || 'No report request'}</small></td>
                 <td><span className={`admin-status ${customer.status === 'active' ? 'completed' : 'failed'}`}>{customer.status}</span></td>
-                <td><button className="button button-outline admin-small-button" type="button" disabled={sectionLoading} onClick={() => void updateCustomerStatus(customer)}>{customer.status === 'blocked' ? 'Enable' : 'Block'}</button></td>
+                <td><div className="admin-row-actions"><button className="button button-outline admin-small-button" type="button" onClick={() => openCustomerDetail(customer.id)}><Eye /> View</button>{canManageCustomers && <button className={`button button-outline admin-small-button${customer.status === 'blocked' ? '' : ' danger'}`} type="button" onClick={() => setStatusDialog({ id: customer.id, name: customer.full_name, status: customer.status })}>{customer.status === 'blocked' ? 'Enable' : 'Block'}</button>}</div></td>
               </tr>)}</tbody>
             </table></div> : <p className="admin-activity-empty">{customerSearch ? 'No matching customers found.' : 'No registered customers yet.'}</p>}
           </article>
@@ -4118,22 +4481,34 @@ function AdminPage() {
             </tbody></table></div>
           </article>}
         </> : activeSection === 'analytics' ? <>
-          <div className="admin-heading"><span>BUSINESS INSIGHTS</span><h1>Analytics</h1><p>Database-backed totals and daily activity from registered accounts, payments, and report requests.</p></div>
+          <div className="admin-heading admin-heading-row"><div><span>BUSINESS INSIGHTS</span><h1>Analytics</h1><p>Revenue, orders, and report delivery from registered accounts, payments, and report requests.</p></div>
+            <label className="admin-inline-select">Period<select value={analyticsDays} onChange={(event) => { setSectionLoading(true); setAnalyticsDays(Number(event.target.value)) }}><option value={7}>Last 7 days</option><option value={14}>Last 14 days</option><option value={30}>Last 30 days</option><option value={90}>Last 90 days</option></select></label>
+          </div>
           {analytics && <>
             <div className="admin-stat-grid admin-analytics-grid">
-              <article className="dashboard-card admin-stat"><Users /><span>Customers</span><strong>{(analytics.summary.total_users || 0).toLocaleString('en-IN')}</strong></article>
-              <article className="dashboard-card admin-stat"><UserRound /><span>Active accounts</span><strong>{(analytics.summary.active_users || 0).toLocaleString('en-IN')}</strong></article>
+              <article className="dashboard-card admin-stat"><BadgeIndianRupee /><span>Revenue ({analytics.days} days)</span><strong>{formatMoney(analyticsRevenue)}</strong><small>{formatMoney(analytics.summary.revenue || 0)} all time</small></article>
+              <article className="dashboard-card admin-stat"><CreditCard /><span>Paid orders ({analytics.days} days)</span><strong>{analyticsOrders.toLocaleString('en-IN')}</strong><small>Avg order {formatMoney(analyticsOrders ? analyticsRevenue / analyticsOrders : 0)}</small></article>
+              <article className="dashboard-card admin-stat"><TrendingUp /><span>Signup → paid conversion</span><strong>{funnelStart ? Math.round((funnelPaid / funnelStart) * 100) : 0}%</strong><small>{funnelPaid} of {funnelStart} customers paid</small></article>
+              <article className="dashboard-card admin-stat"><FileCheck2 /><span>Report success rate</span><strong>{analyticsReportsDone + analyticsReportsFailed ? Math.round((analyticsReportsDone / (analyticsReportsDone + analyticsReportsFailed)) * 100) : 100}%</strong><small>{analyticsReportsDone} delivered · {analyticsReportsFailed} failed</small></article>
+              <article className="dashboard-card admin-stat"><Users /><span>Customers</span><strong>{(analytics.summary.total_users || 0).toLocaleString('en-IN')}</strong><small>{(analytics.summary.active_users || 0).toLocaleString('en-IN')} active accounts</small></article>
               <article className="dashboard-card admin-stat"><UserRound /><span>Users with valid sessions</span><strong>{(analytics.summary.signed_in_users || 0).toLocaleString('en-IN')}</strong></article>
-              <article className="dashboard-card admin-stat"><BadgeIndianRupee /><span>Paid revenue</span><strong>{formatMoney(analytics.summary.revenue || 0)}</strong></article>
-              <article className="dashboard-card admin-stat"><CreditCard /><span>Paid orders</span><strong>{(analytics.summary.paid_payments || 0).toLocaleString('en-IN')}</strong></article>
-              <article className="dashboard-card admin-stat"><AlertTriangle /><span>Failed attempts</span><strong>{(analytics.summary.failed_payments || 0).toLocaleString('en-IN')}</strong></article>
-              <article className="dashboard-card admin-stat"><FileCheck2 /><span>Completed reports</span><strong>{(analytics.summary.completed_reports || 0).toLocaleString('en-IN')}</strong></article>
+              <article className="dashboard-card admin-stat"><AlertTriangle /><span>Failed payment attempts</span><strong>{(analytics.summary.failed_payments || 0).toLocaleString('en-IN')}</strong><small>All time</small></article>
               <article className="dashboard-card admin-stat"><MessageCircle /><span>Open tickets</span><strong>{(analytics.summary.open_tickets || 0).toLocaleString('en-IN')}</strong></article>
             </div>
+            <article className="dashboard-card admin-activity-card admin-chart-card">
+              <div className="dashboard-card-heading"><strong>Daily paid revenue</strong><small>Last {analytics.days} days · hover a bar for details</small></div>
+              <AdminTrendChart trend={analytics.trend} />
+            </article>
             <article className="dashboard-card admin-activity-card">
-              <div className="dashboard-card-heading"><strong>Daily activity</strong><small>Last 14 days</small></div>
-              <div className="admin-table-wrap"><table className="admin-activity-table"><thead><tr><th>Date</th><th>Signups</th><th>Paid orders</th><th>Revenue</th><th>Failed payments</th></tr></thead><tbody>
-                {analytics.trend.map((day) => <tr key={day.day}><td>{formatDate(day.day)}</td><td>{day.signups}</td><td>{day.paid_orders}</td><td>{formatMoney(day.revenue)}</td><td>{day.failed_attempts}</td></tr>)}
+              <div className="dashboard-card-heading"><strong>By bureau</strong><small>Orders placed in the last {analytics.days} days</small></div>
+              {analytics.bureaus.length ? <div className="admin-table-wrap"><table className="admin-activity-table"><thead><tr><th>Bureau</th><th>Paid orders</th><th>Revenue</th><th>Reports delivered</th><th>Reports failed</th><th>Success rate</th></tr></thead><tbody>
+                {analytics.bureaus.map((row) => <tr key={row.bureau}><td><strong>{adminBureauName(row.bureau)}</strong></td><td>{row.paid_orders}</td><td>{formatMoney(row.revenue)}</td><td>{row.completed}</td><td>{row.failed}</td><td>{row.completed + row.failed ? `${Math.round((row.completed / (row.completed + row.failed)) * 100)}%` : '—'}</td></tr>)}
+              </tbody></table></div> : <p className="admin-activity-empty">No bureau orders in this period.</p>}
+            </article>
+            <article className="dashboard-card admin-activity-card">
+              <div className="dashboard-card-heading"><strong>Daily activity</strong><small>Last {analytics.days} days</small></div>
+              <div className="admin-table-wrap"><table className="admin-activity-table"><thead><tr><th>Date</th><th>Signups</th><th>Paid orders</th><th>Revenue</th><th>Reports delivered</th><th>Reports failed</th><th>Failed payments</th></tr></thead><tbody>
+                {[...analytics.trend].reverse().map((day) => <tr key={day.day}><td>{formatDate(day.day)}</td><td>{day.signups}</td><td>{day.paid_orders}</td><td>{formatMoney(day.revenue)}</td><td>{day.reports_completed}</td><td>{day.reports_failed}</td><td>{day.failed_attempts}</td></tr>)}
               </tbody></table></div>
             </article>
           </>}
@@ -4144,18 +4519,22 @@ function AdminPage() {
             const rate = first ? Math.round((item.count / first) * 100) : 0
             return <article className="dashboard-card admin-funnel-step" key={item.step}><span>STEP {index + 1}</span><strong>{item.count.toLocaleString('en-IN')}</strong><b>{item.step}</b><div><i style={{ width: `${rate}%` }} /></div><small>{rate}% of accounts</small></article>
           })}</div>}
-          <article className="dashboard-card admin-activity-card"><div className="dashboard-card-heading"><strong>Customer progress</strong><small>Latest 50</small></div>
-            {customers.length ? <div className="admin-table-wrap"><table className="admin-activity-table"><thead><tr><th>Customer</th><th>Mobile</th><th>Progress</th><th>Last sign in</th><th>Reports</th></tr></thead><tbody>
-              {customers.map((customer) => <tr key={customer.id}><td><strong>{customer.full_name}</strong><small>{customer.email || '—'}</small></td><td>{customer.mobile}</td><td><span className="admin-status pending">{customer.journey_stage}</span></td><td>{formatAdminTimestamp(customer.last_login)}</td><td>{customer.latest_report_status || 'No report yet'}</td></tr>)}
-            </tbody></table></div> : <p className="admin-activity-empty">No customer progress records found.</p>}
+          {journeyCustomers.length > 0 && <div className="admin-chip-row" role="group" aria-label="Filter by journey step">
+            <button type="button" className={journeyStage === '' ? 'active' : ''} onClick={() => setJourneyStage('')}>All <b>{journeyCustomers.length}</b></button>
+            {['Account created', 'Signed in', 'Profile complete', 'Payment started', 'Payment complete', 'Report ready'].filter((stage) => journeyStageCounts[stage]).map((stage) => <button type="button" key={stage} className={journeyStage === stage ? 'active' : ''} onClick={() => setJourneyStage(stage)}>{stage} <b>{journeyStageCounts[stage]}</b></button>)}
+          </div>}
+          <article className="dashboard-card admin-activity-card"><div className="dashboard-card-heading"><strong>Customer progress</strong><small>{journeyStage ? `${visibleJourneyCustomers.length} at “${journeyStage}”` : 'Latest 50'}</small></div>
+            {visibleJourneyCustomers.length ? <div className="admin-table-wrap"><table className="admin-activity-table"><thead><tr><th>Customer</th><th>Mobile</th><th>Progress</th><th>Last sign in</th><th>Reports</th>{canManageCustomers && <th>Follow up</th>}</tr></thead><tbody>
+              {visibleJourneyCustomers.map((customer) => <tr key={customer.id}><td>{canManageCustomers ? <button type="button" className="admin-link-button" onClick={() => openCustomerDetail(customer.id)}>{customer.full_name}</button> : <strong>{customer.full_name}</strong>}<small>Joined {formatAdminTimestamp(customer.created_at)}</small></td><td>{maskAdminMobile(customer.mobile)}</td><td><span className={`admin-status ${customer.journey_stage === 'Report ready' ? 'completed' : 'pending'}`}>{customer.journey_stage}</span></td><td>{formatAdminTimestamp(customer.last_login)}</td><td>{customer.latest_report_status || 'No report yet'}</td>{canManageCustomers && <td>{customer.journey_stage !== 'Report ready' ? <button className="button button-outline admin-small-button" type="button" onClick={() => setFollowUpTarget({ id: customer.id, name: customer.full_name, stage: customer.journey_stage })}><MessageCircle /> Follow up</button> : <span className="admin-muted">—</span>}</td>}</tr>)}
+            </tbody></table></div> : <p className="admin-activity-empty">No customers at this step.</p>}
           </article>
         </> : activeSection === 'tickets' ? <>
           <div className="admin-heading"><span>CUSTOMER SUPPORT</span><h1>Helpline tickets</h1><p>Review customer-submitted requests, reply in the ticket conversation, assign an owner, and update status. Website callback requests are also added here.</p></div>
-          <div className="admin-ticket-toolbar"><label>Status filter<select value={ticketStatus} onChange={(event) => { setTicketStatus(event.target.value); setSectionLoading(true) }}><option value="">All tickets</option><option value="open">Open</option><option value="in_progress">In progress</option><option value="resolved">Resolved</option><option value="closed">Closed</option></select></label><button className="button button-outline" type="button" onClick={() => { setSectionLoading(true); setSectionRefresh((refresh) => refresh + 1) }} disabled={sectionLoading}><Spinner size={16} active={sectionLoading} /> Refresh</button></div>
-          <div className="admin-ticket-list">{tickets.length ? tickets.map((ticket) => <article className="dashboard-card admin-ticket" key={ticket.id}>
+          <div className="admin-ticket-toolbar"><label className="admin-activity-search admin-ticket-search"><Search /><input type="search" aria-label="Search tickets" value={ticketSearch} onChange={(event) => setTicketSearch(event.target.value)} placeholder="Search subject, customer, or mobile" /></label><label>Assigned to<select value={ticketAssignee} onChange={(event) => setTicketAssignee(event.target.value)}><option value="">Anyone</option><option value="me">Me</option><option value="unassigned">Unassigned</option>{ticketAssignees.map((assignee) => <option key={assignee} value={assignee}>{assignee}</option>)}</select></label><label>Status filter<select value={ticketStatus} onChange={(event) => { setTicketStatus(event.target.value); setSectionLoading(true) }}><option value="">All tickets</option><option value="open">Open</option><option value="in_progress">In progress</option><option value="resolved">Resolved</option><option value="closed">Closed</option></select></label><button className="button button-outline" type="button" onClick={() => { setSectionLoading(true); setSectionRefresh((refresh) => refresh + 1) }} disabled={sectionLoading}><Spinner size={16} active={sectionLoading} /> Refresh</button></div>
+          <div className="admin-ticket-list">{visibleTickets.length ? visibleTickets.map((ticket) => <article className="dashboard-card admin-ticket" key={ticket.id}>
             <div className="admin-ticket-top"><div><span className={`admin-status ${ticket.priority === 'urgent' || ticket.priority === 'high' ? 'failed' : 'pending'}`}>{ticket.priority}</span><span className={`admin-status ${ticket.status === 'resolved' || ticket.status === 'closed' ? 'completed' : 'pending'}`}>{ticket.status.replace('_', ' ')}</span></div><time>{formatAdminTimestamp(ticket.created_at)}</time></div>
             <h2>{ticket.subject}</h2><p>{ticket.message}</p><div className="admin-ticket-customer"><strong>{ticket.requester_name}</strong><span>{ticket.requester_mobile}</span><small>Created by {ticket.created_by}</small></div>
-            <div className="admin-ticket-actions"><label>Assign to<input key={ticket.assigned_to || ''} defaultValue={ticket.assigned_to || ''} placeholder="Admin email or name" onBlur={(event) => { const value = event.currentTarget.value.trim() || null; if (value !== ticket.assigned_to) void updateTicket(ticket, ticket.status, value) }} /></label><label>Ticket status<select value={ticket.status} onChange={(event) => void updateTicket(ticket, event.target.value as AdminTicket['status'])}><option value="open">Open</option><option value="in_progress">In progress</option><option value="resolved">Resolved</option><option value="closed">Closed</option></select></label></div>
+            <div className="admin-ticket-actions"><label>Assign to<span className="admin-assign-field"><input key={ticket.assigned_to || ''} defaultValue={ticket.assigned_to || ''} placeholder="Admin email or name" onBlur={(event) => { const value = event.currentTarget.value.trim() || null; if (value !== ticket.assigned_to) void updateTicket(ticket, ticket.status, value) }} />{ticket.assigned_to !== adminId && <button type="button" className="button button-outline admin-small-button" onClick={() => void updateTicket(ticket, ticket.status, adminId)}>Assign to me</button>}</span></label><label>Ticket status<select value={ticket.status} onChange={(event) => void updateTicket(ticket, event.target.value as AdminTicket['status'])}><option value="open">Open</option><option value="in_progress">In progress</option><option value="resolved">Resolved</option><option value="closed">Closed</option></select></label></div>
             <div className="admin-ticket-thread">
               <strong>Conversation</strong>
               {ticket.comments.length ? ticket.comments.map((comment) => <div className={`admin-ticket-comment ${comment.author_type}`} key={comment.id}><div><b>{comment.author_name}</b><time>{formatAdminTimestamp(comment.created_at)}</time></div><p>{comment.message}</p></div>) : <p className="admin-ticket-no-replies">No replies yet.</p>}
@@ -4165,7 +4544,65 @@ function AdminPage() {
                 <button className="button button-primary" type="submit" disabled={sectionLoading}><MessageCircle /> Send reply</button>
               </form>
             </div>
-          </article>) : <p className="admin-activity-empty">No tickets match this status.</p>}</div>
+          </article>) : <p className="admin-activity-empty">{tickets.length ? 'No tickets match these filters.' : 'No tickets match this status.'}</p>}</div>
+        </> : activeSection === 'failed' ? <>
+          <div className="admin-heading"><span>RELIABILITY</span><h1>Failed operations</h1><p>Paid reports that failed or got stuck, payments without confirmation, and failed manual bureau checks. Retry paid reports here so customers don’t have to pay again.</p></div>
+          {failedOps && <>
+            <article className="dashboard-card admin-activity-card">
+              <div className="dashboard-card-heading"><strong>Paid report fetches</strong><small>{failedOps.reports.length} failed or stuck over 15 min</small></div>
+              {failedOps.reports.length ? <div className="admin-table-wrap"><table className="admin-activity-table"><thead><tr><th>Customer</th><th>Bureau</th><th>Status</th><th>Reason</th><th>Requested</th><th>Action</th></tr></thead><tbody>
+                {failedOps.reports.map((item) => <tr key={item.id}><td><button type="button" className="admin-link-button" onClick={() => openCustomerDetail(item.user_id)}>{item.customer}</button><small>+91 ••••••{item.mobile_last4}</small></td><td>{adminBureauName(item.bureau)}</td><td><span className={`admin-status ${item.status === 'failed' ? 'failed' : 'pending'}`}>{item.status === 'failed' ? 'failed' : 'stuck'}</span></td><td><small className="admin-activity-error" title={item.failure_reason || ''}>{item.failure_reason || 'No response from bureau'}</small></td><td>{formatAdminTimestamp(item.requested_at)}</td><td><button className="button button-primary admin-small-button" type="button" disabled={retryingId === item.id} onClick={() => void retryReportRequest(item.id)}><RotateCcw /> {retryingId === item.id ? 'Retrying…' : 'Retry fetch'}</button></td></tr>)}
+              </tbody></table></div> : <p className="admin-activity-empty"><Check /> No failed or stuck paid reports.</p>}
+            </article>
+            <article className="dashboard-card admin-activity-card">
+              <div className="dashboard-card-heading"><strong>Payments needing review</strong><small>Failed, or pending for more than 30 minutes</small></div>
+              {failedOps.payments.length ? <div className="admin-table-wrap"><table className="admin-activity-table"><thead><tr><th>Customer</th><th>Bureau</th><th>Amount</th><th>Gateway</th><th>Issue</th><th>Created</th><th>Action</th></tr></thead><tbody>
+                {failedOps.payments.map((item) => <tr key={item.id}><td><strong>{item.customer}</strong><small>+91 ••••••{item.mobile_last4}</small></td><td>{adminBureauName(item.bureau)}</td><td>{formatMoney(Number(item.amount))}</td><td>{item.gateway}</td><td><small className="admin-activity-error">{item.failure_reason || 'No payment confirmation received'}</small></td><td>{formatAdminTimestamp(item.created_at)}</td><td><button className="button button-outline admin-small-button" type="button" onClick={() => openCustomerDetail(item.user_id)}><Eye /> View customer</button></td></tr>)}
+              </tbody></table></div> : <p className="admin-activity-empty"><Check /> No payments need review.</p>}
+            </article>
+            <article className="dashboard-card admin-activity-card">
+              <div className="dashboard-card-heading"><strong>Failed manual bureau checks</strong><small>Last 30 days · re-run from Credit score checker</small></div>
+              {failedOps.adminChecks.length ? <div className="admin-table-wrap"><table className="admin-activity-table"><thead><tr><th>Client</th><th>Bureau</th><th>Reason</th><th>Checked by</th><th>Date</th></tr></thead><tbody>
+                {failedOps.adminChecks.map((item) => <tr key={item.id}><td><strong>{item.full_name || 'Client'}</strong><small>•••• {item.mobile_last4}</small></td><td>{adminBureauName(item.bureau)}</td><td><small className="admin-activity-error" title={item.failure_reason || ''}>{item.failure_reason || '—'}</small></td><td>{item.admin_id}</td><td>{formatAdminTimestamp(item.created_at)}</td></tr>)}
+              </tbody></table></div> : <p className="admin-activity-empty"><Check /> No failed manual checks.</p>}
+            </article>
+          </>}
+        </> : activeSection === 'health' ? <>
+          <div className="admin-heading"><span>OPERATIONS</span><h1>System health</h1><p>Live configuration and recent outcomes for the database, payments, bureaus, and email.</p></div>
+          {health && <>
+            <div className="admin-health-grid">
+              <article className={`dashboard-card admin-health-card ${health.databaseLatencyMs < 800 ? 'ok' : 'warn'}`}><span>Database</span><strong>Connected</strong><small>{health.databaseLatencyMs} ms response</small></article>
+              <article className={`dashboard-card admin-health-card ${health.payments.mode === 'simulated' ? 'warn' : health.payments.razorpayConfigured ? 'ok' : 'bad'}`}><span>Payments</span><strong>{health.payments.mode === 'simulated' ? 'Simulated' : 'Razorpay live'}</strong><small>{health.payments.mode === 'simulated' ? 'No real money is collected' : health.payments.razorpayConfigured ? 'Gateway keys configured' : 'Gateway keys missing'}</small></article>
+              <article className={`dashboard-card admin-health-card ${health.reportsDemoMode ? 'warn' : 'ok'}`}><span>Credit reports</span><strong>{health.reportsDemoMode ? 'Demo mode' : 'Live bureaus'}</strong><small>{health.bureauConfig.filter((item) => item.configured).length} of {health.bureauConfig.length} bureaus configured</small></article>
+              <article className={`dashboard-card admin-health-card ${health.emailConfigured ? 'ok' : 'bad'}`}><span>Email delivery</span><strong>{health.emailConfigured ? 'Configured' : 'Not configured'}</strong><small>{health.emailConfigured ? 'OTP and notification emails can be sent' : 'Email OTPs will fail'}</small></article>
+              <article className="dashboard-card admin-health-card info"><span>API server</span><strong>{health.environment}</strong><small>Up for {formatAdminUptime(health.uptimeSeconds)}</small></article>
+            </div>
+            <div className="admin-stat-grid">
+              <article className="dashboard-card admin-stat"><BadgeIndianRupee /><span>Paid payments (24h)</span><strong>{health.recent.paidPayments24h}</strong><small>Last payment {formatAdminTimestamp(health.recent.lastPayment)}</small></article>
+              <article className="dashboard-card admin-stat"><AlertTriangle /><span>Failed payments (24h)</span><strong>{health.recent.failedPayments24h}</strong></article>
+              <article className="dashboard-card admin-stat"><FileCheck2 /><span>Reports delivered (24h)</span><strong>{health.recent.completedReports24h}</strong></article>
+              <article className="dashboard-card admin-stat"><FileSearch /><span>Report failures (24h)</span><strong>{health.recent.failedReports24h}</strong><small>Last signup {formatAdminTimestamp(health.recent.lastSignup)}</small></article>
+            </div>
+            <article className="dashboard-card admin-activity-card">
+              <div className="dashboard-card-heading"><strong>Bureau integrations</strong><small>Customer report fetches, last 7 days</small></div>
+              <div className="admin-table-wrap"><table className="admin-activity-table"><thead><tr><th>Bureau</th><th>Configured</th><th>Delivered (7d)</th><th>Failed (7d)</th><th>Success rate</th><th>Last success</th><th>Last failure</th></tr></thead><tbody>
+                {health.bureauConfig.map((config) => { const stats = health.bureaus.find((item) => item.bureau === config.bureau); const total = (stats?.successes_7d || 0) + (stats?.failures_7d || 0); return <tr key={config.bureau}><td><strong>{config.name}</strong></td><td><span className={`admin-status ${config.configured ? 'completed' : 'failed'}`}>{config.configured ? 'yes' : 'no'}</span></td><td>{stats?.successes_7d ?? 0}</td><td>{stats?.failures_7d ?? 0}</td><td>{total ? `${Math.round(((stats?.successes_7d || 0) / total) * 100)}%` : '—'}</td><td>{formatAdminTimestamp(stats?.last_success ?? null)}</td><td>{formatAdminTimestamp(stats?.last_failure ?? null)}{stats?.last_failure_reason && <small className="admin-activity-error" title={stats.last_failure_reason}>{stats.last_failure_reason}</small>}</td></tr> })}
+              </tbody></table></div>
+            </article>
+          </>}
+        </> : activeSection === 'audit' ? <>
+          <div className="admin-heading"><span>COMPLIANCE</span><h1>Audit log</h1><p>Every sign-in and sensitive admin action, with who did it, when, and from which IP address.</p></div>
+          <div className="admin-filter-bar">
+            <label>Action<select value={auditAction} onChange={(event) => { setSectionLoading(true); setAuditPage(1); setAuditAction(event.target.value) }}><option value="">All actions</option>{(auditLog?.actions ?? []).map((action) => <option key={action} value={action}>{adminAuditLabels[action] ?? action}</option>)}</select></label>
+            <form className="admin-inline-form" onSubmit={(event) => { event.preventDefault(); const value = String(new FormData(event.currentTarget).get('admin') || '').trim(); if (value !== auditAdminFilter) { setSectionLoading(true); setAuditPage(1); setAuditAdminFilter(value) } }}><label>Admin<input name="admin" defaultValue={auditAdminFilter} placeholder="Email contains…" /></label><button className="button button-outline admin-small-button" type="submit"><Search /> Apply</button></form>
+          </div>
+          <article className="dashboard-card admin-activity-card">
+            <div className="dashboard-card-heading"><strong>Admin activity</strong><small>{auditLog ? `${auditLog.pagination.total.toLocaleString('en-IN')} entries` : ''}</small></div>
+            {auditLog?.entries.length ? <div className="admin-table-wrap"><table className="admin-activity-table"><thead><tr><th>When</th><th>Admin</th><th>Action</th><th>Target</th><th>Details</th><th>IP address</th></tr></thead><tbody>
+              {auditLog.entries.map((entry) => <tr key={entry.id}><td>{formatAdminTimestamp(entry.created_at)}</td><td>{entry.admin_id}</td><td><span className={`admin-status ${entry.action === 'login_failed' || entry.action === 'customer_blocked' || entry.action === 'admin_disabled' ? 'failed' : entry.action.startsWith('log') ? 'pending' : 'completed'}`}>{adminAuditLabels[entry.action] ?? entry.action}</span></td><td>{entry.target_type === 'customer' && entry.target_id && canManageCustomers ? <button type="button" className="admin-link-button" onClick={() => openCustomerDetail(entry.target_id!)}>View customer</button> : entry.target_type ? <small>{entry.target_type}{entry.target_id ? ` · ${entry.target_id.slice(0, 18)}` : ''}</small> : '—'}</td><td><small className="admin-audit-details">{adminAuditDetails(entry.details) || '—'}</small></td><td>{entry.ip_address || '—'}</td></tr>)}
+            </tbody></table></div> : <p className="admin-activity-empty">{auditLog ? 'No audit entries match these filters.' : ''}</p>}
+          </article>
+          {auditLog && auditTotalPages > 1 && <nav className="admin-activity-pagination" aria-label="Audit pages"><button className="button button-outline" type="button" disabled={auditPage <= 1 || sectionLoading} onClick={() => { setSectionLoading(true); setAuditPage((page) => page - 1) }}><ArrowLeft /> Previous</button><span>Page {auditPage} of {auditTotalPages}</span><button className="button button-outline" type="button" disabled={auditPage >= auditTotalPages || sectionLoading} onClick={() => { setSectionLoading(true); setAuditPage((page) => page + 1) }}>Next <ArrowRight /></button></nav>}
         </> : <>
           <div className="admin-heading"><span>ACCESS CONTROL</span><h1>Manage admins</h1><p>Invite trusted teammates with role-based access. Invitations expire after 48 hours and each admin chooses a private password and PIN.</p></div>
           <article className="dashboard-card admin-management-card">
@@ -4186,7 +4623,52 @@ function AdminPage() {
             </tbody></table></div>
           </article>
         </>}
-      </div></div>}
+      </div>
+        {customerDetailId && <div className="admin-drawer-backdrop" onClick={() => setCustomerDetailId('')}>
+          <aside className="admin-drawer" role="dialog" aria-modal="true" aria-label="Customer details" onClick={(event) => event.stopPropagation()}>
+            <header><div><span>CUSTOMER</span><h2>{customerDetail?.customer.full_name ?? 'Loading…'}</h2>{customerDetail && <small>Joined {formatAdminTimestamp(customerDetail.customer.created_at)}</small>}</div><button type="button" className="admin-icon-button" aria-label="Close customer details" onClick={() => setCustomerDetailId('')}><X /></button></header>
+            {customerDetailError ? <p className="dashboard-notice error" role="alert">{customerDetailError}</p> : !customerDetail ? <p className="admin-activity-empty"><Spinner size={16} /> Loading customer…</p> : <>
+              <dl className="admin-detail-grid">
+                <div><dt>Mobile</dt><dd>{customerDetail.customer.mobile}{customerDetail.customer.mobile_verified && <span className="admin-verified">verified</span>}</dd></div>
+                <div><dt>Email</dt><dd>{customerDetail.customer.email || '—'}{customerDetail.customer.email && customerDetail.customer.email_verified && <span className="admin-verified">verified</span>}</dd></div>
+                <div><dt>Account</dt><dd><span className={`admin-status ${customerDetail.customer.status === 'active' ? 'completed' : 'failed'}`}>{customerDetail.customer.status}</span></dd></div>
+                <div><dt>PAN</dt><dd>{customerDetail.customer.pan_last4 ? `••••••${customerDetail.customer.pan_last4}` : 'Not provided'}</dd></div>
+                <div><dt>Profile</dt><dd>{customerDetail.customer.profile_complete ? `Complete · KYC ${customerDetail.customer.kyc_status || 'not started'}` : 'Incomplete'}</dd></div>
+                <div><dt>Location</dt><dd>{[customerDetail.customer.city, customerDetail.customer.state].filter(Boolean).join(', ') || '—'}</dd></div>
+              </dl>
+              <div className="admin-drawer-actions">
+                {canManageCustomers && <button className={`button button-outline${customerDetail.customer.status === 'blocked' ? '' : ' danger'}`} type="button" onClick={() => setStatusDialog({ id: customerDetail.customer.id, name: customerDetail.customer.full_name, status: customerDetail.customer.status })}>{customerDetail.customer.status === 'blocked' ? 'Enable account' : 'Block account'}</button>}
+                <button className="button button-outline" type="button" onClick={() => setFollowUpTarget({ id: customerDetail.customer.id, name: customerDetail.customer.full_name, stage: '' })}><MessageCircle /> Create follow-up</button>
+                {!customerDetail.customer.mobile.includes('•') && <a className="button button-outline" href={`tel:+91${customerDetail.customer.mobile}`}><Phone /> Call</a>}
+              </div>
+              <section><h3>Report requests <small>{customerDetail.reports.length}</small></h3>{customerDetail.reports.length ? <table className="admin-activity-table admin-drawer-table"><thead><tr><th>Date</th><th>Bureau</th><th>Status</th><th>Score</th><th /></tr></thead><tbody>
+                {customerDetail.reports.map((item) => <tr key={item.id}><td>{formatAdminTimestamp(item.requested_at)}</td><td>{adminBureauName(item.bureau)}{!item.is_paid && <small>demo</small>}</td><td><span className={`admin-status ${item.status}`}>{item.status}</span>{item.failure_reason && <small className="admin-activity-error" title={item.failure_reason}>{item.failure_reason}</small>}</td><td>{item.credit_score ?? '—'}</td><td>{canManageCustomers && item.is_paid && item.status === 'failed' && <button className="button button-outline admin-small-button" type="button" disabled={retryingId === item.id} onClick={() => void retryReportRequest(item.id)}><RotateCcw /> {retryingId === item.id ? 'Retrying…' : 'Retry'}</button>}</td></tr>)}
+              </tbody></table> : <p className="admin-muted">No report requests.</p>}</section>
+              <section><h3>Payments <small>{customerDetail.payments.length}</small></h3>{customerDetail.payments.length ? <table className="admin-activity-table admin-drawer-table"><thead><tr><th>Date</th><th>Bureau</th><th>Amount</th><th>Status</th></tr></thead><tbody>
+                {customerDetail.payments.map((item) => <tr key={item.id}><td>{formatAdminTimestamp(item.paid_at ?? item.created_at)}</td><td>{adminBureauName(item.bureau)}</td><td>{formatMoney(Number(item.amount))}<small>{item.gateway}</small></td><td><span className={`admin-status ${item.status === 'paid' ? 'paid' : item.failure_reason ? 'failed' : 'pending'}`}>{item.status === 'created' ? (item.failure_reason ? 'failed attempt' : 'pending') : item.status}</span>{item.failure_reason && <small className="admin-activity-error">{item.failure_reason}</small>}</td></tr>)}
+              </tbody></table> : <p className="admin-muted">No payments.</p>}</section>
+              <section><h3>Support tickets <small>{customerDetail.tickets.length}</small></h3>{customerDetail.tickets.length ? <ul className="admin-drawer-list">{customerDetail.tickets.map((ticket) => <li key={ticket.id}><div><strong>{ticket.subject}</strong><small>{formatAdminTimestamp(ticket.created_at)} · {ticket.priority}</small></div><span className={`admin-status ${ticket.status === 'resolved' || ticket.status === 'closed' ? 'completed' : 'pending'}`}>{ticket.status.replace('_', ' ')}</span></li>)}</ul> : <p className="admin-muted">No tickets.</p>}</section>
+              <section><h3>Recent sign-ins <small>{customerDetail.sessions.length}</small></h3>{customerDetail.sessions.length ? <ul className="admin-drawer-list">{customerDetail.sessions.map((session) => <li key={session.created_at}><div><strong>{formatAdminTimestamp(session.created_at)}</strong><small title={session.user_agent || ''}>{[session.ip_address, session.user_agent?.split(')')[0]?.replace('(', '').slice(0, 60)].filter(Boolean).join(' · ') || 'Device unknown'}</small></div><span className={`admin-status ${session.revoked_at || new Date(session.expires_at) < new Date() ? 'pending' : 'completed'}`}>{session.revoked_at ? 'signed out' : new Date(session.expires_at) < new Date() ? 'expired' : 'active'}</span></li>)}</ul> : <p className="admin-muted">Never signed in.</p>}</section>
+              {customerDetail.adminActions.length > 0 && <section><h3>Admin actions <small>{customerDetail.adminActions.length}</small></h3><ul className="admin-drawer-list">{customerDetail.adminActions.map((action, index) => <li key={`${action.created_at}-${index}`}><div><strong>{adminAuditLabels[action.action] ?? action.action}</strong><small>{action.admin_id} · {formatAdminTimestamp(action.created_at)}{adminAuditDetails(action.details) ? ` · ${adminAuditDetails(action.details)}` : ''}</small></div></li>)}</ul></section>}
+            </>}
+          </aside>
+        </div>}
+        {(statusDialog || followUpTarget) && <div className="admin-dialog-backdrop" onClick={closeDialogs}>
+          {statusDialog ? <form className="admin-dialog" role="dialog" aria-modal="true" aria-labelledby="admin-status-dialog-title" onClick={(event) => event.stopPropagation()} onSubmit={(event) => void submitCustomerStatus(event)}>
+            <h2 id="admin-status-dialog-title">{statusDialog.status === 'blocked' ? 'Enable' : 'Block'} {statusDialog.name}?</h2>
+            <p>{statusDialog.status === 'blocked' ? 'The customer will be able to sign in and use Scorenow again.' : 'The customer will be signed out and unable to sign in until an admin enables the account.'}</p>
+            <label>{statusDialog.status === 'blocked' ? 'Note (optional)' : 'Reason (required, saved in the audit log)'}<textarea name="reason" rows={3} maxLength={500} required={statusDialog.status !== 'blocked'} minLength={statusDialog.status !== 'blocked' ? 3 : undefined} autoFocus /></label>
+            {dialogError && <p className="dashboard-notice error" role="alert">{dialogError}</p>}
+            <div className="admin-dialog-actions"><button className="button button-outline" type="button" onClick={closeDialogs}>Cancel</button><button className={`button button-primary${statusDialog.status === 'blocked' ? '' : ' danger'}`} type="submit" disabled={dialogBusy}>{dialogBusy ? 'Saving…' : statusDialog.status === 'blocked' ? 'Enable account' : 'Block account'}</button></div>
+          </form> : followUpTarget && <form className="admin-dialog" role="dialog" aria-modal="true" aria-labelledby="admin-follow-dialog-title" onClick={(event) => event.stopPropagation()} onSubmit={(event) => void submitFollowUp(event)}>
+            <h2 id="admin-follow-dialog-title">Follow up with {followUpTarget.name}</h2>
+            <p>Creates a ticket in Helpline tickets{followUpTarget.stage ? ` for a customer at “${followUpTarget.stage}”` : ''}. The customer can see and reply to it from their dashboard.</p>
+            <label>Message to the customer<textarea name="note" rows={4} maxLength={2000} minLength={3} required autoFocus defaultValue={followUpTarget.stage === 'Profile complete' || followUpTarget.stage === 'Signed in' ? 'Hi, we noticed you haven’t requested your credit report yet. Can we help you get started?' : followUpTarget.stage === 'Payment started' ? 'Hi, it looks like your payment didn’t go through. Would you like help completing it?' : followUpTarget.stage === 'Payment complete' ? 'Hi, your payment is confirmed but your report isn’t ready yet. We’re looking into it.' : ''} /></label>
+            {dialogError && <p className="dashboard-notice error" role="alert">{dialogError}</p>}
+            <div className="admin-dialog-actions"><button className="button button-outline" type="button" onClick={closeDialogs}>Cancel</button><button className="button button-primary" type="submit" disabled={dialogBusy}>{dialogBusy ? 'Creating…' : 'Create follow-up'}</button></div>
+          </form>}
+        </div>}
+      </div>}
     </main>
   )
 }

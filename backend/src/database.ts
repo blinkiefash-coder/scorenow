@@ -158,7 +158,25 @@ export const initializeDatabase = async () => {
     )
   `);
   await pool.query(`CREATE INDEX IF NOT EXISTS support_ticket_comments_ticket_idx ON support_ticket_comments (ticket_id, created_at)`);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS admin_audit_log (
+      id BIGSERIAL PRIMARY KEY,
+      admin_id TEXT NOT NULL,
+      action TEXT NOT NULL,
+      target_type TEXT,
+      target_id TEXT,
+      details JSONB,
+      ip_address TEXT,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+  await pool.query(`CREATE INDEX IF NOT EXISTS admin_audit_log_created_idx ON admin_audit_log (created_at DESC)`);
 };
+
+// Customers often keep the placeholder account name; prefer the name on their PAN profile when present.
+const CUSTOMER_DISPLAY_NAME = `CASE WHEN (u.full_name IS NULL OR TRIM(u.full_name) = '' OR u.full_name ILIKE 'score now user')
+  THEN COALESCE(NULLIF(TRIM(k.name_as_per_pan), ''), NULLIF(u.email, ''), 'Customer') ELSE u.full_name END`;
 
 const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 
@@ -387,10 +405,53 @@ export const getAdminReportDocument = async (auditId: number) => {
   } : null;
 };
 
-export const getAdminActivity = async (requestedPage = 1) => {
+export type AdminActivityFilters = {
+  q?: string; paymentStatus?: string; reportStatus?: string; bureau?: string; from?: string; to?: string;
+};
+
+const activityPaymentFilter = (filters: AdminActivityFilters) => {
+  const clauses: string[] = [];
+  const values: unknown[] = [];
+  const add = (sql: (index: number) => string, value: unknown) => { values.push(value); clauses.push(sql(values.length)); };
+  if (filters.q?.trim()) add((i) => `(${CUSTOMER_DISPLAY_NAME} ILIKE $${i} OR u.mobile ILIKE $${i} OR COALESCE(u.email, '') ILIKE $${i})`, `%${filters.q.trim()}%`);
+  if (filters.paymentStatus === "paid") clauses.push(`p.status = 'paid'`);
+  if (filters.paymentStatus === "failed") clauses.push(`(p.status = 'failed' OR (p.status = 'created' AND p.failure_reason IS NOT NULL))`);
+  if (filters.paymentStatus === "pending") clauses.push(`(p.status = 'created' AND p.failure_reason IS NULL)`);
+  if (filters.reportStatus === "none") clauses.push(`r.id IS NULL`);
+  else if (["completed", "failed", "processing"].includes(filters.reportStatus || "")) add((i) => `r.status = $${i}`, filters.reportStatus);
+  if (filters.bureau && /^[a-z]+$/.test(filters.bureau)) add((i) => `p.report_bureau = $${i}`, filters.bureau);
+  if (filters.from && /^\d{4}-\d{2}-\d{2}$/.test(filters.from)) add((i) => `p.created_at >= $${i}::date`, filters.from);
+  if (filters.to && /^\d{4}-\d{2}-\d{2}$/.test(filters.to)) add((i) => `p.created_at < $${i}::date + INTERVAL '1 day'`, filters.to);
+  return { where: clauses.length ? clauses.join(" AND ") : "TRUE", values };
+};
+
+const ACTIVITY_PAYMENT_FROM = `FROM payments p
+      JOIN users u ON u.id = p.user_id
+      LEFT JOIN kyc_profiles k ON k.user_id = u.id
+      LEFT JOIN credit_report_requests r ON r.payment_id = p.id`;
+
+export const exportAdminActivity = async (filters: AdminActivityFilters) => {
+  const { where, values } = activityPaymentFilter(filters);
+  const { rows } = await pool.query<{
+    payment_id: string; customer: string; mobile_last4: string; bureau: string | null; payment_status: string;
+    gateway: string; amount: string; report_status: string | null; failure_reason: string | null; created_at: string;
+  }>(
+    `SELECT p.id AS payment_id, ${CUSTOMER_DISPLAY_NAME} AS customer, RIGHT(u.mobile, 4) AS mobile_last4, p.report_bureau AS bureau,
+            p.status AS payment_status, p.gateway, (p.amount + p.gst_amount)::text AS amount, r.status AS report_status,
+            COALESCE(r.failure_reason, p.failure_reason) AS failure_reason, p.created_at
+     ${ACTIVITY_PAYMENT_FROM}
+     WHERE ${where}
+     ORDER BY p.created_at DESC LIMIT 5000`,
+    values,
+  );
+  return rows;
+};
+
+export const getAdminActivity = async (requestedPage = 1, filters: AdminActivityFilters = {}) => {
+  const paymentFilter = activityPaymentFilter(filters);
   const pageSize = 50;
   const page = Math.max(1, Math.floor(requestedPage));
-  const [summaryResult, paymentResult, reportResult] = await Promise.all([
+  const [summaryResult, paymentResult, filteredCount, reportResult] = await Promise.all([
     pool.query<{
       total_users: string;
       paid_payments: string;
@@ -424,18 +485,19 @@ export const getAdminActivity = async (requestedPage = 1) => {
       created_at: string;
       paid_at: string | null;
       failure_at: string | null;
+      report_request_id: string | null;
       report_status: string | null;
       report_failure_reason: string | null;
     }>(`
-      SELECT p.id, u.full_name, RIGHT(u.mobile, 4) AS mobile_last4, p.report_bureau AS bureau,
+      SELECT p.id, ${CUSTOMER_DISPLAY_NAME} AS full_name, RIGHT(u.mobile, 4) AS mobile_last4, p.report_bureau AS bureau,
              p.amount, p.gst_amount, p.gateway, p.status, p.failure_reason, p.created_at, p.paid_at, p.failure_at,
-             r.status AS report_status, r.failure_reason AS report_failure_reason
-      FROM payments p
-      JOIN users u ON u.id = p.user_id
-      LEFT JOIN credit_report_requests r ON r.payment_id = p.id
+             r.id AS report_request_id, r.status AS report_status, r.failure_reason AS report_failure_reason
+      ${ACTIVITY_PAYMENT_FROM}
+      WHERE ${paymentFilter.where}
       ORDER BY p.created_at DESC
-      LIMIT $1 OFFSET $2
-    `, [pageSize, (page - 1) * pageSize]),
+      LIMIT $${paymentFilter.values.length + 1} OFFSET $${paymentFilter.values.length + 2}
+    `, [...paymentFilter.values, pageSize, (page - 1) * pageSize]),
+    pool.query<{ count: string }>(`SELECT COUNT(*) AS count ${ACTIVITY_PAYMENT_FROM} WHERE ${paymentFilter.where}`, paymentFilter.values),
     pool.query<{
       id: string;
       full_name: string | null;
@@ -472,13 +534,13 @@ export const getAdminActivity = async (requestedPage = 1) => {
     pagination: {
       page,
       pageSize,
-      totalPayments: Number(summary.total_payments),
+      totalPayments: Number(filteredCount.rows[0]?.count ?? 0),
       totalAdminReports: Number(summary.total_admin_reports),
     },
   };
 };
 
-export const getAdminCustomers = async (search: string, requestedPage = 1) => {
+export const getAdminCustomers = async (search: string, requestedPage = 1, maskContact = false) => {
   const pageSize = 50;
   const page = Math.max(1, Math.floor(requestedPage));
   const normalizedSearch = search.trim();
@@ -488,7 +550,7 @@ export const getAdminCustomers = async (search: string, requestedPage = 1) => {
   const panHash = panSearch ? createHash("sha256").update(panSearch).digest("hex") : null;
   const pattern = `%${normalizedSearch}%`;
   const filter = normalizedSearch
-    ? `(u.full_name ILIKE $1 OR u.mobile ILIKE $2 OR COALESCE(u.email, '') ILIKE $1
+    ? `(${CUSTOMER_DISPLAY_NAME} ILIKE $1 OR u.mobile ILIKE $2 OR COALESCE(u.email, '') ILIKE $1
         OR ($3::text IS NOT NULL AND k.pan_hash = $3))`
     : "TRUE";
   const values = normalizedSearch ? [pattern, pattern, panHash] : [];
@@ -497,9 +559,10 @@ export const getAdminCustomers = async (search: string, requestedPage = 1) => {
       id: string; full_name: string; mobile: string; email: string | null; status: string;
       created_at: string; pan_last4: string | null; kyc_status: string | null;
       total_payments: string; paid_payments: string; latest_report_status: string | null;
-      last_login: string | null; journey_stage: string;
+      last_login: string | null; journey_stage: string; profile_complete: boolean;
     }>(
-      `SELECT u.id, u.full_name, u.mobile, u.email, u.status, u.created_at, k.pan_last4, k.kyc_status,
+      `SELECT u.id, ${CUSTOMER_DISPLAY_NAME} AS full_name, u.mobile, u.email, u.status, u.created_at, k.pan_last4, k.kyc_status,
+              (k.user_id IS NOT NULL) AS profile_complete,
               COUNT(DISTINCT p.id) AS total_payments,
               COUNT(DISTINCT p.id) FILTER (WHERE p.status = 'paid') AS paid_payments,
               (SELECT r.status FROM credit_report_requests r WHERE r.user_id = u.id AND r.payment_id IS NOT NULL
@@ -517,7 +580,7 @@ export const getAdminCustomers = async (search: string, requestedPage = 1) => {
        LEFT JOIN kyc_profiles k ON k.user_id = u.id
        LEFT JOIN payments p ON p.user_id = u.id
        WHERE ${filter}
-       GROUP BY u.id, k.user_id, k.pan_last4, k.kyc_status
+       GROUP BY u.id, k.user_id, k.pan_last4, k.kyc_status, k.name_as_per_pan
        ORDER BY u.created_at DESC
        LIMIT $${normalizedSearch ? "4" : "1"} OFFSET $${normalizedSearch ? "5" : "2"}`,
       normalizedSearch ? [...values, pageSize, (page - 1) * pageSize] : [pageSize, (page - 1) * pageSize],
@@ -546,14 +609,15 @@ export const getAdminCustomers = async (search: string, requestedPage = 1) => {
       }[] }),
   ]);
   return {
-    customers: customers.rows,
+    customers: maskContact ? customers.rows.map((row) => ({ ...row, mobile: maskMobile(row.mobile), email: maskEmail(row.email) })) : customers.rows,
     manualChecks: manualChecks.rows,
     pagination: { page, pageSize, total: Number(count.rows[0]?.count ?? 0) },
   };
 };
 
-export const getAdminAnalytics = async () => {
-  const [summary, trend, funnel] = await Promise.all([
+export const getAdminAnalytics = async (requestedDays = 14) => {
+  const days = [7, 14, 30, 90].includes(requestedDays) ? requestedDays : 14;
+  const [summary, trend, funnel, bureaus] = await Promise.all([
     pool.query<{
       total_users: string; active_users: string; verified_profiles: string; total_payments: string;
       paid_payments: string; revenue: string; failed_payments: string; report_requests: string;
@@ -576,17 +640,22 @@ export const getAdminAnalytics = async () => {
     `),
     pool.query<{
       day: string; signups: string; paid_orders: string; revenue: string; failed_attempts: string;
+      reports_completed: string; reports_failed: string;
     }>(`
       WITH days AS (
-        SELECT generate_series(CURRENT_DATE - INTERVAL '13 days', CURRENT_DATE, INTERVAL '1 day')::date AS day
+        SELECT generate_series(CURRENT_DATE - ($1::int - 1) * INTERVAL '1 day', CURRENT_DATE, INTERVAL '1 day')::date AS day
       )
       SELECT to_char(days.day, 'YYYY-MM-DD') AS day,
         (SELECT COUNT(*) FROM users u WHERE u.created_at >= days.day AND u.created_at < days.day + INTERVAL '1 day' AND u.role = 'customer') AS signups,
         (SELECT COUNT(*) FROM payments p WHERE p.paid_at >= days.day AND p.paid_at < days.day + INTERVAL '1 day') AS paid_orders,
         (SELECT COALESCE(SUM(p.amount + p.gst_amount), 0) FROM payments p WHERE p.paid_at >= days.day AND p.paid_at < days.day + INTERVAL '1 day') AS revenue,
-        (SELECT COUNT(*) FROM payments p WHERE p.failure_at >= days.day AND p.failure_at < days.day + INTERVAL '1 day') AS failed_attempts
+        (SELECT COUNT(*) FROM payments p WHERE p.failure_at >= days.day AND p.failure_at < days.day + INTERVAL '1 day') AS failed_attempts,
+        (SELECT COUNT(*) FROM credit_report_requests r WHERE r.payment_id IS NOT NULL AND r.status = 'completed'
+          AND COALESCE(r.completed_at, r.requested_at) >= days.day AND COALESCE(r.completed_at, r.requested_at) < days.day + INTERVAL '1 day') AS reports_completed,
+        (SELECT COUNT(*) FROM credit_report_requests r WHERE r.payment_id IS NOT NULL AND r.status = 'failed'
+          AND r.requested_at >= days.day AND r.requested_at < days.day + INTERVAL '1 day') AS reports_failed
       FROM days ORDER BY days.day
-    `),
+    `, [days]),
     pool.query<{ signed_up: string; profile_complete: string; payment_started: string; payment_paid: string; report_ready: string }>(`
       SELECT
         COUNT(DISTINCT u.id) AS signed_up,
@@ -600,6 +669,17 @@ export const getAdminAnalytics = async () => {
       LEFT JOIN (SELECT DISTINCT user_id, status FROM credit_report_requests WHERE payment_id IS NOT NULL) r ON r.user_id = u.id
       WHERE u.role = 'customer'
     `),
+    pool.query<{ bureau: string; paid_orders: string; revenue: string; completed: string; failed: string }>(`
+      SELECT p.report_bureau AS bureau,
+        COUNT(*) FILTER (WHERE p.status = 'paid') AS paid_orders,
+        COALESCE(SUM(p.amount + p.gst_amount) FILTER (WHERE p.status = 'paid'), 0) AS revenue,
+        COUNT(r.id) FILTER (WHERE r.status = 'completed') AS completed,
+        COUNT(r.id) FILTER (WHERE r.status = 'failed') AS failed
+      FROM payments p
+      LEFT JOIN credit_report_requests r ON r.payment_id = p.id
+      WHERE p.report_bureau IS NOT NULL AND p.created_at >= CURRENT_DATE - ($1::int - 1) * INTERVAL '1 day'
+      GROUP BY p.report_bureau ORDER BY paid_orders DESC
+    `, [days]),
   ]);
   const counts = summary.rows[0];
   const steps = funnel.rows[0];
@@ -611,6 +691,16 @@ export const getAdminAnalytics = async () => {
       paid_orders: Number(row.paid_orders),
       revenue: Number(row.revenue),
       failed_attempts: Number(row.failed_attempts),
+      reports_completed: Number(row.reports_completed),
+      reports_failed: Number(row.reports_failed),
+    })),
+    days,
+    bureaus: bureaus.rows.map((row) => ({
+      bureau: row.bureau,
+      paid_orders: Number(row.paid_orders),
+      revenue: Number(row.revenue),
+      completed: Number(row.completed),
+      failed: Number(row.failed),
     })),
     funnel: [
       { step: "Account created", count: Number(steps.signed_up) },
@@ -1458,4 +1548,183 @@ export const saveWebsiteInquiry = async ({
   } finally {
     client.release();
   }
+};
+
+export const maskMobile = (mobile: string | null) => mobile ? `••••••${mobile.slice(-4)}` : mobile;
+export const maskEmail = (email: string | null) => {
+  if (!email) return email;
+  const [user, domain] = email.split("@");
+  return domain ? `${user.slice(0, 2)}•••@${domain}` : "•••";
+};
+
+export const recordAdminAudit = async ({
+  adminId, action, targetType = null, targetId = null, details = null, ipAddress = null,
+}: {
+  adminId: string; action: string; targetType?: string | null; targetId?: string | null;
+  details?: Record<string, unknown> | null; ipAddress?: string | null;
+}) => {
+  await pool.query(
+    `INSERT INTO admin_audit_log (admin_id, action, target_type, target_id, details, ip_address) VALUES ($1, $2, $3, $4, $5, $6)`,
+    [adminId, action, targetType, targetId, details ? JSON.stringify(details) : null, ipAddress],
+  );
+};
+
+export const listAdminAudit = async ({ page = 1, action = "", adminId = "" }: { page?: number; action?: string; adminId?: string }) => {
+  const pageSize = 50;
+  const safePage = Math.max(1, Math.floor(page));
+  const values = [action || null, adminId ? `%${adminId}%` : null];
+  const where = `($1::text IS NULL OR action = $1) AND ($2::text IS NULL OR admin_id ILIKE $2)`;
+  const [rows, count, actions] = await Promise.all([
+    pool.query<{
+      id: string; admin_id: string; action: string; target_type: string | null; target_id: string | null;
+      details: Record<string, unknown> | null; ip_address: string | null; created_at: string;
+    }>(
+      `SELECT id, admin_id, action, target_type, target_id, details, ip_address, created_at FROM admin_audit_log
+       WHERE ${where} ORDER BY created_at DESC LIMIT $3 OFFSET $4`,
+      [...values, pageSize, (safePage - 1) * pageSize],
+    ),
+    pool.query<{ count: string }>(`SELECT COUNT(*) AS count FROM admin_audit_log WHERE ${where}`, values),
+    pool.query<{ action: string }>(`SELECT DISTINCT action FROM admin_audit_log ORDER BY action`),
+  ]);
+  return {
+    entries: rows.rows,
+    actions: actions.rows.map((row) => row.action),
+    pagination: { page: safePage, pageSize, total: Number(count.rows[0]?.count ?? 0) },
+  };
+};
+
+export const getAdminCustomerDetail = async (userId: string, maskContact = false) => {
+  const { rows } = await pool.query<{
+    id: string; full_name: string; account_name: string; mobile: string; email: string | null; status: string;
+    created_at: string; mobile_verified: boolean; email_verified: boolean; pan_last4: string | null; kyc_status: string | null;
+    city: string | null; state: string | null; profile_complete: boolean; profile_updated_at: string | null;
+  }>(
+    `SELECT u.id, ${CUSTOMER_DISPLAY_NAME} AS full_name, u.full_name AS account_name, u.mobile, u.email, u.status, u.created_at,
+            u.mobile_verified, u.email_verified, k.pan_last4, k.kyc_status, k.city, k.state,
+            (k.user_id IS NOT NULL) AS profile_complete, k.updated_at AS profile_updated_at
+     FROM users u LEFT JOIN kyc_profiles k ON k.user_id = u.id WHERE u.id = $1`,
+    [userId],
+  );
+  const customer = rows[0];
+  if (!customer) return null;
+  const [payments, reports, tickets, sessions, audit] = await Promise.all([
+    pool.query<{ id: string; bureau: string | null; amount: string; status: string; gateway: string; failure_reason: string | null; created_at: string; paid_at: string | null }>(
+      `SELECT id, report_bureau AS bureau, (amount + gst_amount)::text AS amount, status, gateway, failure_reason, created_at, paid_at
+       FROM payments WHERE user_id = $1 ORDER BY created_at DESC LIMIT 50`, [userId]),
+    pool.query<{ id: string; bureau: string; status: string; failure_reason: string | null; requested_at: string; completed_at: string | null; credit_score: number | null; is_paid: boolean }>(
+      `SELECT r.id, r.bureau, r.status, r.failure_reason, r.requested_at, r.completed_at, c.credit_score, (r.payment_id IS NOT NULL) AS is_paid
+       FROM credit_report_requests r LEFT JOIN credit_reports c ON c.request_id = r.id
+       WHERE r.user_id = $1 ORDER BY r.requested_at DESC LIMIT 50`, [userId]),
+    pool.query<{ id: string; subject: string; status: string; priority: string; created_at: string }>(
+      `SELECT id, subject, status, priority, created_at FROM support_tickets WHERE user_id = $1 ORDER BY created_at DESC LIMIT 20`, [userId]),
+    pool.query<{ created_at: string; expires_at: string; revoked_at: string | null; ip_address: string | null; user_agent: string | null }>(
+      `SELECT created_at, expires_at, revoked_at, host(ip_address) AS ip_address, LEFT(user_agent, 120) AS user_agent
+       FROM user_sessions WHERE user_id = $1 ORDER BY created_at DESC LIMIT 10`, [userId]),
+    pool.query<{ admin_id: string; action: string; details: Record<string, unknown> | null; created_at: string }>(
+      `SELECT admin_id, action, details, created_at FROM admin_audit_log
+       WHERE target_type = 'customer' AND target_id = $1 ORDER BY created_at DESC LIMIT 20`, [userId]),
+  ]);
+  return {
+    customer: maskContact ? { ...customer, mobile: maskMobile(customer.mobile)!, email: maskEmail(customer.email) } : customer,
+    payments: payments.rows,
+    reports: reports.rows,
+    tickets: tickets.rows,
+    sessions: maskContact ? sessions.rows.map((row) => ({ ...row, ip_address: null })) : sessions.rows,
+    adminActions: audit.rows,
+  };
+};
+
+export const findCustomerForFollowUp = async (userId: string) => {
+  const { rows } = await pool.query<{ id: string; full_name: string; mobile: string }>(
+    `SELECT u.id, ${CUSTOMER_DISPLAY_NAME} AS full_name, u.mobile FROM users u LEFT JOIN kyc_profiles k ON k.user_id = u.id WHERE u.id = $1`,
+    [userId],
+  );
+  return rows[0] ?? null;
+};
+
+// Paid report requests that failed, or have been stuck in processing, can be retried by an admin.
+export const findAdminRetryableReport = async (requestId: string) => {
+  const { rows } = await pool.query<{ id: string; user_id: string; bureau: Bureau; status: string }>(
+    `SELECT id, user_id, bureau, status FROM credit_report_requests
+     WHERE id::text = $1 AND payment_id IS NOT NULL
+       AND (status = 'failed' OR (status = 'processing' AND requested_at < NOW() - INTERVAL '15 minutes'))`,
+    [requestId],
+  );
+  return rows[0] ?? null;
+};
+
+export const getAdminAttention = async () => {
+  const { rows } = await pool.query<{
+    failed_reports: string; stuck_reports: string; stuck_payments: string; open_tickets: string; unassigned_tickets: string; failed_admin_checks: string;
+  }>(`
+    SELECT
+      (SELECT COUNT(*) FROM credit_report_requests WHERE payment_id IS NOT NULL AND status = 'failed') AS failed_reports,
+      (SELECT COUNT(*) FROM credit_report_requests WHERE payment_id IS NOT NULL AND status = 'processing' AND requested_at < NOW() - INTERVAL '15 minutes') AS stuck_reports,
+      (SELECT COUNT(*) FROM payments WHERE status = 'created' AND failure_reason IS NULL AND created_at < NOW() - INTERVAL '30 minutes') AS stuck_payments,
+      (SELECT COUNT(*) FROM support_tickets WHERE user_id IS NOT NULL AND status IN ('open', 'in_progress')) AS open_tickets,
+      (SELECT COUNT(*) FROM support_tickets WHERE user_id IS NOT NULL AND status IN ('open', 'in_progress') AND assigned_to IS NULL) AS unassigned_tickets,
+      (SELECT COUNT(*) FROM admin_report_audit WHERE status = 'failed' AND created_at > NOW() - INTERVAL '7 days') AS failed_admin_checks
+  `);
+  return Object.fromEntries(Object.entries(rows[0]).map(([key, value]) => [key, Number(value)])) as Record<
+    "failed_reports" | "stuck_reports" | "stuck_payments" | "open_tickets" | "unassigned_tickets" | "failed_admin_checks", number>;
+};
+
+export const getFailedOperations = async () => {
+  const [reports, payments, adminChecks] = await Promise.all([
+    pool.query<{ id: string; user_id: string; customer: string; mobile_last4: string; bureau: string; status: string; failure_reason: string | null; requested_at: string }>(
+      `SELECT r.id, r.user_id, ${CUSTOMER_DISPLAY_NAME} AS customer, RIGHT(u.mobile, 4) AS mobile_last4, r.bureau, r.status, r.failure_reason, r.requested_at
+       FROM credit_report_requests r JOIN users u ON u.id = r.user_id LEFT JOIN kyc_profiles k ON k.user_id = u.id
+       WHERE r.payment_id IS NOT NULL AND (r.status = 'failed' OR (r.status = 'processing' AND r.requested_at < NOW() - INTERVAL '15 minutes'))
+       ORDER BY r.requested_at DESC LIMIT 100`),
+    pool.query<{ id: string; user_id: string; customer: string; mobile_last4: string; bureau: string | null; amount: string; gateway: string; failure_reason: string | null; created_at: string }>(
+      `SELECT p.id, p.user_id, ${CUSTOMER_DISPLAY_NAME} AS customer, RIGHT(u.mobile, 4) AS mobile_last4, p.report_bureau AS bureau,
+              (p.amount + p.gst_amount)::text AS amount, p.gateway, p.failure_reason, p.created_at
+       FROM payments p JOIN users u ON u.id = p.user_id LEFT JOIN kyc_profiles k ON k.user_id = u.id
+       WHERE p.status = 'failed' OR (p.status = 'created' AND (p.failure_reason IS NOT NULL OR p.created_at < NOW() - INTERVAL '30 minutes'))
+       ORDER BY p.created_at DESC LIMIT 100`),
+    pool.query<{ id: string; full_name: string | null; mobile_last4: string; bureau: string; failure_reason: string | null; admin_id: string; created_at: string }>(
+      `SELECT id, applicant_details->>'fullName' AS full_name, mobile_last4, bureau, failure_reason, admin_id, created_at
+       FROM admin_report_audit WHERE status = 'failed' AND created_at > NOW() - INTERVAL '30 days'
+       ORDER BY created_at DESC LIMIT 50`),
+  ]);
+  return { reports: reports.rows, payments: payments.rows, adminChecks: adminChecks.rows };
+};
+
+export const getHealthStats = async () => {
+  const started = Date.now();
+  await pool.query("SELECT 1");
+  const databaseLatencyMs = Date.now() - started;
+  const [recent, bureaus] = await Promise.all([
+    pool.query<{ failed_reports_24h: string; completed_reports_24h: string; failed_payments_24h: string; paid_payments_24h: string; last_signup: string | null; last_payment: string | null }>(`
+      SELECT
+        (SELECT COUNT(*) FROM credit_report_requests WHERE payment_id IS NOT NULL AND status = 'failed' AND requested_at > NOW() - INTERVAL '24 hours') AS failed_reports_24h,
+        (SELECT COUNT(*) FROM credit_report_requests WHERE payment_id IS NOT NULL AND status = 'completed' AND requested_at > NOW() - INTERVAL '24 hours') AS completed_reports_24h,
+        (SELECT COUNT(*) FROM payments WHERE failure_at > NOW() - INTERVAL '24 hours') AS failed_payments_24h,
+        (SELECT COUNT(*) FROM payments WHERE paid_at > NOW() - INTERVAL '24 hours') AS paid_payments_24h,
+        (SELECT MAX(created_at) FROM users) AS last_signup,
+        (SELECT MAX(paid_at) FROM payments) AS last_payment
+    `),
+    pool.query<{ bureau: string; last_success: string | null; last_failure: string | null; last_failure_reason: string | null; failures_7d: string; successes_7d: string }>(`
+      SELECT b.bureau,
+        (SELECT MAX(COALESCE(completed_at, requested_at)) FROM credit_report_requests WHERE bureau = b.bureau AND status = 'completed') AS last_success,
+        (SELECT MAX(requested_at) FROM credit_report_requests WHERE bureau = b.bureau AND status = 'failed') AS last_failure,
+        (SELECT failure_reason FROM credit_report_requests WHERE bureau = b.bureau AND status = 'failed' ORDER BY requested_at DESC LIMIT 1) AS last_failure_reason,
+        (SELECT COUNT(*) FROM credit_report_requests WHERE bureau = b.bureau AND status = 'failed' AND requested_at > NOW() - INTERVAL '7 days') AS failures_7d,
+        (SELECT COUNT(*) FROM credit_report_requests WHERE bureau = b.bureau AND status = 'completed' AND requested_at > NOW() - INTERVAL '7 days') AS successes_7d
+      FROM (VALUES ('cibil'), ('equifax'), ('experian'), ('crif')) AS b(bureau)
+    `),
+  ]);
+  const counts = recent.rows[0];
+  return {
+    databaseLatencyMs,
+    recent: {
+      failedReports24h: Number(counts.failed_reports_24h),
+      completedReports24h: Number(counts.completed_reports_24h),
+      failedPayments24h: Number(counts.failed_payments_24h),
+      paidPayments24h: Number(counts.paid_payments_24h),
+      lastSignup: counts.last_signup,
+      lastPayment: counts.last_payment,
+    },
+    bureaus: bureaus.rows.map((row) => ({ ...row, failures_7d: Number(row.failures_7d), successes_7d: Number(row.successes_7d) })),
+  };
 };
