@@ -1,7 +1,7 @@
 import type { Bureau } from "./bureaus.js";
 
 // Bump when parsing changes so stored raw reports get re-normalized on next view.
-export const PARSER_VERSION = 6;
+export const PARSER_VERSION = 5;
 
 export type ReportAccount = {
   lender: string;
@@ -130,17 +130,6 @@ const maskPan = (value: unknown) => {
 const validScore = (value: unknown) => {
   const score = amount(value);
   return score !== null && Number.isInteger(score) && score >= 300 && score <= 900 ? score : null;
-};
-
-// Convert object with numeric keys (e.g., {1: {...}, 2: {...}}) to array
-const objectToArray = (value: unknown): unknown[] => {
-  if (Array.isArray(value)) return value;
-  if (!isObject(value)) return [];
-  const entries = Object.entries(value as Record<string, unknown>)
-    .filter(([key]) => /^\d+$/.test(key))
-    .sort((a, b) => Number(a[0]) - Number(b[0]))
-    .map(([, val]) => val);
-  return entries;
 };
 
 const accountTypeNames: Record<string, string> = {
@@ -397,7 +386,7 @@ const parseCibil = (raw: unknown): Omit<NormalizedReport, "parserVersion" | "bur
         interestRate: reported(granted.interestRate),
         writtenOffAmount: reported(trade.writtenOffAmtTotal),
         settlementAmount: reported(trade.settlementAmount),
-        paymentHistory: objectToArray(get(granted, "PayStatusHistory.MonthlyPayStatus")).filter(isObject).map((entry) => ({
+        paymentHistory: asArray(get(granted, "PayStatusHistory.MonthlyPayStatus")).filter(isObject).map((entry) => ({
           month: (isoDate(entry.date) ?? "").slice(0, 7),
           daysPastDue: /^\d+$/.test(text(entry.status) ?? "") ? Number(entry.status) : null,
         })).filter((entry) => entry.month).sort((a, b) => b.month.localeCompare(a.month)).slice(0, 24),

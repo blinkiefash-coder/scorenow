@@ -2701,55 +2701,33 @@ function DashboardPage({ user, onLogout }: { user: AuthUser; onLogout: () => voi
                     ))}
                   </div>}
                   <div className="sc-body">
-                    <div className="sc-gauge-wrapper">
-                      <div className="sc-gauge" role="img" aria-label={`Credit score ${activeReport.credit_score ?? 'unavailable'} out of 900`}>
-                        <svg viewBox="0 0 200 112" aria-hidden="true">
-                          <path d={gaugeArc(0, 1)} className="sc-gauge-base" />
-                          <path d={gaugeArc(0, 0.467)} stroke="#ef4444" />
-                          <path d={gaugeArc(0.467, 0.667)} stroke="#f59e0b" />
-                          <path d={gaugeArc(0.667, 1)} stroke="#22c55e" />
-                          <circle cx={gaugeMarker.x} cy={gaugeMarker.y} r="7" className="sc-gauge-dot" />
-                        </svg>
-                        <div className="sc-gauge-value">
-                          <strong>{activeReport.credit_score ?? '—'}</strong>
-                          <span className={`sc-band sc-band-${scoreBandTone(activeReport.score_band)}`}>{activeReport.score_band || 'Score available'}</span>
-                        </div>
-                        <span className="sc-gauge-min">300</span><span className="sc-gauge-max">900</span>
+                    <div className="sc-gauge" role="img" aria-label={`Credit score ${activeReport.credit_score ?? 'unavailable'} out of 900`}>
+                      <svg viewBox="0 0 200 112" aria-hidden="true">
+                        <path d={gaugeArc(0, 1)} className="sc-gauge-base" />
+                        <path d={gaugeArc(0, 0.467)} stroke="#ef4444" />
+                        <path d={gaugeArc(0.467, 0.667)} stroke="#f59e0b" />
+                        <path d={gaugeArc(0.667, 1)} stroke="#22c55e" />
+                        <circle cx={gaugeMarker.x} cy={gaugeMarker.y} r="7" className="sc-gauge-dot" />
+                      </svg>
+                      <div className="sc-gauge-value">
+                        <strong>{activeReport.credit_score ?? '—'}</strong>
+                        <span className={`sc-band sc-band-${scoreBandTone(activeReport.score_band)}`}>{activeReport.score_band || 'Score available'}</span>
                       </div>
-                      <div className="sc-gauge-meta">
-                        <div className="sc-meta-item">
-                          <span className="sc-meta-label">Score Range</span>
-                          <strong className="sc-meta-value">300–900</strong>
-                        </div>
-                        <div className="sc-meta-divider"></div>
-                        <div className="sc-meta-item">
-                          <span className="sc-meta-label">Status</span>
-                          <span className={`sc-status-badge sc-status-${scoreBandTone(activeReport.score_band)}`}>{activeReport.score_band || 'Ready'}</span>
-                        </div>
-                      </div>
+                      <span className="sc-gauge-min">300</span><span className="sc-gauge-max">900</span>
                     </div>
                     <div className="sc-copy">
-                      <div className="sc-copy-header">
-                        <h3>{activeReport.overdue_accounts
-                          ? `${activeReport.overdue_accounts} account${activeReport.overdue_accounts === 1 ? '' : 's'} need${activeReport.overdue_accounts === 1 ? 's' : ''} attention`
-                          : activeReport.score_band?.toLowerCase().includes('needs attention')
-                            ? 'Your score needs attention'
-                            : 'Your credit score is ready'}</h3>
-                        <span className="sc-copy-icon">
-                          {activeReport.overdue_accounts ? <AlertTriangle /> : <Check />}
-                        </span>
-                      </div>
+                      <strong>{activeReport.overdue_accounts
+                        ? `${activeReport.overdue_accounts} account${activeReport.overdue_accounts === 1 ? '' : 's'} need attention`
+                        : activeReport.score_band?.toLowerCase().includes('needs attention')
+                          ? 'Your score needs attention'
+                          : 'Your credit score is ready'}</strong>
                       <p>{activeReport.overdue_accounts
                         ? 'Review your account details and payment history to see what may need action.'
                         : `Explore your ${bureauName(activeReport.bureau)} report and account details.`}</p>
-                      <div className="sc-actions">
-                        <button className="sc-download" type="button" onClick={() => void downloadActiveReport()} disabled={downloadingReport}>
-                          <Download /> {downloadingReport ? 'Preparing…' : 'Download'}
-                        </button>
-                        <a className="sc-link" href="#my-report">
-                          View Details <ArrowRight />
-                        </a>
-                      </div>
+                      <button className="sc-download" type="button" onClick={() => void downloadActiveReport()} disabled={downloadingReport}>
+                        <Download /> {downloadingReport ? 'Preparing report…' : 'Download my report'}
+                      </button>
+                      <a className="sc-link" href="#my-report">Understand my report <ArrowRight /></a>
                       {downloadReportError && <p className="dashboard-notice error score-download-error" role="alert">{downloadReportError}</p>}
                     </div>
                   </div>

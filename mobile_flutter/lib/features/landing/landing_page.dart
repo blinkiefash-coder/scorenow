@@ -30,9 +30,6 @@ class GuestHomeScreen extends StatefulWidget {
 }
 
 class _GuestHomeScreenState extends State<GuestHomeScreen> {
-  // Like the web, the login prompt opens only once per app session.
-  static bool _authPrompted = false;
-  final _scrollController = ScrollController();
   final _scaffoldKey = GlobalKey<ScaffoldState>();
   final _homeKey = GlobalKey();
   final _formKey = GlobalKey();
@@ -57,20 +54,7 @@ class _GuestHomeScreenState extends State<GuestHomeScreen> {
   String _error = '';
 
   @override
-  void initState() {
-    super.initState();
-    _scrollController.addListener(_onScroll);
-  }
-
-  void _onScroll() {
-    if (_authPrompted || _scrollController.offset < 220) return;
-    _authPrompted = true;
-    if (mounted) context.push('/login');
-  }
-
-  @override
   void dispose() {
-    _scrollController.dispose();
     for (final controller in [_fullName, _mobile, _email, _city, _score]) {
       controller.dispose();
     }
@@ -223,7 +207,6 @@ class _GuestHomeScreenState extends State<GuestHomeScreen> {
       ),
       endDrawer: _navDrawer(context),
       body: SingleChildScrollView(
-        controller: _scrollController,
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
