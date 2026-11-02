@@ -94,6 +94,53 @@ const subscriptionSteps = [
   { icon: Headphones, title: 'Start your subscription', text: 'Once confirmed, your support period begins with the agreed plan and guidance.' },
 ]
 
+const supportCategories = [
+  { id: 'general', label: 'General Question', icon: CircleHelp, color: '#5b9bd5' },
+  { id: 'report', label: 'Report Issue', icon: FileSearch, color: '#70ad47' },
+  { id: 'score', label: 'Score Related', icon: TrendingUp, color: '#ffc000' },
+  { id: 'technical', label: 'Technical Issue', icon: AlertTriangle, color: '#e74c3c' },
+  { id: 'billing', label: 'Billing/Payment', icon: CreditCard, color: '#9b59b6' },
+]
+
+const helpFaqs = [
+  {
+    category: 'general',
+    question: 'How do I check my credit score?',
+    answer: 'You can check your credit score by signing into your Scorenow dashboard. We provide access to reports from CIBIL, Experian, Equifax, and CRIF High Mark all in one place.',
+    relatedLinks: ['Understand Your Report', 'View My Dashboard'],
+  },
+  {
+    category: 'report',
+    question: 'What should I do if I find errors in my credit report?',
+    answer: 'If you find errors, gather supporting documents and file a formal dispute with the bureau. Our support team can guide you through the correction process step by step.',
+    relatedLinks: ['Dispute an Error', 'Get Expert Help'],
+  },
+  {
+    category: 'score',
+    question: 'Why did my credit score drop?',
+    answer: 'Common reasons include late payments, high credit utilisation, multiple recent credit inquiries, or negative remarks on your report. Check your report for specific factors affecting your score.',
+    relatedLinks: ['Improve Your Score', 'Understand Score Factors'],
+  },
+  {
+    category: 'score',
+    question: 'How can I improve my credit score?',
+    answer: 'Focus on timely payments, keeping credit utilisation below 30%, maintaining older accounts, and avoiding multiple credit applications. Consistent habits build a stronger profile over time.',
+    relatedLinks: ['Score Improvement Plan', 'Expert Consultation'],
+  },
+  {
+    category: 'technical',
+    question: 'Why can\'t I see my bureau reports?',
+    answer: 'Bureau access requires proper verification. Ensure your details match bureau records exactly. If issues persist, our support team can help troubleshoot the connection.',
+    relatedLinks: ['Verify My Identity', 'Contact Support'],
+  },
+  {
+    category: 'billing',
+    question: 'What payment methods do you accept?',
+    answer: 'We accept major credit cards, debit cards, net banking, and digital wallets like Google Pay and Apple Pay. Razorpay handles all secure transactions.',
+    relatedLinks: ['View Pricing', 'Payment Help'],
+  },
+]
+
 const subscriptionPlans = [
   { name: 'Monthly', duration: '1 month', price: '₹99', note: 'Flexible monthly access' },
   { name: '6 Months', duration: '6 months', price: '₹499', note: 'Best for steady progress', featured: true },
@@ -2245,6 +2292,9 @@ function DashboardPage({ user, onLogout }: { user: AuthUser; onLogout: () => voi
   const [supportReplying, setSupportReplying] = useState<string | null>(null)
   const [supportError, setSupportError] = useState('')
   const [supportNotice, setSupportNotice] = useState('')
+  const [supportCategory, setSupportCategory] = useState('general')
+  const [expandedFaqs, setExpandedFaqs] = useState<Set<number>>(new Set())
+  const [showFaqs, setShowFaqs] = useState(false)
   const [busyBureau, setBusyBureau] = useState<BureauId | null>(null)
   const [downloadingReport, setDownloadingReport] = useState(false)
   const [downloadReportError, setDownloadReportError] = useState('')
@@ -2556,9 +2606,27 @@ function DashboardPage({ user, onLogout }: { user: AuthUser; onLogout: () => voi
   const scoreProgress = activeReport?.credit_score
     ? Math.max(0, Math.min(1, (activeReport.credit_score - 300) / 600))
     : 0.5
-  const scoreMarkerPosition = {
-    left: `${scoreProgress * 100}%`,
-    top: `${(1 - Math.sin(Math.PI * scoreProgress)) * 100}%`,
+  const gaugePoint = (progress: number) => {
+    const angle = Math.PI * (1 - progress)
+    return { x: 100 + 80 * Math.cos(angle), y: 100 - 80 * Math.sin(angle) }
+  }
+  const gaugeArc = (from: number, to: number) => {
+    const start = gaugePoint(from)
+    const end = gaugePoint(to)
+    return `M ${start.x.toFixed(2)} ${start.y.toFixed(2)} A 80 80 0 0 1 ${end.x.toFixed(2)} ${end.y.toFixed(2)}`
+  }
+  const gaugeMarker = gaugePoint(scoreProgress)
+
+  const reportInsights: { tone: 'good' | 'warn' | 'info'; text: string }[] = []
+  if (activeReport) {
+    const { overdue_accounts: overdue, active_accounts: active, total_accounts: total, enquiries_last_6_months: enquiries, credit_score: score } = activeReport
+    if (overdue) reportInsights.push({ tone: 'warn', text: `${overdue} of your ${active ?? total ?? 'reported'} accounts ${overdue === 1 ? 'is' : 'are'} overdue. Clearing ${overdue === 1 ? 'it' : 'them'} first is the fastest way to lift your score.` })
+    else if (total) reportInsights.push({ tone: 'good', text: 'No overdue accounts on your report. Keep paying on time to stay on track.' })
+    if (enquiries !== null && enquiries !== undefined) reportInsights.push(enquiries >= 3
+      ? { tone: 'warn', text: `${enquiries} recent enquiries can hurt your score. Avoid new credit applications for a few months.` }
+      : { tone: 'good', text: enquiries === 0 ? 'No recent enquiries, which is good for your score.' : `Only ${enquiries} recent enquir${enquiries === 1 ? 'y' : 'ies'}, which is within a healthy range.` })
+    if (active && total && total - active > active) reportInsights.push({ tone: 'info', text: `${total - active} of your ${total} accounts are closed. Older closed accounts still add to your credit history.` })
+    if (score !== null && score !== undefined && score < 750) reportInsights.push({ tone: 'info', text: `A score of 750+ unlocks better loan and card offers. You are ${750 - score} points away.` })
   }
 
   return (
@@ -2620,35 +2688,34 @@ function DashboardPage({ user, onLogout }: { user: AuthUser; onLogout: () => voi
 
           <section className="dashboard-grid dashboard-overview-grid" id="dashboard-overview">
             {activeReport
-              ? <article className="dashboard-card score-card">
-                  <div className="dashboard-card-heading score-card-header">
-                    <strong>Your credit score</strong>
-                    <span className="score-report-date"><Clock3 /> Updated {formatDate(activeReport.report_date)}{activeReport.is_demo ? ' · Sample' : ''}</span>
+              ? <article className="dashboard-card sc-card">
+                  <div className="sc-head">
+                    <strong>Your Credit Score</strong>
+                    <span className="sc-date"><Clock3 /> Updated {formatDate(activeReport.report_date)}{activeReport.is_demo ? ' · Sample' : ''}</span>
                   </div>
-                  <div className="score-card-meta-row">
-                    {completedReports.length > 1 && <div className="dashboard-bureau-tabs" role="tablist" aria-label="Choose a credit bureau">
-                      {completedReports.map((report) => (
-                        <button key={report.bureau} type="button" role="tab" aria-selected={report.bureau === activeBureau} className={report.bureau === activeBureau ? 'active' : ''} onClick={() => setSelectedBureau(report.bureau)}>
-                          {bureauName(report.bureau)}
-                        </button>
-                      ))}
-                    </div>}
-                    <span className={`score-status-label score-band-${scoreBandTone(activeReport.score_band)}`}>
-                      {scoreBandTone(activeReport.score_band) === 'excellent' || scoreBandTone(activeReport.score_band) === 'good'
-                        ? <Check aria-hidden="true" />
-                        : scoreBandTone(activeReport.score_band) === 'fair' || scoreBandTone(activeReport.score_band) === 'attention'
-                          ? <AlertTriangle aria-hidden="true" />
-                          : <CircleHelp aria-hidden="true" />}
-                      {activeReport.score_band || 'Score available'}
-                    </span>
-                  </div>
-                  <div className="score-card-body">
-                    <div className={`dashboard-gauge score-band-${scoreBandTone(activeReport.score_band)}`} aria-label={`Credit score ${activeReport.credit_score ?? 'unavailable'} out of 900`}>
-                      <div className="dashboard-gauge-track"><div className="dashboard-gauge-needle" style={scoreMarkerPosition} /></div>
-                      <strong>{activeReport.credit_score ?? '—'}</strong>
-                      <span className="gauge-min">300</span><span className="gauge-max">900</span>
+                  {completedReports.length > 1 && <div className="sc-tabs" role="tablist" aria-label="Choose a credit bureau">
+                    {completedReports.map((report) => (
+                      <button key={report.bureau} type="button" role="tab" aria-selected={report.bureau === activeBureau} className={report.bureau === activeBureau ? 'active' : ''} onClick={() => setSelectedBureau(report.bureau)}>
+                        {bureauName(report.bureau)}
+                      </button>
+                    ))}
+                  </div>}
+                  <div className="sc-body">
+                    <div className="sc-gauge" role="img" aria-label={`Credit score ${activeReport.credit_score ?? 'unavailable'} out of 900`}>
+                      <svg viewBox="0 0 200 112" aria-hidden="true">
+                        <path d={gaugeArc(0, 1)} className="sc-gauge-base" />
+                        <path d={gaugeArc(0, 0.467)} stroke="#ef4444" />
+                        <path d={gaugeArc(0.467, 0.667)} stroke="#f59e0b" />
+                        <path d={gaugeArc(0.667, 1)} stroke="#22c55e" />
+                        <circle cx={gaugeMarker.x} cy={gaugeMarker.y} r="7" className="sc-gauge-dot" />
+                      </svg>
+                      <div className="sc-gauge-value">
+                        <strong>{activeReport.credit_score ?? '—'}</strong>
+                        <span className={`sc-band sc-band-${scoreBandTone(activeReport.score_band)}`}>{activeReport.score_band || 'Score available'}</span>
+                      </div>
+                      <span className="sc-gauge-min">300</span><span className="sc-gauge-max">900</span>
                     </div>
-                    <div className="dashboard-score-copy">
+                    <div className="sc-copy">
                       <strong>{activeReport.overdue_accounts
                         ? `${activeReport.overdue_accounts} account${activeReport.overdue_accounts === 1 ? '' : 's'} need attention`
                         : activeReport.score_band?.toLowerCase().includes('needs attention')
@@ -2657,12 +2724,10 @@ function DashboardPage({ user, onLogout }: { user: AuthUser; onLogout: () => voi
                       <p>{activeReport.overdue_accounts
                         ? 'Review your account details and payment history to see what may need action.'
                         : `Explore your ${bureauName(activeReport.bureau)} report and account details.`}</p>
-                      <div className="score-card-actions">
-                        <button className="dashboard-primary-action" type="button" onClick={() => void downloadActiveReport()} disabled={downloadingReport}>
-                          <Download /> {downloadingReport ? 'Preparing report…' : 'Download my report'}
-                        </button>
-                        <a href="#my-report">Understand my report <ArrowRight /></a>
-                      </div>
+                      <button className="sc-download" type="button" onClick={() => void downloadActiveReport()} disabled={downloadingReport}>
+                        <Download /> {downloadingReport ? 'Preparing report…' : 'Download my report'}
+                      </button>
+                      <a className="sc-link" href="#my-report">Understand my report <ArrowRight /></a>
                       {downloadReportError && <p className="dashboard-notice error score-download-error" role="alert">{downloadReportError}</p>}
                     </div>
                   </div>
@@ -2670,14 +2735,20 @@ function DashboardPage({ user, onLogout }: { user: AuthUser; onLogout: () => voi
               : <article className="dashboard-card empty-report-card">
                   <div className="empty-dashboard-state"><FileSearch /><strong>Your credit picture starts here</strong><span>Choose a bureau to securely request your report. We’ll help you understand the information and decide what to focus on.</span></div>
                 </article>}
+            {activeReport && <article className="dashboard-card quick-overview" aria-label="Credit report highlights">
+              <div className="dashboard-card-heading"><strong>Quick Overview</strong></div>
+              <div className="quick-overview-grid">
+                <div><span className="dashboard-metric-icon blue"><WalletCards /></span><strong>{activeReport.active_accounts ?? '—'}</strong><small>Active Accounts</small></div>
+                <div><span className={`dashboard-metric-icon ${activeReport.overdue_accounts ? 'red' : 'green'}`}><AlertTriangle /></span><strong>{activeReport.overdue_accounts ?? '—'}</strong><small>Overdue Accounts</small></div>
+                <div><span className="dashboard-metric-icon blue"><Search /></span><strong>{activeReport.enquiries_last_6_months ?? '—'}</strong><small>Recent Enquiries</small></div>
+                <div><span className="dashboard-metric-icon gold"><BadgeIndianRupee /></span><strong>{activeReport.total_outstanding === null ? '—' : formatMoney(Number(activeReport.total_outstanding))}</strong><small>Outstanding</small></div>
+              </div>
+              {reportInsights.length > 0 && <div className="qo-insights">
+                <strong><Sparkles /> Scorenow insights</strong>
+                <ul>{reportInsights.slice(0, 3).map((insight) => <li key={insight.text} className={`qo-${insight.tone}`}>{insight.tone === 'warn' ? <AlertTriangle /> : insight.tone === 'good' ? <Check /> : <CircleHelp />}<span>{insight.text}</span></li>)}</ul>
+              </div>}
+            </article>}
           </section>
-
-          {activeReport && <section className="dashboard-metrics" aria-label="Credit report highlights">
-            <article className="dashboard-card dashboard-metric"><span className="dashboard-metric-icon blue"><WalletCards /></span><div><small>Total accounts</small><strong>{activeReport.total_accounts ?? '—'}</strong><span>Listed on your report</span></div></article>
-            <article className="dashboard-card dashboard-metric"><span className="dashboard-metric-icon green"><Check /></span><div><small>Active accounts</small><strong>{activeReport.active_accounts ?? '—'}</strong><span>Currently open</span></div></article>
-            <article className="dashboard-card dashboard-metric"><span className="dashboard-metric-icon gold"><BadgeIndianRupee /></span><div><small>Outstanding balance</small><strong>{activeReport.total_outstanding === null ? '—' : formatMoney(Number(activeReport.total_outstanding))}</strong><span>Across reported accounts</span></div></article>
-            <article className="dashboard-card dashboard-metric"><span className={`dashboard-metric-icon ${activeReport.overdue_accounts ? 'red' : 'green'}`}><AlertTriangle /></span><div><small>Overdue accounts</small><strong>{activeReport.overdue_accounts ?? '—'}</strong><span>As shown by {bureauName(activeReport.bureau)}</span></div></article>
-          </section>}
 
           <section className="dashboard-card bureau-comparison" id="bureau-comparison">
             <div className="dashboard-card-heading">
@@ -2814,10 +2885,99 @@ function DashboardPage({ user, onLogout }: { user: AuthUser; onLogout: () => voi
 
           <section className="dashboard-card help-card" id="help-support">
             <div className="dashboard-card-heading"><strong><CircleHelp /> Help &amp; support</strong><small>Mon–Sat · 10 AM – 7 PM</small></div>
+            
+            <div className="help-tabs-section">
+              <button className="help-tab-toggle" onClick={() => setShowFaqs(!showFaqs)} type="button">
+                <Lightbulb size={16} />
+                <span>Quick answers & FAQs</span>
+                <ChevronDown className={showFaqs ? 'rotated' : ''} size={16} />
+              </button>
+              
+              {showFaqs && (
+                <div className="help-faqs-container">
+                  <div className="faq-categories-filter">
+                    <p className="faq-filter-label">Filter by category:</p>
+                    <div className="faq-category-buttons">
+                      {supportCategories.map((cat) => {
+                        const IconComponent = cat.icon
+                        return (
+                          <button
+                            key={cat.id}
+                            type="button"
+                            className={`faq-category-btn ${supportCategory === cat.id ? 'active' : ''}`}
+                            onClick={() => setSupportCategory(cat.id)}
+                            style={{ ['--category-color' as string]: cat.color }}
+                          >
+                            <IconComponent size={14} />
+                            {cat.label}
+                          </button>
+                        )
+                      })}
+                    </div>
+                  </div>
+                  
+                  <div className="faq-list">
+                    {helpFaqs
+                      .filter((faq) => faq.category === supportCategory)
+                      .map((faq, index) => {
+                        const isExpanded = expandedFaqs.has(index)
+                        return (
+                          <div key={index} className={`faq-item ${isExpanded ? 'expanded' : ''}`}>
+                            <button
+                              type="button"
+                              className="faq-question"
+                              onClick={() => {
+                                const newSet = new Set(expandedFaqs)
+                                if (isExpanded) newSet.delete(index)
+                                else newSet.add(index)
+                                setExpandedFaqs(newSet)
+                              }}
+                            >
+                              <span className="faq-icon">?</span>
+                              <span className="faq-text">{faq.question}</span>
+                              <ChevronDown className="faq-chevron" size={16} />
+                            </button>
+                            {isExpanded && (
+                              <div className="faq-answer">
+                                <p>{faq.answer}</p>
+                                {faq.relatedLinks.length > 0 && (
+                                  <div className="faq-links">
+                                    <small>Related:</small>
+                                    <div className="faq-link-buttons">
+                                      {faq.relatedLinks.map((link) => (
+                                        <a href="#" key={link} className="faq-link-btn">{link} <ArrowRight size={12} /></a>
+                                      ))}
+                                    </div>
+                                  </div>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        )
+                      })}
+                  </div>
+                </div>
+              )}
+            </div>
+            
             <form className="customer-ticket-form" onSubmit={(event) => void submitSupportTicket(event)}>
               <h3>Send a message to our support team</h3>
-              <label>What do you need help with?<input name="subject" minLength={3} maxLength={180} placeholder="Briefly describe your issue" required /></label>
-              <label>Message<textarea name="message" rows={4} minLength={3} maxLength={4000} placeholder="Include details that will help us resolve this for you." required /></label>
+              <label className="form-group">
+                <span className="label-text">Issue category</span>
+                <select name="category" value={supportCategory} onChange={(e) => setSupportCategory(e.target.value)} className="category-select">
+                  {supportCategories.map((cat) => (
+                    <option key={cat.id} value={cat.id}>{cat.label}</option>
+                  ))}
+                </select>
+              </label>
+              <label className="form-group">
+                <span className="label-text">What do you need help with?</span>
+                <input name="subject" minLength={3} maxLength={180} placeholder="Briefly describe your issue" required />
+              </label>
+              <label className="form-group">
+                <span className="label-text">Message</span>
+                <textarea name="message" rows={4} minLength={3} maxLength={4000} placeholder="Include details that will help us resolve this for you." required />
+              </label>
               {supportError && <p className="dashboard-notice error" role="alert">{supportError}</p>}
               {supportNotice && <p className="dashboard-notice info" role="status">{supportNotice}</p>}
               <button type="submit" className="button button-primary" disabled={supportSubmitting}>{supportSubmitting ? <><Spinner size={16} /> Sending…</> : <>Submit support ticket <ArrowRight /></>}</button>
