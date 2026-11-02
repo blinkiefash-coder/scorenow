@@ -2701,19 +2701,25 @@ function DashboardPage({ user, onLogout }: { user: AuthUser; onLogout: () => voi
                     ))}
                   </div>}
                   <div className="sc-body">
-                    <div className="sc-gauge" role="img" aria-label={`Credit score ${activeReport.credit_score ?? 'unavailable'} out of 900`}>
-                      <svg viewBox="0 0 200 112" aria-hidden="true">
-                        <path d={gaugeArc(0, 1)} className="sc-gauge-base" />
-                        <path d={gaugeArc(0, 0.467)} stroke="#ef4444" />
-                        <path d={gaugeArc(0.467, 0.667)} stroke="#f59e0b" />
-                        <path d={gaugeArc(0.667, 1)} stroke="#22c55e" />
-                        <circle cx={gaugeMarker.x} cy={gaugeMarker.y} r="7" className="sc-gauge-dot" />
-                      </svg>
-                      <div className="sc-gauge-value">
-                        <strong>{activeReport.credit_score ?? '—'}</strong>
-                        <span className={`sc-band sc-band-${scoreBandTone(activeReport.score_band)}`}>{activeReport.score_band || 'Score available'}</span>
+                    <div className="sc-gauge-container">
+                      <div className="sc-gauge" role="img" aria-label={`Credit score ${activeReport.credit_score ?? 'unavailable'} out of 900`}>
+                        <svg viewBox="0 0 200 112" aria-hidden="true">
+                          <path d={gaugeArc(0, 1)} className="sc-gauge-base" />
+                          <path d={gaugeArc(0, 0.467)} stroke="#ef4444" />
+                          <path d={gaugeArc(0.467, 0.667)} stroke="#f59e0b" />
+                          <path d={gaugeArc(0.667, 1)} stroke="#22c55e" />
+                          <circle cx={gaugeMarker.x} cy={gaugeMarker.y} r="7" className="sc-gauge-dot" />
+                        </svg>
+                        <div className="sc-gauge-value">
+                          <strong>{activeReport.credit_score ?? '—'}</strong>
+                          <span className={`sc-band sc-band-${scoreBandTone(activeReport.score_band)}`}>Average <Info /></span>
+                        </div>
+                        <span className="sc-gauge-min">300</span><span className="sc-gauge-max">900</span>
                       </div>
-                      <span className="sc-gauge-min">300</span><span className="sc-gauge-max">900</span>
+                      <div className="sc-gauge-meta">
+                        <div className="sc-meta-item"><span className="sc-trend-badge">+50</span><small>vs last month</small></div>
+                        <div className="sc-meta-item"><span className="sc-progress-icon">📍</span><small>Good progress!</small><p>Keep going to reach Good range.</p></div>
+                      </div>
                     </div>
                     <div className="sc-copy">
                       <strong>{activeReport.overdue_accounts
@@ -2733,7 +2739,7 @@ function DashboardPage({ user, onLogout }: { user: AuthUser; onLogout: () => voi
                   </div>
                 </article>
               : <article className="dashboard-card empty-report-card">
-                  <div className="empty-dashboard-state"><FileSearch /><strong>Your credit picture starts here</strong><span>Choose a bureau to securely request your report. We’ll help you understand the information and decide what to focus on.</span></div>
+                  <div className="empty-dashboard-state"><FileSearch /><strong>Your credit picture starts here</strong><span>Choose a bureau to securely request your report. We'll help you understand the information and decide what to focus on.</span></div>
                 </article>}
             {activeReport && <article className="dashboard-card quick-overview" aria-label="Credit report highlights">
               <div className="dashboard-card-heading"><strong>Quick Overview</strong></div>
