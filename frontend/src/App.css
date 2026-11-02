@@ -3453,53 +3453,53 @@ img { max-width: 100%; }
 }
 
 /* Credit score card: light card with SVG gauge */
-.dashboard-grid.dashboard-overview-grid > .sc-card { display: block; padding: 20px 24px; border: 1px solid #e5ecf4; border-radius: 18px; background: #fff; color: #10233f; }
-.sc-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 10px; }
-.sc-head > strong { color: #10233f; font: 700 16px 'Sora Variable', sans-serif; }
+.dashboard-grid.dashboard-overview-grid > .sc-card { display: block; padding: 16px 20px; border: 1px solid #e5ecf4; border-radius: 18px; background: #fff; color: #10233f; }
+.sc-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 8px; }
+.sc-head > strong { color: #10233f; font: 700 15px 'Sora Variable', sans-serif; }
 .sc-date { display: inline-flex; align-items: center; gap: 6px; color: #708098; font-size: 10px; font-weight: 600; }
 .sc-date svg { width: 12px; height: 12px; }
-.sc-tabs { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
+.sc-tabs { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
 .sc-tabs button { min-height: 28px; padding: 0 10px; border: 1px solid #dbe6f3; border-radius: 999px; background: #f5f9ff; color: #35557f; font-size: 10px; font-weight: 700; cursor: pointer; }
 .sc-tabs button:hover { background: #eaf3ff; }
 .sc-tabs button.active { border-color: #087af5; background: #087af5; color: #fff; }
-.sc-body { display: grid; grid-template-columns: minmax(150px, 190px) minmax(0, 1fr); align-items: center; gap: 16px; }
-.sc-gauge-container { display: flex; align-items: center; gap: 14px; }
-.sc-gauge { position: relative; width: 100%; max-width: 190px; margin-inline: auto; }
+.sc-body { display: grid; grid-template-columns: minmax(140px, 170px) minmax(0, 1fr); align-items: center; gap: 14px; }
+.sc-gauge-container { display: flex; align-items: center; gap: 12px; }
+.sc-gauge { position: relative; width: 100%; max-width: 170px; margin-inline: auto; }
 .sc-gauge svg { display: block; width: 100%; height: auto; overflow: visible; }
 .sc-gauge path { fill: none; stroke-width: 14; stroke-linecap: butt; }
 .sc-gauge path.sc-gauge-base { stroke: #eef3f9; stroke-linecap: round; }
 .sc-gauge-dot { fill: #fff; stroke: #10233f; stroke-width: 3; }
-.sc-gauge-value { position: absolute; left: 0; right: 0; top: 38%; display: grid; justify-items: center; gap: 1px; }
-.sc-gauge-value > strong { color: #10233f; font: 800 32px/1 'Sora Variable', sans-serif; }
-.sc-band { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; font-weight: 700; color: #708098; }
+.sc-gauge-value { position: absolute; left: 0; right: 0; top: 38%; display: grid; justify-items: center; gap: 0px; }
+.sc-gauge-value > strong { color: #10233f; font: 800 28px/1 'Sora Variable', sans-serif; }
+.sc-band { display: inline-flex; align-items: center; gap: 4px; font-size: 10px; font-weight: 700; color: #d9362b; }
 .sc-band-excellent, .sc-band-good { color: #16845a; }
 .sc-band-fair { color: #d98a00; }
 .sc-band-attention { color: #d9362b; }
-.sc-gauge-min, .sc-gauge-max { position: absolute; bottom: -2px; color: #708098; font-size: 9px; font-weight: 700; }
+.sc-gauge-min, .sc-gauge-max { position: absolute; bottom: -2px; color: #708098; font-size: 8px; font-weight: 700; }
 .sc-gauge-min { left: 0px; }
 .sc-gauge-max { right: 0px; }
-.sc-gauge-meta { display: flex; flex-direction: column; gap: 10px; }
-.sc-meta-item { display: flex; flex-direction: column; gap: 2px; }
-.sc-meta-item > small { color: #5a6b83; font-size: 10px; font-weight: 600; }
-.sc-meta-item > p { margin: 0; color: #5a6b83; font-size: 10px; line-height: 1.3; }
-.sc-trend-badge { display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; border-radius: 50%; background: #e8f5e9; color: #16845a; font-size: 13px; font-weight: 800; }
-.sc-progress-icon { font-size: 16px; }
-.sc-copy { display: grid; justify-items: start; gap: 6px; min-width: 0; }
-.sc-copy > strong { color: #10233f; font-size: 15px; line-height: 1.2; font-weight: 700; }
-.sc-copy > p { margin: 0; color: #5a6b83; font-size: 11px; line-height: 1.4; }
-.sc-download { display: inline-flex; align-items: center; gap: 6px; min-height: 32px; padding: 0 14px; border: 0; border-radius: 8px; background: #087af5; color: #fff; font-size: 11px; font-weight: 700; cursor: pointer; transition: all .2s ease; }
+.sc-gauge-meta { display: flex; flex-direction: column; gap: 8px; }
+.sc-meta-item { display: flex; flex-direction: column; gap: 1px; }
+.sc-meta-item > small { color: #5a6b83; font-size: 9px; font-weight: 600; }
+.sc-meta-item > p { margin: 0; color: #5a6b83; font-size: 9px; line-height: 1.2; }
+.sc-trend-badge { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; border-radius: 50%; background: #e8f5e9; color: #16845a; font-size: 12px; font-weight: 800; }
+.sc-progress-icon { font-size: 14px; }
+.sc-copy { display: grid; justify-items: start; gap: 4px; min-width: 0; }
+.sc-copy > strong { color: #10233f; font-size: 14px; line-height: 1.2; font-weight: 700; }
+.sc-copy > p { margin: 0; color: #5a6b83; font-size: 10px; line-height: 1.3; }
+.sc-download { display: inline-flex; align-items: center; gap: 6px; min-height: 32px; padding: 0 12px; border: 0; border-radius: 8px; background: #087af5; color: #fff; font-size: 11px; font-weight: 700; cursor: pointer; transition: all .2s ease; }
 .sc-download:hover:not(:disabled) { background: #0663c9; transform: translateY(-1px); }
 .sc-download:disabled { cursor: wait; opacity: .75; }
 .sc-download svg { width: 14px; height: 14px; }
-.sc-link { display: inline-flex; align-items: center; gap: 4px; color: #087af5; font-size: 11px; font-weight: 700; text-decoration: none; transition: all .2s ease; }
+.sc-link { display: inline-flex; align-items: center; gap: 4px; color: #087af5; font-size: 10px; font-weight: 700; text-decoration: none; transition: all .2s ease; }
 .sc-link:hover { opacity: 0.85; }
-.sc-link svg { width: 12px; height: 12px; }
+.sc-link svg { width: 11px; height: 11px; }
 @media (max-width: 640px) {
   .sc-body { grid-template-columns: minmax(0, 1fr); }
   .sc-gauge-container { flex-direction: column; }
   .sc-copy { justify-items: center; text-align: center; }
-  .sc-gauge { max-width: 160px; }
-  .sc-gauge-value > strong { font-size: 28px; }
+  .sc-gauge { max-width: 150px; }
+  .sc-gauge-value > strong { font-size: 24px; }
 }
 
 /* Fixed, equal-height overview cards with Quick Overview content centred */
@@ -3507,13 +3507,14 @@ img { max-width: 100%; }
   .dashboard-grid.dashboard-overview-grid > .sc-card,
   .dashboard-grid.dashboard-overview-grid > .quick-overview { height: 100%; min-height: 300px; box-sizing: border-box; }
 }
-.dashboard-grid.dashboard-overview-grid > .quick-overview { display: flex; flex-direction: column; padding: 20px 24px; border: 1px solid #e5ecf4; border-radius: 18px; background: #fff; }
-.quick-overview .dashboard-card-heading { margin-bottom: 12px; }
-.quick-overview-grid { flex: 0 0 auto; display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; align-items: stretch; }
-.quick-overview-grid > div { display: flex; flex-direction: column; gap: 6px; align-items: center; text-align: center; padding: 12px 8px; border: 1px solid #edf2f9; border-radius: 10px; background: #f9fbff; }
+.dashboard-grid.dashboard-overview-grid > .quick-overview { display: flex; flex-direction: column; padding: 16px 20px; border: 1px solid #e5ecf4; border-radius: 18px; background: #fff; }
+.quick-overview .dashboard-card-heading { margin-bottom: 10px; }
+.quick-overview-grid { flex: 0 0 auto; display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; align-items: stretch; }
+.quick-overview-grid > div { display: flex; flex-direction: column; gap: 5px; align-items: center; text-align: center; padding: 10px 6px; border: 1px solid #edf2f9; border-radius: 10px; background: #f9fbff; }
 .quick-overview-grid > div span { display: flex; justify-content: center; }
-.quick-overview-grid > div strong { color: #10233f; font-size: 18px; font-weight: 800; line-height: 1; }
-.quick-overview-grid > div small { color: #5a6b83; font-size: 10px; font-weight: 600; }
+.quick-overview-grid > div strong { color: #10233f; font-size: 16px; font-weight: 800; line-height: 1; }
+.quick-overview-grid > div small { color: #5a6b83; font-size: 9px; font-weight: 600; }
+.qo-insights { display: none; }
 
 /* Dashboard polish: softer depth, tinted stat tiles, larger gauge */
 .dashboard-grid.dashboard-overview-grid > .sc-card,

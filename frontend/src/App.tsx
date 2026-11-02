@@ -2749,10 +2749,6 @@ function DashboardPage({ user, onLogout }: { user: AuthUser; onLogout: () => voi
                 <div><span className="dashboard-metric-icon blue"><Search /></span><strong>{activeReport.enquiries_last_6_months ?? '—'}</strong><small>Recent Enquiries</small></div>
                 <div><span className="dashboard-metric-icon gold"><BadgeIndianRupee /></span><strong>{activeReport.total_outstanding === null ? '—' : formatMoney(Number(activeReport.total_outstanding))}</strong><small>Outstanding</small></div>
               </div>
-              {reportInsights.length > 0 && <div className="qo-insights">
-                <strong><Sparkles /> Scorenow insights</strong>
-                <ul>{reportInsights.slice(0, 3).map((insight) => <li key={insight.text} className={`qo-${insight.tone}`}>{insight.tone === 'warn' ? <AlertTriangle /> : insight.tone === 'good' ? <Check /> : <CircleHelp />}<span>{insight.text}</span></li>)}</ul>
-              </div>}
             </article>}
           </section>
 
