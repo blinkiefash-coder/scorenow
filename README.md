@@ -1,6 +1,6 @@
-# Score Now
+# Scorenow
 
-Full-stack workspace for the Score Now responsive website.
+Full-stack workspace for the Scorenow responsive website.
 
 ## Structure
 
@@ -43,7 +43,7 @@ Customers can continue using mobile OTP or choose email and password. Account cr
 
 ## Credit report PDF downloads
 
-The customer dashboard downloads a bureau-provided PDF when one is available. If a bureau response does not include a usable PDF, the backend generates a Score Now-formatted PDF from the normalized report data. Admin-initiated bureau checks can also download a Score Now report copy. Generated copies are explicitly labeled as not issued or endorsed by the bureau and are served only to the authenticated report owner or authorized admin.
+The customer dashboard downloads a bureau-provided PDF when one is available. If a bureau response does not include a usable PDF, the backend generates a Scorenow-formatted PDF from the normalized report data. Admin-initiated bureau checks can also download a Scorenow report copy. Generated copies are explicitly labeled as not issued or endorsed by the bureau and are served only to the authenticated report owner or authorized admin.
 
 ## Client preview deployment
 

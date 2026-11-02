@@ -21,3 +21,16 @@ export const verifyFirebasePhoneToken = async (idToken) => {
         throw new Error('This Firebase account has no verified phone number.');
     return token;
 };
+export const verifyFirebaseGoogleToken = async (idToken) => {
+    const app = getFirebaseAdminApp();
+    if (!app)
+        throw new Error('Firebase Admin is not configured on this server.');
+    const token = await getAuth(app).verifyIdToken(idToken);
+    if (token.firebase?.sign_in_provider !== 'google.com') {
+        throw new Error('Sign in with a Google account to continue.');
+    }
+    if (!token.email || !token.email_verified) {
+        throw new Error('Your Google account must have a verified email address.');
+    }
+    return token;
+};

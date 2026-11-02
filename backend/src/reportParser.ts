@@ -339,7 +339,34 @@ const parseCibil = (raw: unknown): Omit<NormalizedReport, "parserVersion" | "bur
   );
   const borrower = get(report, "Borrower");
   const reportDate = isoDate(firstOf(report, "SB.reportDate", "reportDate", "Sources.Source.InquiryDate")) ?? new Date().toISOString().slice(0, 10);
-  const accounts: ReportAccount[] = asArray(get(report, "TradeLinePartition")).flatMap((partition) => asArray(isObject(partition) ? partition.Tradeline ?? partition : partition))
+  
+  // Try multiple paths for TradeLinePartition as CIBIL API structure may vary
+  let tradeLinePartition = get(report, "TradeLinePartition") ?? get(report, "Tradeline") ?? get(data, "credit_report.Tradeline") ?? get(data, "credit_report.accounts");
+  let inquiryPartition = get(report, "InquiryPartition") ?? get(report, "Inquiry") ?? get(data, "credit_report.Inquiry") ?? get(data, "credit_report.enquiries");
+  
+  if (!tradeLinePartition && isObject(report)) {
+    // Last resort: search for keys that might contain account/tradeline data
+    const reportObj = report as Record<string, unknown>;
+    tradeLinePartition = reportObj.TradeLinePartition ?? reportObj.Tradeline ?? reportObj.accounts ?? reportObj.credit_accounts;
+  }
+  if (!inquiryPartition && isObject(report)) {
+    const reportObj = report as Record<string, unknown>;
+    inquiryPartition = reportObj.InquiryPartition ?? reportObj.Inquiry ?? reportObj.enquiries ?? reportObj.credit_enquiries;
+  }
+  
+  if ((tradeLinePartition === undefined || (asArray(tradeLinePartition).length === 0)) || 
+      (inquiryPartition === undefined || (asArray(inquiryPartition).length === 0))) {
+    console.warn("CIBIL parser: Accounts or Enquiries extraction returned empty or undefined", {
+      hasTradeLinePartition: tradeLinePartition !== undefined,
+      tradeLinePartitionCount: asArray(tradeLinePartition).length,
+      hasInquiryPartition: inquiryPartition !== undefined,
+      inquiryPartitionCount: asArray(inquiryPartition).length,
+      reportKeys: isObject(report) ? Object.keys(report as any).slice(0, 10) : "not an object",
+      dataKeys: isObject(data) ? Object.keys(data as any).slice(0, 10) : "not an object",
+    });
+  }
+  
+  const accounts: ReportAccount[] = asArray(tradeLinePartition).flatMap((partition) => asArray(isObject(partition) ? partition.Tradeline ?? partition : partition))
     .filter(isObject).map((trade) => {
       const granted = isObject(trade.GrantedTrade) ? trade.GrantedTrade : {};
       const openClosed = text(get(trade, "OpenClosed.symbol")) ?? text(trade.OpenClosed);
@@ -365,7 +392,7 @@ const parseCibil = (raw: unknown): Omit<NormalizedReport, "parserVersion" | "bur
         })).filter((entry) => entry.month).sort((a, b) => b.month.localeCompare(a.month)).slice(0, 24),
       };
     });
-  const enquiries: ReportEnquiry[] = asArray(get(report, "InquiryPartition")).flatMap((partition) => asArray(isObject(partition) ? partition.Inquiry ?? partition : partition))
+  const enquiries: ReportEnquiry[] = asArray(inquiryPartition).flatMap((partition) => asArray(isObject(partition) ? partition.Inquiry ?? partition : partition))
     .filter(isObject).map((enquiry) => ({
       lender: text(enquiry.subscriberName) ?? "Unknown lender",
       purpose: text(enquiry.inquiryType) ? accountType(enquiry.inquiryType) : text(get(enquiry, "Purpose.description")),

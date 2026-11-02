@@ -8,7 +8,7 @@ import path from "node:path";
 import { BUREAUS, bureauNames, fetchBureauReport, downloadReportPdf, isBureau, isBureauAvailable, livePdfUrl, missingApplicantFields, scoreBand, stateCodes, } from "./bureaus.js";
 import { completeReportRequest, authenticateCustomerByEmail, authenticateDatabaseAdmin, createDemoReportRequest, createAdminReportAudit, addSupportTicketComment, createAdminSession, completeAdminReportAudit, createOtp, createCustomerInvitation, createAdminInvitation, acceptAdminInvitation, createReportPayment, createSession, failReportRequest, findReportPayment, findReportRequest, findSessionUser, findAdminSession, findUserByEmail, getApplicant, getAdminActivity, getAdminAnalytics, getAdminCustomers, getAdminReportDocument, getDashboardStatus, getReportDetail, getReportPdf, initializeDatabase, listAdminAccounts, listAdminUsers, listCustomerInvitations, listSupportTickets, markEmailVerified, markPaymentFailed, markPaymentPaidAndCreateRequest, recordPaymentFailure, markReportProcessing, revokeSession, revokeAdminSession, setAdminAccountStatus, setCustomerPassword, setCustomerAccountStatus, updateSupportTicket, createSupportTicket, cancelCustomerInvitation, saveAssessment, saveReportPdf, saveWebsiteInquiry, saveKycProfile, setUserEmailIfMissing, upsertUserByMobile, verifyOtp, } from "./database.js";
 import { generateReportPdf } from "./reportPdf.js";
-import { verifyFirebasePhoneToken } from "./firebaseAdmin.js";
+import { verifyFirebaseGoogleToken, verifyFirebasePhoneToken } from "./firebaseAdmin.js";
 import { demoReportResponses, isReportsDemoMode } from "./demoReports.js";
 import { createRazorpayOrder, isRazorpayConfigured, isSimulatedPayments, isValidPaymentSignature, simulatedId } from "./razorpay.js";
 import { normalizeReport } from "./reportParser.js";
@@ -126,7 +126,7 @@ const fieldLabels = {
     goal: "Improvement goal",
 };
 app.get("/api/health", (_request, response) => {
-    response.json({ status: "ok", service: "Score Now API" });
+    response.json({ status: "ok", service: "Scorenow API" });
 });
 app.post("/api/auth/email/login", async (request, response) => {
     const ipAddress = requestIpAddress(request);
@@ -554,26 +554,20 @@ app.get("/api/admin/reports/:auditId/pdf", requireAdmin, requireAdminRoles("owne
         response.status(500).json({ message: "Unable to generate this report PDF." });
     }
 });
-// Returns whether the code was actually delivered, so the caller can decide
-// whether to echo a sample code back to the client for easy testing.
 const sendOtpEmail = async (to, code) => {
     const transport = createMailTransport();
-    if (!transport) {
-        console.log(`[dev] Email OTP for ${to}: ${code}`);
+    if (!transport)
         return false;
-    }
     await transport.sendMail({
-        from: process.env.SMTP_FROM || process.env.SMTP_USER || "Score Now Website <no-reply@scorenow.in>",
+        from: process.env.SMTP_FROM || process.env.SMTP_USER || "Scorenow Website <no-reply@scorenow.in>",
         to,
-        subject: "Your Score Now verification code",
-        text: `Your Score Now verification code is ${code}. It expires in 5 minutes.`,
-        html: `<div style="font-family:Arial,sans-serif;max-width:480px;margin:auto;color:#081446"><div style="padding:20px;background:#087af5;color:white"><h1 style="margin:0;font-size:20px">Score Now</h1></div><div style="padding:22px;background:#f7fbff"><p>Your verification code is:</p><p style="font-size:28px;font-weight:800;letter-spacing:6px">${code}</p><p style="color:#65708a;font-size:12px">This code expires in 5 minutes. If you did not request this, you can ignore this email.</p></div></div>`,
+        subject: "Your Scorenow verification code",
+        text: `Your Scorenow verification code is ${code}. It expires in 5 minutes.`,
+        html: `<div style="font-family:Arial,sans-serif;max-width:480px;margin:auto;color:#081446"><div style="padding:20px;background:#087af5;color:white"><h1 style="margin:0;font-size:20px">Scorenow</h1></div><div style="padding:22px;background:#f7fbff"><p>Your verification code is:</p><p style="font-size:28px;font-weight:800;letter-spacing:6px">${code}</p><p style="color:#65708a;font-size:12px">This code expires in 5 minutes. If you did not request this, you can ignore this email.</p></div></div>`,
     });
     return true;
 };
-// No SMS gateway is wired up yet; log the code so OTP login still works in development.
-const sendOtpSms = async (mobile, code) => {
-    console.log(`[dev] SMS OTP for +91${mobile}: ${code}`);
+const sendOtpSms = async (_mobile, _code) => {
     return false;
 };
 app.post("/api/auth/otp/request", async (request, response) => {
@@ -592,7 +586,11 @@ app.post("/api/auth/otp/request", async (request, response) => {
             }
             const { code } = await createOtp({ mobile, purpose: "login" });
             const delivered = await sendOtpSms(mobile, code);
-            response.json({ message: "A verification code was sent to your mobile number.", devCode: !delivered && process.env.NODE_ENV !== "production" ? code : undefined });
+            if (!delivered) {
+                response.status(503).json({ message: "SMS verification is unavailable. Please try Firebase phone sign-in." });
+                return;
+            }
+            response.json({ message: "A verification code was sent to your mobile number." });
             return;
         }
         const email = value.toLowerCase();
@@ -607,7 +605,11 @@ app.post("/api/auth/otp/request", async (request, response) => {
         }
         const { code } = await createOtp({ mobile: user.mobile, email, purpose: "login" });
         const delivered = await sendOtpEmail(email, code);
-        response.json({ message: "A verification code was sent to your email.", devCode: !delivered && process.env.NODE_ENV !== "production" ? code : undefined });
+        if (!delivered) {
+            response.status(503).json({ message: "Email verification is unavailable. Please try again later." });
+            return;
+        }
+        response.json({ message: "A verification code was sent to your email." });
     }
     catch (error) {
         response.status(429).json({ message: error instanceof Error ? error.message : "Unable to send a verification code." });
@@ -688,6 +690,45 @@ app.post("/api/auth/firebase-session", async (request, response) => {
         response.status(503).json({ message: error instanceof Error ? error.message : "Unable to verify your mobile sign-in." });
     }
 });
+app.post("/api/auth/google-session", async (request, response) => {
+    const ipAddress = requestIpAddress(request);
+    if (!canAttemptCustomerEmailLogin(ipAddress)) {
+        response.status(429).json({ message: "Too many sign-in attempts. Try again in 15 minutes." });
+        return;
+    }
+    const idToken = String(request.body.idToken || "");
+    if (!idToken) {
+        response.status(400).json({ message: "Missing Google sign-in token." });
+        return;
+    }
+    let token;
+    try {
+        token = await verifyFirebaseGoogleToken(idToken);
+    }
+    catch (error) {
+        console.error("Firebase Google token verification failed", error);
+        response.status(401).json({ message: error instanceof Error ? error.message : "Unable to verify your Google sign-in." });
+        return;
+    }
+    try {
+        const user = await findUserByEmail(token.email.trim().toLowerCase());
+        if (!user) {
+            response.status(404).json({ message: "No Scorenow account is linked to this Google email. Create an account with your mobile number first, then sign in with Google." });
+            return;
+        }
+        const verifiedUser = user.email_verified ? user : await markEmailVerified(user.id);
+        customerEmailLoginAttempts.delete(ipAddress);
+        response.json({
+            message: "Signed in successfully.",
+            user: verifiedUser,
+            token: await startSession(request, verifiedUser.id),
+        });
+    }
+    catch (error) {
+        console.error("Customer Google sign-in failed", error);
+        response.status(500).json({ message: "Unable to sign in with Google right now. Please try again." });
+    }
+});
 app.post("/api/auth/logout", async (request, response) => {
     const token = bearerToken(request);
     if (token)
@@ -760,6 +801,12 @@ const runReportFetch = async (userId, requestId, bureau, consentIpAddress) => {
         return result.diagnostics;
     }
     const report = normalizeReport(bureau, result.raw);
+    console.log(`Report normalized for ${bureau}:`, {
+        score: report.score,
+        accountsCount: report.accounts.length,
+        enquiriesCount: report.enquiries.length,
+        scoreFactorsCount: report.scoreFactors?.length ?? 0,
+    });
     await completeReportRequest({
         userId,
         requestId,
@@ -791,6 +838,13 @@ app.get("/api/reports/:requestId/pdf", requireUser, async (request, response) =>
             response.status(404).json({ message: "Report not found." });
             return;
         }
+        console.log(`PDF generation for ${request.params.requestId}:`, {
+            bureau: record.bureau,
+            hasStoredPdf: !!record.pdf,
+            accountsCount: record.report.accounts.length,
+            enquiriesCount: record.report.enquiries.length,
+            firstAccountLender: record.report.accounts[0]?.lender,
+        });
         let pdf = record.pdf;
         let generatedCopy = false;
         if (!pdf) {
@@ -820,6 +874,13 @@ app.get("/api/reports/:requestId", requireUser, async (request, response) => {
             response.status(404).json({ message: "Report not found." });
             return;
         }
+        // Debug: Log account/enquiry counts
+        console.log(`Report detail for ${request.params.requestId}:`, {
+            bureau: detail.bureau,
+            accountsCount: detail.accounts?.length ?? 0,
+            enquiriesCount: detail.enquiries?.length ?? 0,
+            firstAccountKeys: detail.accounts?.[0] ? Object.keys(detail.accounts[0]) : [],
+        });
         response.json(detail);
     }
     catch (error) {
@@ -1193,12 +1254,12 @@ app.post("/api/assessments", requireUser, upload.single("report"), async (reques
     }
     try {
         const result = await transport.sendMail({
-            from: process.env.SMTP_FROM || process.env.SMTP_USER || "Score Now Website <no-reply@scorenow.in>",
+            from: process.env.SMTP_FROM || process.env.SMTP_USER || "Scorenow Website <no-reply@scorenow.in>",
             to: "info@scorenow.in",
             replyTo: email,
             subject: `${title}: ${subjectName}`,
             text,
-            html: `<div style="font-family:Arial,sans-serif;max-width:640px;margin:auto;color:#081446"><div style="padding:22px;background:#087af5;color:white"><h1 style="margin:0;font-size:22px">Score Now</h1><p style="margin:5px 0 0">${title}</p></div><div style="padding:22px;background:#f7fbff"><p>A new assessment was submitted through the Score Now website.</p><table style="width:100%;border-collapse:collapse;background:white">${htmlRows}</table><p style="margin:18px 0 0;color:#65708a;font-size:12px">Credit report attached: <strong>${request.file ? "Yes" : "No"}</strong></p></div></div>`,
+            html: `<div style="font-family:Arial,sans-serif;max-width:640px;margin:auto;color:#081446"><div style="padding:22px;background:#087af5;color:white"><h1 style="margin:0;font-size:22px">Scorenow</h1><p style="margin:5px 0 0">${title}</p></div><div style="padding:22px;background:#f7fbff"><p>A new assessment was submitted through the Scorenow website.</p><table style="width:100%;border-collapse:collapse;background:white">${htmlRows}</table><p style="margin:18px 0 0;color:#65708a;font-size:12px">Credit report attached: <strong>${request.file ? "Yes" : "No"}</strong></p></div></div>`,
             attachments: request.file ? [{
                     filename: path.basename(request.file.originalname),
                     content: request.file.buffer,
@@ -1231,10 +1292,10 @@ const startServer = async () => {
         await initializeDatabase();
         app.listen(port, (error) => {
             if (error) {
-                console.error(`Unable to start Score Now API on port ${port}`, error);
+                console.error(`Unable to start Scorenow API on port ${port}`, error);
                 process.exit(1);
             }
-            console.log(`Score Now API is running at http://localhost:${port}`);
+            console.log(`Scorenow API is running at http://localhost:${port}`);
             if (isSimulatedPayments())
                 console.warn("PAYMENTS_MODE=simulated: report payments are auto-approved and NOT charged.");
         });

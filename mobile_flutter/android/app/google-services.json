@@ -1,0 +1,47 @@
+{
+  "project_info": {
+    "project_number": "923206991481",
+    "project_id": "bharatshop-3eff7",
+    "storage_bucket": "bharatshop-3eff7.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:923206991481:android:b3e835056aec3bc4d85ea8",
+        "android_client_info": {
+          "package_name": "in.scorenow.app"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "923206991481-s1o0dcl2o2m8o10dlmo6qtvb0g0hdisi.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "in.scorenow.app",
+            "certificate_hash": "e50c7bfa80a1961373ae2e1203992c1df26deedb"
+          }
+        },
+        {
+          "client_id": "923206991481-26g502t7u9v0l6top8r5dgs87vqvmjjs.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCvaMPaoMEO3Jf64HfNuuKV0vCNyATpNcI"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "923206991481-26g502t7u9v0l6top8r5dgs87vqvmjjs.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

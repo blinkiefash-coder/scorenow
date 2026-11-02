@@ -1,6 +1,13 @@
 import { getApp, getApps, initializeApp, type FirebaseApp } from 'firebase/app'
 import { getAnalytics, isSupported, type Analytics } from 'firebase/analytics'
-import { getAuth, RecaptchaVerifier, signInWithPhoneNumber, type ConfirmationResult } from 'firebase/auth'
+import {
+  getAuth,
+  GoogleAuthProvider,
+  RecaptchaVerifier,
+  signInWithPhoneNumber,
+  signInWithPopup,
+  type ConfirmationResult,
+} from 'firebase/auth'
 
 export type { ConfirmationResult }
 
@@ -27,6 +34,13 @@ export const sendFirebasePhoneOtp = async (mobile: string): Promise<Confirmation
     recaptchaVerifier = new RecaptchaVerifier(firebaseAuth, 'firebase-recaptcha', { size: 'invisible' })
   }
   return signInWithPhoneNumber(firebaseAuth, `+91${mobile}`, recaptchaVerifier)
+}
+
+export const signInWithGoogle = async (): Promise<string> => {
+  const provider = new GoogleAuthProvider()
+  provider.setCustomParameters({ prompt: 'select_account' })
+  const result = await signInWithPopup(firebaseAuth, provider)
+  return result.user.getIdToken()
 }
 
 export const resetFirebaseRecaptcha = () => {

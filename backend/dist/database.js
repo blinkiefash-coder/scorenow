@@ -563,7 +563,7 @@ export const upsertUserByMobile = async ({ mobile, fullName, email, }) => {
      ON CONFLICT (mobile) DO UPDATE
        SET mobile_verified = TRUE,
            updated_at = NOW()
-     RETURNING id, mobile, email, full_name, email_verified, status`, [mobile, fullName?.trim() || inviteResult.rows[0]?.full_name || "Score Now User"]);
+     RETURNING id, mobile, email, full_name, email_verified, status`, [mobile, fullName?.trim() || inviteResult.rows[0]?.full_name || "Scorenow User"]);
     const user = rows[0];
     if (user.status !== "active")
         throw new Error("This account is currently disabled. Please contact support.");
@@ -656,6 +656,22 @@ export const setUserEmailIfMissing = async (userId, email) => {
         throw new Error("That email is already linked to another account.");
     }
 };
+// Counts, per month, how many accounts were paid late (1+ days past due) out of those with a reported status.
+const monthlyPaymentSignal = (accounts) => {
+    const months = new Map();
+    for (const account of accounts ?? []) {
+        for (const entry of account.paymentHistory) {
+            if (!entry.month || entry.daysPastDue === null)
+                continue;
+            const item = months.get(entry.month) ?? { month: entry.month, late: 0, reported: 0 };
+            item.reported += 1;
+            if (entry.daysPastDue > 0)
+                item.late += 1;
+            months.set(entry.month, item);
+        }
+    }
+    return [...months.values()].sort((a, b) => a.month.localeCompare(b.month)).slice(-12);
+};
 const persistNormalizedReport = async (reportId, report) => {
     await pool.query(`UPDATE credit_reports SET normalized_report = $2, credit_score = $3, score_band = $4,
        total_accounts = $5, active_accounts = $6, overdue_accounts = $7,
@@ -667,7 +683,7 @@ const persistNormalizedReport = async (reportId, report) => {
 // Demo requests have no payment; they only exist when REPORTS_DEMO_MODE is on outside production.
 const VISIBLE_REQUEST = `(r.payment_id IS NOT NULL OR r.provider = 'demo')`;
 export const getDashboardStatus = async (userId) => {
-    const [profileResult, reportResult] = await Promise.all([
+    const [profileResult, reportResult, historyResult] = await Promise.all([
         pool.query(`SELECT id, name_as_per_pan, to_char(date_of_birth, 'YYYY-MM-DD') AS date_of_birth, city, state, pan_last4, kyc_status
        FROM kyc_profiles WHERE user_id = $1 ORDER BY created_at DESC LIMIT 1`, [userId]),
         pool.query(`SELECT DISTINCT ON (r.bureau)
@@ -679,11 +695,18 @@ export const getDashboardStatus = async (userId) => {
        LEFT JOIN credit_reports c ON c.request_id = r.id
        WHERE r.user_id = $1 AND ${VISIBLE_REQUEST}
        ORDER BY r.bureau, r.requested_at DESC`, [userId]),
+        pool.query(`SELECT r.bureau, c.credit_score AS score, to_char(COALESCE(c.report_date, r.requested_at::date), 'YYYY-MM-DD') AS date
+       FROM credit_report_requests r
+       JOIN credit_reports c ON c.request_id = r.id
+       WHERE r.user_id = $1 AND ${VISIBLE_REQUEST} AND r.status = 'completed' AND c.credit_score IS NOT NULL
+         AND COALESCE(c.report_date, r.requested_at::date) >= (CURRENT_DATE - INTERVAL '6 months')
+       ORDER BY date ASC, r.requested_at ASC`, [userId]),
     ]);
     const reports = await Promise.all(reportResult.rows.map(async (row) => {
         const { credit_report_id, raw_report, normalized_report, ...dashboardRow } = row;
-        if (!credit_report_id || !raw_report || normalized_report?.parserVersion === PARSER_VERSION)
-            return dashboardRow;
+        if (!credit_report_id || !raw_report || normalized_report?.parserVersion === PARSER_VERSION) {
+            return { ...dashboardRow, payment_months: monthlyPaymentSignal(normalized_report?.accounts) };
+        }
         const report = normalizeReport(row.bureau, raw_report);
         await persistNormalizedReport(credit_report_id, report);
         return {
@@ -695,9 +718,14 @@ export const getDashboardStatus = async (userId) => {
             overdue_accounts: report.summary.overdueAccounts,
             enquiries_last_6_months: report.summary.enquiriesLast6Months,
             total_outstanding: String(report.summary.totalBalance),
+            payment_months: monthlyPaymentSignal(report.accounts),
         };
     }));
-    return { profile: profileResult.rows[0] ?? null, reports };
+    return {
+        profile: profileResult.rows[0] ?? null,
+        reports,
+        history: historyResult.rows.map((row) => ({ bureau: row.bureau, score: Number(row.score), date: row.date })),
+    };
 };
 export const createReportPayment = async ({ userId, bureau, orderId, amount, gstAmount, gateway, }) => {
     await pool.query(`INSERT INTO payments (user_id, gateway, gateway_order_id, amount, gst_amount, status, report_bureau)

@@ -73,8 +73,8 @@ export const generateReportPdf = ({ report, reportDate }: ReportPdfInput): Promi
       margins: { top: 60, bottom: 62, left: 40, right: 40 },
       bufferPages: true,
       info: {
-        Title: `Score Now ${bureauName} report copy`,
-        Author: "Score Now",
+        Title: `Scorenow ${bureauName} report copy`,
+        Author: "Scorenow",
         Subject: "Credit report data summary",
       },
     });
@@ -306,7 +306,7 @@ export const generateReportPdf = ({ report, reportDate }: ReportPdfInput): Promi
     doc.rect(left, 84, width, 1.5).fill(theme.accent);
     doc.y = 98;
 
-    const notice = `This is a Score Now-generated report copy based on data returned by ${bureauName}. It is not issued, certified, or endorsed by the bureau and does not replace the original bureau report.`;
+    const notice = `This is a Scorenow-generated report copy based on data returned by ${bureauName}. It is not issued, certified, or endorsed by the bureau and does not replace the original bureau report.`;
     setText(false, 8, colors.muted);
     const noticeHeight = doc.heightOfString(toPdfText(notice), { width: width - 24 });
     doc.roundedRect(left, doc.y, width, noticeHeight + 14, 4).fill(colors.pale);
@@ -414,7 +414,7 @@ export const generateReportPdf = ({ report, reportDate }: ReportPdfInput): Promi
       const footerY = doc.page.height - 36;
       doc.moveTo(left, footerY - 8).lineTo(left + width, footerY - 8).strokeColor(colors.line).lineWidth(0.6).stroke();
       setText(false, 7.5, colors.muted);
-      doc.text(toPdfText(`Score Now report copy. Not issued or endorsed by ${bureauName}.`), left, footerY, { width: width * 0.75, lineBreak: false });
+      doc.text(toPdfText(`Scorenow report copy. Not issued or endorsed by ${bureauName}.`), left, footerY, { width: width * 0.75, lineBreak: false });
       doc.text(`Page ${index + 1} of ${pages.count}`, left, footerY, { width, align: "right", lineBreak: false });
     }
     doc.end();

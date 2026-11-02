@@ -8,7 +8,7 @@ import {
   ArrowUpDown, ArrowUpRight, ArrowDownLeft, Bell, Info, Target, TrendingUp, Users, Volume2, VolumeX, UserRound, WalletCards, X, Zap,
 } from 'lucide-react'
 import './App.css'
-import { resetFirebaseRecaptcha, sendFirebasePhoneOtp, type ConfirmationResult } from './firebase.ts'
+import { resetFirebaseRecaptcha, sendFirebasePhoneOtp, signInWithGoogle, type ConfirmationResult } from './firebase.ts'
 
 const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:3000'
 
@@ -134,10 +134,10 @@ const explainerScenes = [
   {
     icon: Headphones,
     label: 'Resolve',
-    title: 'Get a clear plan with Score Now',
+    title: 'Get a clear plan with Scorenow',
     metric: '1:1',
     metricLabel: 'Expert guidance',
-    narration: 'Score Now analyses your report, identifies high-impact issues and possible errors, and gives you a practical action plan with expert support throughout the process.',
+    narration: 'Scorenow analyses your report, identifies high-impact issues and possible errors, and gives you a practical action plan with expert support throughout the process.',
     captions: ['We analyse your reports and identify high-impact issues.', 'Our team helps you understand errors and correction steps.', 'You receive a practical roadmap with expert support.'],
     points: ['Detailed multi-bureau report review', 'Error identification and correction guidance', 'Personalised improvement roadmap'],
   },
@@ -209,7 +209,7 @@ function ImpactStats() {
   }, [])
 
   return (
-    <section ref={sectionRef} className={active ? 'trust-section impact-active' : 'trust-section'} aria-label="Score Now impact">
+    <section ref={sectionRef} className={active ? 'trust-section impact-active' : 'trust-section'} aria-label="Scorenow impact">
       <div className="container stat-grid">
         <div><span className="stat-icon pink"><Users /></span><p><CountUp value={100000} active={active} suffix="+" format="indian" />Customers Helped</p></div>
         <div><span className="stat-icon green"><Handshake /></span><p><CountUp value={2500} active={active} prefix="₹" suffix="+ Cr" format="indian" />Loans Assisted</p></div>
@@ -236,10 +236,14 @@ function ImpactStats() {
   )
 }
 
+function Spinner({ size = 18, active = true }: { size?: number; active?: boolean }) {
+  return <img className={active ? 'brand-spinner' : 'brand-spinner brand-spinner-idle'} src="/scorenow-mark.png" alt="" width={size} height={size} aria-hidden="true" />
+}
+
 function Brand({ href = '#home' }: { href?: string }) {
   return (
-    <a className="brand" href={href} aria-label="Score Now home">
-      <img src="/scorenow-logo-2026.jpg" alt="Score Now - Improve Your Credit Score" />
+    <a className="brand" href={href} aria-label="Scorenow home">
+      <img src="/scorenow-logo-2026.jpg" alt="Scorenow - Improve Your Credit Score" />
     </a>
   )
 }
@@ -443,13 +447,10 @@ function AuthModal({ open, notice, onClose, onSuccess }: { open: boolean; notice
   const [otpContact, setOtpContact] = useState<{ type: 'mobile' | 'email'; value: string }>({ type: 'mobile', value: '' })
   const [authError, setAuthError] = useState('')
   const [authLoading, setAuthLoading] = useState(false)
-  const [sampleOtp, setSampleOtp] = useState('')
   const pendingFullNameRef = useRef('')
   const pendingEmailRef = useRef('')
   const pendingPasswordRef = useRef('')
   const firebaseConfirmationRef = useRef<ConfirmationResult | null>(null)
-
-  const usesFirebasePhoneAuth = !import.meta.env.DEV
 
   useEffect(() => {
     if (!open) return
@@ -458,7 +459,6 @@ function AuthModal({ open, notice, onClose, onSuccess }: { open: boolean; notice
     setShowPassword(false)
     setOtpDigits(['', '', '', '', '', ''])
     setAuthError('')
-    setSampleOtp('')
     firebaseConfirmationRef.current = null
     resetFirebaseRecaptcha()
   }, [open])
@@ -484,10 +484,9 @@ function AuthModal({ open, notice, onClose, onSuccess }: { open: boolean; notice
   if (!open) return null
 
   const requestOtp = async (type: 'mobile' | 'email', value: string) => {
-    if (type === 'mobile' && usesFirebasePhoneAuth) {
+    if (type === 'mobile') {
       resetFirebaseRecaptcha()
       firebaseConfirmationRef.current = await sendFirebasePhoneOtp(value)
-      setSampleOtp('')
       return
     }
     const response = await fetch(`${apiUrl}/api/auth/otp/request`, {
@@ -495,9 +494,8 @@ function AuthModal({ open, notice, onClose, onSuccess }: { open: boolean; notice
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ type, value }),
     })
-    const result = await response.json() as { message?: string; devCode?: string }
+    const result = await response.json() as { message?: string }
     if (!response.ok) throw new Error(result.message || 'Unable to send a verification code.')
-    setSampleOtp(result.devCode || '')
   }
 
   const submitLogin = async (event: FormEvent<HTMLFormElement>) => {
@@ -528,6 +526,28 @@ function AuthModal({ open, notice, onClose, onSuccess }: { open: boolean; notice
       setView('otp')
     } catch (error) {
       setAuthError(error instanceof Error ? error.message : 'Unable to send a verification code.')
+    } finally {
+      setAuthLoading(false)
+    }
+  }
+
+  const submitGoogleLogin = async () => {
+    setAuthError('')
+    setAuthLoading(true)
+    try {
+      const idToken = await signInWithGoogle()
+      const response = await fetch(`${apiUrl}/api/auth/google-session`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ idToken }),
+      })
+      const result = await response.json() as { message?: string; user?: Omit<AuthUser, 'token'>; token?: string }
+      if (!response.ok) throw new Error(result.message || 'Unable to sign in with Google.')
+      if (!result.user || !result.token) throw new Error('Unable to complete Google sign-in.')
+      onSuccess({ ...result.user, token: result.token })
+      onClose()
+    } catch (error) {
+      setAuthError(error instanceof Error ? error.message : 'Unable to sign in with Google.')
     } finally {
       setAuthLoading(false)
     }
@@ -577,7 +597,6 @@ function AuthModal({ open, notice, onClose, onSuccess }: { open: boolean; notice
     setAuthLoading(true)
     try {
       const response = otpContact.type === 'mobile'
-        && usesFirebasePhoneAuth
         ? await (async () => {
             const confirmation = firebaseConfirmationRef.current
             if (!confirmation) throw new Error('Request a new SMS code and try again.')
@@ -629,14 +648,14 @@ function AuthModal({ open, notice, onClose, onSuccess }: { open: boolean; notice
         className="auth-modal"
         role="dialog"
         aria-modal="true"
-        aria-label={view === 'login' ? 'Sign in to Score Now' : view === 'signup' ? 'Create a Score Now account' : 'Verify your mobile number'}
+        aria-label={view === 'login' ? 'Sign in to Scorenow' : view === 'signup' ? 'Create a Scorenow account' : 'Verify your mobile number'}
         onClick={(event) => event.stopPropagation()}
       >
         {view === 'otp'
           ? <button className="auth-back" type="button" onClick={() => setView(otpOrigin)} aria-label="Go back"><ArrowLeft /></button>
           : <button className="auth-close" type="button" onClick={onClose} aria-label="Close"><X /></button>}
 
-        <img className="auth-brand" src="/scorenow-logo-hd.png" alt="Score Now" />
+        <img className="auth-brand" src="/scorenow-logo-hd.png" alt="Scorenow" />
         <div id="firebase-recaptcha" />
 
         {view === 'otp' ? (
@@ -644,11 +663,6 @@ function AuthModal({ open, notice, onClose, onSuccess }: { open: boolean; notice
             <span className="auth-shield"><ShieldCheck /></span>
             <h3>Verify Your {otpContact.type === 'mobile' ? 'Mobile Number' : 'Email Address'}</h3>
             <p>Enter the 6-digit code sent to<br /><strong>{maskedContact}</strong></p>
-            {sampleOtp && (
-              <button type="button" className="auth-sample-otp" onClick={() => setOtpDigits(sampleOtp.split(''))}>
-                <ShieldCheck /> Sample OTP (dev mode): <strong>{sampleOtp}</strong>
-              </button>
-            )}
             {authError && <p className="auth-error">{authError}</p>}
             <form className="auth-form otp-form" onSubmit={submitOtp}>
               <OtpInputs digits={otpDigits} onChange={setOtpDigits} />
@@ -663,7 +677,7 @@ function AuthModal({ open, notice, onClose, onSuccess }: { open: boolean; notice
           <>
             <span className="auth-avatar"><UserRound /></span>
             <h3>{view === 'login' ? 'Welcome Back' : 'Create Your Account'}</h3>
-            <p>{view === 'login' ? 'Sign in to continue to Score Now.' : 'Start improving your credit profile in just a few steps.'}</p>
+            <p>{view === 'login' ? 'Sign in to continue to Scorenow.' : 'Start improving your credit profile in just a few steps.'}</p>
             {notice && <p className="auth-notice" role="alert"><LockKeyhole /> {notice}</p>}
 
             {view === 'login' && (
@@ -703,11 +717,13 @@ function AuthModal({ open, notice, onClose, onSuccess }: { open: boolean; notice
             )}
 
             <div className="auth-divider"><span>or continue with</span></div>
-            <button className="auth-google" type="button"><GoogleIcon /> Continue with Google</button>
+            <button className="auth-google" type="button" onClick={() => void submitGoogleLogin()} disabled={authLoading}>
+              <GoogleIcon /> {authLoading ? 'Signing in…' : 'Continue with Google'}
+            </button>
 
             <p className="auth-switch">
               {view === 'login'
-                ? <>New to Score Now? <button type="button" onClick={() => setView('signup')}>Create Account</button></>
+                ? <>New to Scorenow? <button type="button" onClick={() => setView('signup')}>Create Account</button></>
                 : <>Already registered? <button type="button" onClick={() => setView('login')}>Sign In</button></>}
             </p>
           </>
@@ -720,9 +736,9 @@ function AuthModal({ open, notice, onClose, onSuccess }: { open: boolean; notice
 function AppDownload() {
   return (
     <div className="app-download">
-      <strong>Score Now on mobile</strong>
+      <strong>Scorenow on mobile</strong>
       <small>Apps coming soon</small>
-      <div className="store-badges" aria-label="Score Now mobile apps coming soon">
+      <div className="store-badges" aria-label="Scorenow mobile apps coming soon">
         <span className="store-badge"><Smartphone /><span><small>Coming soon on the</small><b>App Store</b></span></span>
         <span className="store-badge"><Play /><span><small>Coming soon on</small><b>Google Play</b></span></span>
       </div>
@@ -827,7 +843,7 @@ function AssessmentPathways() {
   const [selectedSituation, setSelectedSituation] = useState(0)
   const situation = creditSituations[selectedSituation]
   const SituationIcon = situation.icon
-  const situationMessage = encodeURIComponent(`Hello Score Now, I need help with: ${situation.title}. Please guide me on the next steps.`)
+  const situationMessage = encodeURIComponent(`Hello Scorenow, I need help with: ${situation.title}. Please guide me on the next steps.`)
 
   return (
     <>
@@ -865,19 +881,19 @@ function PlansSection() {
       <div className="container plans-heading"><p className="section-kicker">35% Launch Offer</p><h2>Choose the Support That <span>Fits Your Profile</span></h2><p>Limited-period pricing across all plans. The final service scope is confirmed after reviewing your credit profile.</p></div>
       <div className="container plans-grid">
         {servicePlans.map((plan) => {
-          const message = encodeURIComponent(`Hello Score Now, I am interested in the ${plan.name} plan. Please share the recommended scope and pricing for my credit profile.`)
+          const message = encodeURIComponent(`Hello Scorenow, I am interested in the ${plan.name} plan. Please share the recommended scope and pricing for my credit profile.`)
           return <article className={plan.featured ? 'featured' : ''} key={plan.name}>{plan.featured && <span className="popular-label"><Star /> Most Popular</span>}<span className="discount-badge">35% OFF</span><p>Best for</p><h3>{plan.name}</h3><span className="plan-audience">{plan.audience}</span><ul>{plan.features.map((feature) => <li key={feature}><Check />{feature}</li>)}</ul><div className="plan-footer"><small>{plan.duration}</small><span className="original-price">{plan.originalPrice} + GST</span><strong>{plan.offerPrice} <small>+ GST</small></strong><a className="button button-primary" href={`https://wa.me/919114141011?text=${message}`} target="_blank" rel="noreferrer">Choose {plan.name}<ArrowRight /></a></div></article>
         })}
       </div>
       <div className="container subscription-panel" id="subscription">
         <div className="subscription-heading"><p className="section-kicker">Subscription</p><h3>A plan is an option. A subscription is your <span>active support engagement.</span></h3><p>Selecting a plan does not start a subscription. We confirm your scope, pricing, and start date with you first.</p></div>
-        <div className="subscription-pricing" aria-label="Score Now subscription plans">
-          {subscriptionPlans.map((plan) => <article className={plan.featured ? 'featured' : ''} key={plan.name}>{plan.featured && <span className="subscription-popular">Most Popular</span>}<small>{plan.duration}</small><h4>{plan.name}</h4><strong>{plan.price}</strong><span>{plan.note}</span><a className="button button-primary" href={`https://wa.me/919114141011?text=${encodeURIComponent(`Hello Score Now, I would like to subscribe to the ${plan.name} plan for ${plan.price}. Please share the next steps.`)}`} target="_blank" rel="noreferrer"><MessageCircle /> Subscribe</a></article>)}
+        <div className="subscription-pricing" aria-label="Scorenow subscription plans">
+          {subscriptionPlans.map((plan) => <article className={plan.featured ? 'featured' : ''} key={plan.name}>{plan.featured && <span className="subscription-popular">Most Popular</span>}<small>{plan.duration}</small><h4>{plan.name}</h4><strong>{plan.price}</strong><span>{plan.note}</span><a className="button button-primary" href={`https://wa.me/919114141011?text=${encodeURIComponent(`Hello Scorenow, I would like to subscribe to the ${plan.name} plan for ${plan.price}. Please share the next steps.`)}`} target="_blank" rel="noreferrer"><MessageCircle /> Subscribe</a></article>)}
         </div>
         <div className="subscription-steps">
           {subscriptionSteps.map((step, index) => { const Icon = step.icon; return <article key={step.title}><span><Icon /></span><small>Step {index + 1}</small><strong>{step.title}</strong><p>{step.text}</p></article> })}
         </div>
-        <a className="button button-primary subscription-cta" href={`https://wa.me/919114141011?text=${encodeURIComponent('Hello Score Now, I would like to start a subscription. Please help me choose a plan and confirm the scope, pricing, and start date.')}`} target="_blank" rel="noreferrer"><MessageCircle /> Start a subscription <ArrowRight /></a>
+        <a className="button button-primary subscription-cta" href={`https://wa.me/919114141011?text=${encodeURIComponent('Hello Scorenow, I would like to start a subscription. Please help me choose a plan and confirm the scope, pricing, and start date.')}`} target="_blank" rel="noreferrer"><MessageCircle /> Start a subscription <ArrowRight /></a>
       </div>
       <p className="plans-note container"><ShieldCheck /> No score outcome is guaranteed. Recommendations depend on your report, repayment behaviour, and bureau updates.</p>
       <div className="container inclusions-heading"><p className="section-kicker">Included Support</p><h3>What Our Plans Can Include</h3><p>Service tenure and included support vary by selected plan.</p></div>
@@ -962,7 +978,7 @@ function CreditJourney() {
       </div>
       <div className="container journey-player">
         <div className={`journey-stage scene-${activeScene + 1} ${isPlaying ? 'playing' : ''}`} key={activeScene}>
-          <div className="presentation-top"><span>Score Now Guide</span><span>{String(activeScene + 1).padStart(2, '0')} / {String(explainerScenes.length).padStart(2, '0')}</span></div>
+          <div className="presentation-top"><span>Scorenow Guide</span><span>{String(activeScene + 1).padStart(2, '0')} / {String(explainerScenes.length).padStart(2, '0')}</span></div>
           <div className="presentation-title"><span className="scene-icon"><SceneIcon /></span><div><p>{scene.label}</p><h3>{scene.title}</h3></div></div>
           <div className="presentation-body">
             <div className="presentation-metric"><strong>{scene.metric}</strong><small>{scene.metricLabel}</small></div>
@@ -1188,7 +1204,7 @@ function ChatAssistant({ requireLogin, isDashboard = false }: { requireLogin: Re
   const phoneDigits = phone.replace(/\D/g, '')
   const contactPhone = phoneDigits.length === 10 ? phoneDigits : 'not provided'
   const whatsappMessage = encodeURIComponent(
-    `Hello Score Now, I am ${name}. I need help with: ${concern}. My credit score range is: ${scoreRange}. My phone number is: ${contactPhone}.`,
+    `Hello Scorenow, I am ${name}. I need help with: ${concern}. My credit score range is: ${scoreRange}. My phone number is: ${contactPhone}.`,
   )
 
   const submitName = (event: FormEvent) => {
@@ -1255,7 +1271,7 @@ function ChatAssistant({ requireLogin, isDashboard = false }: { requireLogin: Re
   }, [isOpen, step])
 
   return (
-    <aside className={`chat-assistant${isOpen ? ' open' : ''}${isDashboard ? ' dashboard-assistant' : ''}`} aria-label="Score Now chat assistant">
+    <aside className={`chat-assistant${isOpen ? ' open' : ''}${isDashboard ? ' dashboard-assistant' : ''}`} aria-label="Scorenow chat assistant">
       {isOpen && (
         <div className="chat-panel">
           <div className="chat-header">
@@ -1310,9 +1326,9 @@ function ChatAssistant({ requireLogin, isDashboard = false }: { requireLogin: Re
       )}
       {!isOpen && <div className="chat-presence">
         <div className="chat-invite"><strong>Hi, I'm Neha</strong><span>Need help with your credit score?</span></div>
-        <button className="assistant-face" type="button" onClick={() => setIsOpen(true)} aria-label="Chat with Neha, Score Now credit assistant" title="Chat with Neha"><img src="/neha-avatar.svg" alt="" /><i /></button>
+        <button className="assistant-face" type="button" onClick={() => setIsOpen(true)} aria-label="Chat with Neha, Scorenow credit assistant" title="Chat with Neha"><img src="/neha-avatar.svg" alt="" /><i /></button>
       </div>}
-      <button className="chat-launcher" type="button" onClick={() => setIsOpen((open) => !open)} aria-label={isOpen ? 'Close Score Now assistant' : 'Open Score Now assistant'} aria-expanded={isOpen}>
+      <button className="chat-launcher" type="button" onClick={() => setIsOpen((open) => !open)} aria-label={isOpen ? 'Close Scorenow assistant' : 'Open Scorenow assistant'} aria-expanded={isOpen}>
         {isOpen ? <X /> : <MessageCircle />}{!isOpen && <span>Chat with us</span>}
       </button>
     </aside>
@@ -1458,7 +1474,7 @@ function LoanPaymentPage({ user, report, onGetReport }: { user: AuthUser; report
 
       {!report && <article className="dashboard-card empty-report-card"><div className="empty-dashboard-state"><FileSearch /><strong>Get a credit report to see your loans</strong><span>Your running and defaulted loans appear here once you have a credit report.</span><a className="dashboard-score-cta" href="#credit-reports" onClick={onGetReport}>Get a credit report <ArrowRight /></a></div></article>}
       {error && <p className="dashboard-notice error">{error}</p>}
-      {report && !accounts && !error && <div className="dashboard-card report-loading"><RotateCcw /> Loading your loans…</div>}
+      {report && !accounts && !error && <div className="dashboard-card report-loading"><Spinner size={18} /> Loading your loans…</div>}
       {accounts && <>
         <div className="loan-stats">{stats.map(({ tone, icon: Icon, label, value, note }) => (
           <article className={`loan-stat ${tone}`} key={label}><span className="loan-stat-icon"><Icon /></span><div><small>{label}</small><strong>{value}</strong><span>{note}</span></div></article>
@@ -1727,7 +1743,7 @@ function ReportDetailView({ user, requestId }: { user: AuthUser; requestId: stri
   }, [requestId, user])
 
   if (error) return <p className="dashboard-notice error">{error}</p>
-  if (!detail) return <div className="dashboard-card report-loading"><RotateCcw /> Loading full report…</div>
+  if (!detail) return <div className="dashboard-card report-loading"><Spinner size={18} /> Loading full report…</div>
 
   const { summary, personal } = detail
   const bureauLabel = bureauCatalog.find((item) => item.id === detail.bureau)?.name ?? detail.bureau
@@ -1774,7 +1790,7 @@ function ReportDetailView({ user, requestId }: { user: AuthUser; requestId: stri
           {detail.pdfAvailable && <button type="button" className="button button-primary" disabled={downloading} onClick={() => void downloadPdf()}><Download /> {downloading ? 'Preparing…' : 'Download PDF'}</button>}
         </div>
       </article>
-      <p className="dashboard-notice info">If a bureau-issued PDF is unavailable, the download is a Score Now-generated report copy based on the bureau data, not an official bureau document.</p>
+      <p className="dashboard-notice info">If a bureau-issued PDF is unavailable, the download is a Scorenow-generated report copy based on the bureau data, not an official bureau document.</p>
       {downloadError && <p className="dashboard-notice error" role="alert">{downloadError}</p>}
       <div className="report-summary-strip">
         <div><small>Total accounts</small><strong>{summary.totalAccounts}</strong></div>
@@ -1958,8 +1974,8 @@ function SimulatedCheckout({ checkout, onApprove, onDismiss }: { checkout: Simul
     <div className="auth-overlay" role="presentation" onClick={stage === 'select' ? onDismiss : undefined}>
       <div className="sim-checkout" role="dialog" aria-modal="true" aria-label="Payment" onClick={(event) => event.stopPropagation()}>
         <header>
-          <img src="/scorenow-logo-hd.png" alt="Score Now" />
-          <div><strong>Score Now</strong><small>{checkout.bureauName} credit report</small></div>
+          <img src="/scorenow-logo-hd.png" alt="Scorenow" />
+          <div><strong>Scorenow</strong><small>{checkout.bureauName} credit report</small></div>
           <b>₹{(checkout.amount / 100).toFixed(2)}</b>
           {stage === 'select' && <button type="button" onClick={onDismiss} aria-label="Close"><X /></button>}
         </header>
@@ -1975,7 +1991,7 @@ function SimulatedCheckout({ checkout, onApprove, onDismiss }: { checkout: Simul
           <button type="button" className="button button-primary sim-pay" onClick={pay}>Pay ₹{(checkout.amount / 100).toFixed(2)}</button>
           <p className="sim-note"><ShieldCheck /> Payments are auto-approved while our payment gateway is being activated. You will not be charged.</p>
         </>}
-        {stage === 'processing' && <div className="sim-status"><RotateCcw className="spin" /><strong>Processing payment…</strong></div>}
+        {stage === 'processing' && <div className="sim-status"><Spinner size={32} /><strong>Processing payment…</strong></div>}
         {stage === 'approved' && <div className="sim-status approved"><span><Check /></span><strong>Payment approved</strong><small>Fetching your report…</small></div>}
       </div>
     </div>
@@ -2023,7 +2039,7 @@ function ProfileOnboarding({ user, onComplete, onLogout }: { user: AuthUser; onC
   return (
     <div className="dashboard-shell onboarding-shell">
       <aside className="dashboard-sidebar"><Brand href="/" /><div className="dashboard-support"><span><ShieldCheck /></span><strong>Your details stay protected</strong><p>PAN is stored encrypted and only shared with the credit bureau you choose.</p><button type="button" onClick={onLogout}>Log Out <ArrowRight /></button></div></aside>
-      <main className="dashboard-main"><div className="onboarding-wrap"><div className="onboarding-intro"><span className="onboarding-kicker"><Sparkles /> Almost there</span><h1>Complete your credit profile</h1><p>We need these details to fetch your credit report from CIBIL, Equifax, or Experian.</p><div className="onboarding-steps"><span className="active"><b>1</b>Profile details</span><span><b>2</b>Choose bureau &amp; pay</span><span><b>3</b>Credit dashboard</span></div></div><form className="onboarding-form" onSubmit={submitProfile}><div className="onboarding-form-heading"><span><FileCheck2 /></span><div><h2>Verify your identity</h2><p>Use the details exactly as they appear on your PAN card.</p></div></div><div className="onboarding-form-grid"><label><span>Name as per PAN *</span><input name="nameAsPerPan" required minLength={2} placeholder="Enter your full name" autoComplete="name" /></label><label><span>PAN number *</span><input name="pan" required pattern="[A-Za-z]{5}[0-9]{4}[A-Za-z]" placeholder="ABCDE1234F" autoCapitalize="characters" /></label><label><span>Date of birth *</span><input name="dateOfBirth" type="date" required /></label><label><span>Gender *</span><select name="gender" required defaultValue=""><option value="" disabled>Select gender</option><option value="female">Female</option><option value="male">Male</option><option value="other">Other</option></select></label><label className="field-wide"><span>Address *</span><input name="addressLine1" required placeholder="House number and street" autoComplete="street-address" /></label><label><span>City *</span><input name="city" required placeholder="Your city" autoComplete="address-level2" /></label><label><span>State *</span><select name="state" required defaultValue=""><option value="" disabled>Select state</option>{indianStates.map((state) => <option key={state}>{state}</option>)}</select></label><label><span>PIN code *</span><input name="pincode" required inputMode="numeric" pattern="[0-9]{6}" placeholder="6-digit PIN" autoComplete="postal-code" /></label>{!user.email && <label className="field-wide"><span>Email address *</span><input name="email" type="email" required placeholder="you@example.com" autoComplete="email" /></label>}</div><label className="onboarding-consent"><input type="checkbox" required /><span>I agree to let Score Now share these details with the credit bureau I choose to fetch my credit report.</span></label>{error && <p className="auth-error">{error}</p>}<button className="button button-primary onboarding-submit" type="submit" disabled={saving}>{saving ? 'Saving profile…' : <>Save Profile &amp; Continue <ArrowRight /></>}</button></form></div></main>
+      <main className="dashboard-main"><div className="onboarding-wrap"><div className="onboarding-intro"><span className="onboarding-kicker"><Sparkles /> Almost there</span><h1>Complete your credit profile</h1><p>We need these details to fetch your credit report from CIBIL, Equifax, or Experian.</p><div className="onboarding-steps"><span className="active"><b>1</b>Profile details</span><span><b>2</b>Choose bureau &amp; pay</span><span><b>3</b>Credit dashboard</span></div></div><form className="onboarding-form" onSubmit={submitProfile}><div className="onboarding-form-heading"><span><FileCheck2 /></span><div><h2>Verify your identity</h2><p>Use the details exactly as they appear on your PAN card.</p></div></div><div className="onboarding-form-grid"><label><span>Name as per PAN *</span><input name="nameAsPerPan" required minLength={2} placeholder="Enter your full name" autoComplete="name" /></label><label><span>PAN number *</span><input name="pan" required pattern="[A-Za-z]{5}[0-9]{4}[A-Za-z]" placeholder="ABCDE1234F" autoCapitalize="characters" /></label><label><span>Date of birth *</span><input name="dateOfBirth" type="date" required /></label><label><span>Gender *</span><select name="gender" required defaultValue=""><option value="" disabled>Select gender</option><option value="female">Female</option><option value="male">Male</option><option value="other">Other</option></select></label><label className="field-wide"><span>Address *</span><input name="addressLine1" required placeholder="House number and street" autoComplete="street-address" /></label><label><span>City *</span><input name="city" required placeholder="Your city" autoComplete="address-level2" /></label><label><span>State *</span><select name="state" required defaultValue=""><option value="" disabled>Select state</option>{indianStates.map((state) => <option key={state}>{state}</option>)}</select></label><label><span>PIN code *</span><input name="pincode" required inputMode="numeric" pattern="[0-9]{6}" placeholder="6-digit PIN" autoComplete="postal-code" /></label>{!user.email && <label className="field-wide"><span>Email address *</span><input name="email" type="email" required placeholder="you@example.com" autoComplete="email" /></label>}</div><label className="onboarding-consent"><input type="checkbox" required /><span>I agree to let Scorenow share these details with the credit bureau I choose to fetch my credit report.</span></label>{error && <p className="auth-error">{error}</p>}<button className="button button-primary onboarding-submit" type="submit" disabled={saving}>{saving ? 'Saving profile…' : <>Save Profile &amp; Continue <ArrowRight /></>}</button></form></div></main>
     </div>
   )
 }
@@ -2112,14 +2128,14 @@ const guideProductOptions = [
     title: 'FD-backed secured card',
     description: 'Some providers offer a credit card secured against a fixed deposit. The deposit may be held as collateral while the card is active.',
     checks: 'Ask about the deposit lock-in, fees, interest, bureau reporting, and what happens if a payment is missed.',
-    message: 'Hello Score Now, I would like to ask about FD-backed secured credit card options.',
+    message: 'Hello Scorenow, I would like to ask about FD-backed secured credit card options.',
   },
   {
     icon: WalletCards,
     title: 'Existing or standard credit card',
     description: 'If you already have a card, regular on-time payments and sensible balances may help build a positive repayment record.',
     checks: 'Compare annual charges and repayment terms. Avoid applying for a card solely to chase a score increase.',
-    message: 'Hello Score Now, I would like guidance on choosing and managing a credit card responsibly.',
+    message: 'Hello Scorenow, I would like guidance on choosing and managing a credit card responsibly.',
   },
 ]
 
@@ -2197,7 +2213,7 @@ function CreditGuidePage({ slug }: { slug: string }) {
             <aside className="guide-help-callout">
               <span><MessageCircle /></span>
               <div><strong>Need help understanding your report?</strong><p>Ask our team about your report or general credit options.</p></div>
-              <a href={`https://wa.me/919114141011?text=${encodeURIComponent(`Hello Score Now, I have a question about: ${guide.title}`)}`} target="_blank" rel="noreferrer">Talk to our team <ArrowRight /></a>
+              <a href={`https://wa.me/919114141011?text=${encodeURIComponent(`Hello Scorenow, I have a question about: ${guide.title}`)}`} target="_blank" rel="noreferrer">Talk to our team <ArrowRight /></a>
             </aside>
           </article>
 
@@ -2357,7 +2373,7 @@ function DashboardPage({ user, onLogout }: { user: AuthUser; onLogout: () => voi
     }
   }
 
-  if (loading) return <div className="dashboard-loading"><span><RotateCcw /></span><strong>Loading your credit workspace…</strong></div>
+  if (loading) return <div className="dashboard-loading"><span><Spinner size={44} /></span><strong>Loading your credit workspace…</strong></div>
   if (!status?.profile) return <ProfileOnboarding user={user} onComplete={() => void loadStatus()} onLogout={onLogout} />
 
   const reportFor = (bureau: BureauId) => status.reports.find((report) => report.bureau === bureau)
@@ -2487,7 +2503,7 @@ function DashboardPage({ user, onLogout }: { user: AuthUser; onLogout: () => voi
           amount: order.amount,
           currency: order.currency,
           order_id: order.orderId,
-          name: 'Score Now',
+          name: 'Scorenow',
           description: `${order.bureauName} credit report`,
           image: '/scorenow-logo-hd.png',
           prefill: order.prefill,
@@ -2583,11 +2599,11 @@ function DashboardPage({ user, onLogout }: { user: AuthUser; onLogout: () => voi
       <main className="dashboard-main" id="dashboard-main">
         <header className="dashboard-topbar">
           <button className="dashboard-menu-button" type="button" aria-label="Open menu" aria-expanded={mobileNavOpen} aria-controls="dashboard-sidebar" onClick={() => setMobileNavOpen(true)}><Menu /></button>
-          <div className="dashboard-page-heading"><span>Score Now <b>/</b> {page === 'fd' ? 'Investment products' : page === 'cards' ? 'Credit cards' : 'Credit workspace'}</span><strong>{{ loans: 'Loan payment', fd: 'Fixed deposits', cards: 'Credit Cards', overview: 'Your dashboard' }[page]}</strong></div>
+          <div className="dashboard-page-heading"><span>Scorenow <b>/</b> {page === 'fd' ? 'Investment products' : page === 'cards' ? 'Credit cards' : 'Credit workspace'}</span><strong>{{ loans: 'Loan payment', fd: 'Fixed deposits', cards: 'Credit Cards', overview: 'Your dashboard' }[page]}</strong></div>
           <div className="dashboard-top-actions">
             <span className="dashboard-updated">{activeReport ? <>Last updated <strong>{formatDate(activeReport.report_date)}</strong></> : 'Your credit workspace'}</span>
             <button className="dashboard-refresh-button" type="button" onClick={() => void loadStatus(true)} disabled={refreshing}>
-              <RotateCcw className={refreshing ? 'spin' : ''} />{refreshing ? 'Refreshing…' : 'Refresh dashboard'}
+              <Spinner size={18} active={refreshing} />{refreshing ? 'Refreshing…' : 'Refresh dashboard'}
             </button>
             <a className="dashboard-score-cta" href="#credit-reports" onClick={(event) => openNav(event, '#credit-reports')}>Get a credit report <ArrowRight /></a>
             <AuthAvatarButton user={user} onClick={() => undefined} onLogout={onLogout} />
@@ -2597,7 +2613,7 @@ function DashboardPage({ user, onLogout }: { user: AuthUser; onLogout: () => voi
         <div className="dashboard-content">
           {page === 'loans' ? <LoanPaymentPage user={user} report={activeReport} onGetReport={() => setPage('overview')} /> : page === 'fd' ? <FixedDepositsPage /> : page === 'cards' ? <CreditCardsPage /> : <>
           <div className="dashboard-welcome">
-            <div><span className="dashboard-kicker">YOUR CREDIT WORKSPACE</span><h1>{greeting}, {firstName}! <span>👋</span></h1><p>{completedReports.length ? 'Your credit picture, with Score Now here to help you understand what comes next.' : 'Start with a report. We’ll help you understand it and guide you through what to do next.'}</p></div>
+            <div><span className="dashboard-kicker">YOUR CREDIT WORKSPACE</span><h1>{greeting}, {firstName}! <span>👋</span></h1><p>{completedReports.length ? 'Your credit picture, with Scorenow here to help you understand what comes next.' : 'Start with a report. We’ll help you understand it and guide you through what to do next.'}</p></div>
           </div>
 
           {notice && <p className={`dashboard-notice ${notice.tone}`} role="status">{notice.text}</p>}
@@ -2788,7 +2804,7 @@ function DashboardPage({ user, onLogout }: { user: AuthUser; onLogout: () => voi
             <article className="dashboard-card account-card" id="settings">
               <div className="dashboard-card-heading"><strong><Settings /> Settings</strong></div>
               <ul className="settings-list">
-                <li><span><Smartphone /></span><div><strong>Sign-in method</strong><small>{user.mobile ? `Mobile OTP · +91 ${user.mobile}` : user.email ? `Email · ${user.email}` : 'Score Now account'}</small></div></li>
+                <li><span><Smartphone /></span><div><strong>Sign-in method</strong><small>{user.mobile ? `Mobile OTP · +91 ${user.mobile}` : user.email ? `Email · ${user.email}` : 'Scorenow account'}</small></div></li>
                 <li><span><FileCheck2 /></span><div><strong>Update profile details</strong><small>To correct your PAN, name, or date of birth, contact our support team so the change can be verified.</small></div><a href="mailto:info@scorenow.in?subject=Profile%20update%20request">Request <ArrowRight /></a></li>
                 <li><span><LockKeyhole /></span><div><strong>Data &amp; privacy</strong><small>Your details are shared only with the credit bureau you choose when fetching a report.</small></div></li>
               </ul>
@@ -2804,18 +2820,18 @@ function DashboardPage({ user, onLogout }: { user: AuthUser; onLogout: () => voi
               <label>Message<textarea name="message" rows={4} minLength={3} maxLength={4000} placeholder="Include details that will help us resolve this for you." required /></label>
               {supportError && <p className="dashboard-notice error" role="alert">{supportError}</p>}
               {supportNotice && <p className="dashboard-notice info" role="status">{supportNotice}</p>}
-              <button type="submit" className="button button-primary" disabled={supportSubmitting}>{supportSubmitting ? <><RotateCcw className="spin" /> Sending…</> : <>Submit support ticket <ArrowRight /></>}</button>
+              <button type="submit" className="button button-primary" disabled={supportSubmitting}>{supportSubmitting ? <><Spinner size={16} /> Sending…</> : <>Submit support ticket <ArrowRight /></>}</button>
             </form>
             <div className="customer-ticket-section">
-              <div className="customer-ticket-heading"><h3>Your support tickets</h3><button type="button" className="button button-outline" onClick={() => { setSupportLoading(true); setSupportRefresh((refresh) => refresh + 1) }} disabled={supportLoading}><RotateCcw /> Refresh</button></div>
-              {supportLoading && <div className="customer-ticket-loading" role="status"><RotateCcw className="spin" /> Loading your tickets…</div>}
+              <div className="customer-ticket-heading"><h3>Your support tickets</h3><button type="button" className="button button-outline" onClick={() => { setSupportLoading(true); setSupportRefresh((refresh) => refresh + 1) }} disabled={supportLoading}><Spinner size={16} active={supportLoading} /> Refresh</button></div>
+              {supportLoading && <div className="customer-ticket-loading" role="status"><Spinner size={16} /> Loading your tickets…</div>}
               {!supportLoading && supportTickets.length === 0 && <p className="customer-ticket-empty">Your submitted support requests will appear here.</p>}
               <div className="customer-ticket-list">
                 {supportTickets.map((ticket) => <article className="customer-ticket" key={ticket.id}>
                   <div className="customer-ticket-top"><div><strong>{ticket.subject}</strong><span className={`admin-status ${ticket.status === 'resolved' || ticket.status === 'closed' ? 'completed' : 'pending'}`}>{ticket.status.replace('_', ' ')}</span></div><time>{formatAdminTimestamp(ticket.updated_at)}</time></div>
                   <p className="customer-ticket-original">{ticket.message}</p>
                   {ticket.comments.length > 0 && <div className="customer-ticket-comments" aria-label="Ticket conversation">
-                    {ticket.comments.map((comment) => <div className={`customer-ticket-comment ${comment.author_type}`} key={comment.id}><div><strong>{comment.author_type === 'admin' ? 'Score Now support' : 'You'}</strong><time>{formatAdminTimestamp(comment.created_at)}</time></div><p>{comment.message}</p></div>)}
+                    {ticket.comments.map((comment) => <div className={`customer-ticket-comment ${comment.author_type}`} key={comment.id}><div><strong>{comment.author_type === 'admin' ? 'Scorenow support' : 'You'}</strong><time>{formatAdminTimestamp(comment.created_at)}</time></div><p>{comment.message}</p></div>)}
                   </div>}
                   {ticket.status !== 'closed' && <form className="customer-ticket-reply" onSubmit={(event) => void replyToSupportTicket(event, ticket.id)}>
                     <label className="sr-only" htmlFor={`customer-ticket-reply-${ticket.id}`}>Reply to {ticket.subject}</label>
@@ -2919,7 +2935,7 @@ function HomePage() {
               <p className="safe-note"><ShieldCheck /> Your data is 100% safe &amp; confidential</p>
             </div>
 
-            <div className="hero-visual" id="score" aria-label="Example Score Now mobile dashboard">
+            <div className="hero-visual" id="score" aria-label="Example Scorenow mobile dashboard">
               <div className="floating-card growth-card"><BarChart3 /><span><strong>+42 points</strong> in 6 months</span></div>
               <div className="floating-card approval-card"><BadgeIndianRupee /><span><strong>Better loan</strong> approval chances</span></div>
               <div className="phone">
@@ -3007,15 +3023,15 @@ function HomePage() {
 
         <section className="about-section section reveal-section" id="about" data-reveal>
           <div className="container about-grid">
-            <div><p className="section-kicker">About Score Now</p><h2>Credit guidance that stays <span>clear and practical.</span></h2></div>
-            <div className="about-copy"><p>Score Now helps individuals and businesses understand credit reports, identify areas that need attention, and take informed steps toward a healthier credit profile.</p><p>We focus on transparent guidance, data privacy, and practical actions. Credit outcomes depend on each person's report and financial behaviour, so we never promise instant or guaranteed score changes.</p><a className="text-link" href="#contact">Speak with our team <ArrowRight /></a></div>
+            <div><p className="section-kicker">About Scorenow</p><h2>Credit guidance that stays <span>clear and practical.</span></h2></div>
+            <div className="about-copy"><p>Scorenow helps individuals and businesses understand credit reports, identify areas that need attention, and take informed steps toward a healthier credit profile.</p><p>We focus on transparent guidance, data privacy, and practical actions. Credit outcomes depend on each person's report and financial behaviour, so we never promise instant or guaranteed score changes.</p><a className="text-link" href="#contact">Speak with our team <ArrowRight /></a></div>
           </div>
         </section>
 
         <section className="partner-opportunity section reveal-section" id="partner-opportunity" data-reveal>
           <div className="container">
             <div className="partner-opportunity-heading">
-              <p className="section-kicker">Grow with Score Now</p>
+              <p className="section-kicker">Grow with Scorenow</p>
               <h2>Want to become our <span>partner?</span></h2>
               <p>Bring credit guidance closer to people in your city. Talk with us about a franchise-style partnership and how we could work together in your area.</p>
             </div>
@@ -3024,7 +3040,7 @@ function HomePage() {
               <article><span><Users /></span><h3>Help more people</h3><p>Introduce individuals and businesses to practical credit support.</p></article>
               <article><span><Handshake /></span><h3>Explore partnership</h3><p>Discuss the opportunity, local fit, and possible next steps with our team.</p></article>
             </div>
-            <a className="button button-primary partner-opportunity-cta" href={`https://wa.me/919114141011?text=${encodeURIComponent('Hello Score Now, I am interested in becoming a partner in my city. Please share more about the franchise-style partnership opportunity.')}`} target="_blank" rel="noreferrer">
+            <a className="button button-primary partner-opportunity-cta" href={`https://wa.me/919114141011?text=${encodeURIComponent('Hello Scorenow, I am interested in becoming a partner in my city. Please share more about the franchise-style partnership opportunity.')}`} target="_blank" rel="noreferrer">
               <MessageCircle /> Discuss a Partnership <ArrowRight />
             </a>
           </div>
@@ -3032,7 +3048,7 @@ function HomePage() {
 
         <section className="cta-section reveal-section" id="contact" data-reveal>
           <div className="container cta-inner">
-            <div className="contact-copy"><p className="section-kicker">Contact Us</p><h2>Talk to a Score Now expert</h2><p>Choose the contact method that works best for you. Our team will help you understand the next steps.</p></div>
+            <div className="contact-copy"><p className="section-kicker">Contact Us</p><h2>Talk to a Scorenow expert</h2><p>Choose the contact method that works best for you. Our team will help you understand the next steps.</p></div>
             <div className="contact-options">
               <a className="contact-option whatsapp" href="https://wa.me/919114141011?text=Hello%20Score%20Now%2C%20I%20would%20like%20help%20with%20my%20credit%20score." target="_blank" rel="noreferrer"><MessageCircle /><span><small>Chat on WhatsApp</small><strong>+91 91141 41011</strong></span><ArrowRight /></a>
               <a className="contact-option" href="tel:+919114141011"><Phone /><span><small>Call our expert</small><strong>+91 91141 41011</strong></span><ArrowRight /></a>
@@ -3044,7 +3060,7 @@ function HomePage() {
 
       <footer>
         <div className="container footer-grid"><div><Brand /><p>Clear guidance for a stronger financial future.</p></div><div><strong>Company</strong><a href="#about">About Us</a><a href="#partner-opportunity">Partner with us</a><a href="#contact">Contact</a></div><div><strong>Services</strong><a href="#insights">Credit Report</a><a href="#services">Score Improvement</a></div><div><strong>Reach Us</strong><a href="tel:+919114141011">+91 91141 41011</a><a href="mailto:info@scorenow.in">info@scorenow.in</a></div><AppDownload /></div>
-        <div className="container footer-bottom"><span>© 2026 Score Now. All rights reserved.</span><span>Privacy Policy · Terms of Use</span></div>
+        <div className="container footer-bottom"><span>© 2026 Scorenow. All rights reserved.</span><span>Privacy Policy · Terms of Use</span></div>
       </footer>
       <ChatAssistant requireLogin={requireLogin} />
       {authModal}
@@ -3055,8 +3071,8 @@ function HomePage() {
 function BusinessPage() {
   const [menuOpen, setMenuOpen] = useState(false)
   const { user, logout, requireLogin, openAuth, authModal } = useLoginGate()
-  const businessMessage = encodeURIComponent('Hello Score Now, I would like to discuss the Business CMR Improvement Programme.')
-  const shieldMessage = encodeURIComponent('Hello Score Now, I would like to discuss the Credit Shield 360 annual business membership.')
+  const businessMessage = encodeURIComponent('Hello Scorenow, I would like to discuss the Business CMR Improvement Programme.')
+  const shieldMessage = encodeURIComponent('Hello Scorenow, I would like to discuss the Credit Shield 360 annual business membership.')
 
   return (
     <div className="site-shell business-page">
@@ -3091,10 +3107,10 @@ function BusinessPage() {
         </section>
 
         <section className="business-confidence section">
-          <div className="container"><p className="section-kicker">Why Score Now</p><h2>Practical Support for <span>Commercial Credit</span></h2><div className="confidence-grid"><div><ShieldCheck /><strong>Privacy first</strong><span>Business and report details are handled carefully.</span></div><div><FileSearch /><strong>Thorough review</strong><span>We examine payment behaviour, exposure, and trade lines.</span></div><div><Users /><strong>Human guidance</strong><span>Understand each issue with clear expert support.</span></div><div><TrendingUp /><strong>Actionable roadmap</strong><span>Prioritised next steps aligned to funding readiness.</span></div></div></div>
+          <div className="container"><p className="section-kicker">Why Scorenow</p><h2>Practical Support for <span>Commercial Credit</span></h2><div className="confidence-grid"><div><ShieldCheck /><strong>Privacy first</strong><span>Business and report details are handled carefully.</span></div><div><FileSearch /><strong>Thorough review</strong><span>We examine payment behaviour, exposure, and trade lines.</span></div><div><Users /><strong>Human guidance</strong><span>Understand each issue with clear expert support.</span></div><div><TrendingUp /><strong>Actionable roadmap</strong><span>Prioritised next steps aligned to funding readiness.</span></div></div></div>
         </section>
       </main>
-      <footer><div className="container footer-grid"><div><Brand href="/" /><p>Clear guidance for a stronger financial future.</p></div><div><strong>Explore</strong><a href="/">Individuals</a><a href="/business">Businesses</a></div><div><strong>Business</strong><a href="#business-assessment">Assessment</a><a href="#business-plans">Plans</a></div><div><strong>Reach Us</strong><a href="tel:+919114141011">+91 91141 41011</a><a href="mailto:info@scorenow.in">info@scorenow.in</a></div><AppDownload /></div><div className="container footer-bottom"><span>© 2026 Score Now. All rights reserved.</span><span>Privacy Policy · Terms of Use</span></div></footer>
+      <footer><div className="container footer-grid"><div><Brand href="/" /><p>Clear guidance for a stronger financial future.</p></div><div><strong>Explore</strong><a href="/">Individuals</a><a href="/business">Businesses</a></div><div><strong>Business</strong><a href="#business-assessment">Assessment</a><a href="#business-plans">Plans</a></div><div><strong>Reach Us</strong><a href="tel:+919114141011">+91 91141 41011</a><a href="mailto:info@scorenow.in">info@scorenow.in</a></div><AppDownload /></div><div className="container footer-bottom"><span>© 2026 Scorenow. All rights reserved.</span><span>Privacy Policy · Terms of Use</span></div></footer>
       <ChatAssistant requireLogin={requireLogin} />
       {authModal}
     </div>
@@ -3191,7 +3207,7 @@ function CreditScorePage() {
 
   return (
     <main className="cibil-page">
-      <header className="cibil-header"><Brand href="/" /><a href="/" aria-label="Return to Score Now"><ArrowLeft /> Home</a></header>
+      <header className="cibil-header"><Brand href="/" /><a href="/" aria-label="Return to Scorenow"><ArrowLeft /> Home</a></header>
       <div className="cibil-layout">
         <section className="cibil-intro">
           <span className="cibil-kicker"><ShieldCheck /> Secure credit report request</span>
@@ -3238,7 +3254,7 @@ function CreditScorePage() {
           <details className="cibil-raw-response"><summary>View full API response</summary><pre>{JSON.stringify(report, null, 2)}</pre></details>
         </section>}
       </div>
-      <footer className="cibil-footer">Score Now <span>·</span> Handle credit and identity data responsibly.</footer>
+      <footer className="cibil-footer">Scorenow <span>·</span> Handle credit and identity data responsibly.</footer>
       <ChatAssistant requireLogin={requireLogin} />
       {authModal}
     </main>
@@ -3768,7 +3784,7 @@ function AdminPage() {
   }
   const customerTotalPages = Math.max(1, Math.ceil(customerTotal / 50))
 
-  if (authState === 'checking') return <div className="admin-loading"><RotateCcw /> Verifying admin session…</div>
+  if (authState === 'checking') return <div className="admin-loading"><Spinner size={20} /> Verifying admin session…</div>
 
   return (
     <main className="admin-shell">
@@ -3799,15 +3815,15 @@ function AdminPage() {
           <p>Private operations workspace</p>
         </aside>
         <div className="admin-content">
-        {(activeSection === 'overview' ? activityLoading : activeSection === 'reports' ? loading : sectionLoading) && <div className="admin-data-loading" role="status"><RotateCcw /> Loading {activeSection === 'overview' ? 'activity' : activeSection === 'reports' ? 'the credit report' : activeSection === 'tickets' ? 'support tickets' : activeSection === 'customers' ? 'customer records' : activeSection === 'team' ? 'admin team' : 'analytics'} from the database…</div>}
+        {(activeSection === 'overview' ? activityLoading : activeSection === 'reports' ? loading : sectionLoading) && <div className="admin-data-loading" role="status"><Spinner size={18} /> Loading {activeSection === 'overview' ? 'activity' : activeSection === 'reports' ? 'the credit report' : activeSection === 'tickets' ? 'support tickets' : activeSection === 'customers' ? 'customer records' : activeSection === 'team' ? 'admin team' : 'analytics'} from the database…</div>}
         {sectionError && activeSection !== 'overview' && <p className="dashboard-notice error" role="alert">{sectionError}</p>}
-        {activeSection !== 'overview' && <div className="admin-section-actions"><button className="button button-outline" type="button" onClick={() => { setSectionLoading(true); setSectionRefresh((refresh) => refresh + 1) }} disabled={sectionLoading}><RotateCcw /> {sectionLoading ? 'Refreshing…' : 'Refresh section'}</button></div>}
+        {activeSection !== 'overview' && <div className="admin-section-actions"><button className="button button-outline" type="button" onClick={() => { setSectionLoading(true); setSectionRefresh((refresh) => refresh + 1) }} disabled={sectionLoading}><Spinner size={16} active={sectionLoading} /> {sectionLoading ? 'Refreshing…' : 'Refresh section'}</button></div>}
         {activeSection === 'overview' ? <>
         <div className="admin-heading"><span>SECURE OPERATIONS</span><h1>Admin overview</h1><p>Review customer activity, payment outcomes, and bureau report requests.</p></div>
         <section className="admin-activity" aria-label="Admin activity">
           <div className="admin-activity-toolbar">
             <label className="admin-activity-search"><Search /><input aria-label="Search admin activity on this page" type="search" value={activitySearch} onChange={(event) => { setActivitySearch(event.target.value); setActivityPage(1) }} placeholder="Search this page by name, phone, bureau, or status" /></label>
-            <button className="button button-outline" type="button" onClick={refreshActivity} disabled={activityLoading}><RotateCcw /> {activityLoading ? 'Refreshing…' : 'Refresh activity'}</button>
+            <button className="button button-outline" type="button" onClick={refreshActivity} disabled={activityLoading}><Spinner size={16} active={activityLoading} /> {activityLoading ? 'Refreshing…' : 'Refresh activity'}</button>
           </div>
           {activityError && <p className="dashboard-notice error" role="alert">{activityError}</p>}
           {reportPdfError && <p className="dashboard-notice error" role="alert">{reportPdfError}</p>}
@@ -3875,13 +3891,13 @@ function AdminPage() {
             <label>PIN code<input name="pincode" inputMode="numeric" pattern="[0-9]{6}" maxLength={6} autoComplete="postal-code" required /></label>
             <label>Gender<select name="gender" required defaultValue=""><option value="" disabled>Select</option><option value="female">Female</option><option value="male">Male</option><option value="other">Other</option></select></label>
           </div>
-          <label className="admin-consent"><input type="checkbox" name="clientConsent" required /><span>I confirm the client has authorized Score Now to submit these details to the selected credit bureau for this report request.</span></label>
+          <label className="admin-consent"><input type="checkbox" name="clientConsent" required /><span>I confirm the client has authorized Scorenow to submit these details to the selected credit bureau for this report request.</span></label>
           {reportError && <p className="dashboard-notice error" role="alert">{reportError}</p>}
           <button className="button button-primary" type="submit" disabled={loading}>{loading ? 'Requesting report…' : <>Fetch {bureauCatalog.find((item) => item.id === bureau)?.name} report <ArrowRight /></>}</button>
         </form>
         {report && <section className="admin-report-result" aria-live="polite">
-          <div className="report-toolbar-actions"><button className="button button-primary" type="button" onClick={() => void downloadAdminReportPdf(reportAuditId, report.bureau)} disabled={reportPdfLoadingId === reportAuditId || !reportAuditId}><Download /> {reportPdfLoadingId === reportAuditId ? 'Preparing PDF…' : 'Download Score Now PDF'}</button></div>
-          <p className="dashboard-notice info">This is a Score Now-generated copy based on bureau data, not an official bureau-issued report.</p>
+          <div className="report-toolbar-actions"><button className="button button-primary" type="button" onClick={() => void downloadAdminReportPdf(reportAuditId, report.bureau)} disabled={reportPdfLoadingId === reportAuditId || !reportAuditId}><Download /> {reportPdfLoadingId === reportAuditId ? 'Preparing PDF…' : 'Download Scorenow PDF'}</button></div>
+          <p className="dashboard-notice info">This is a Scorenow-generated copy based on bureau data, not an official bureau-issued report.</p>
           {reportPdfError && <p className="dashboard-notice error" role="alert">{reportPdfError}</p>}
           <div className="admin-result-heading"><div><span>{bureauCatalog.find((item) => item.id === report.bureau)?.name} REPORT</span><h2>{report.personal.name || 'Client report'}</h2></div><strong>{report.score ?? '—'}<small>{report.score ? 'Credit score' : 'Score unavailable'}</small></strong></div>
           <div className="report-summary-strip">
@@ -3901,7 +3917,7 @@ function AdminPage() {
           <div className="admin-heading"><span>CUSTOMER CARE</span><h1>Customers</h1><p>Search verified customer accounts by name, phone, email, or an exact PAN. PAN is only shown as its last four characters.</p></div>
           <div className="admin-customer-toolbar">
             <label className="admin-activity-search"><Search /><input aria-label="Search customers by name, mobile, email, or PAN" value={customerSearch} onChange={(event) => { setCustomerSearch(event.target.value); setCustomerPage(1); setSectionLoading(true) }} placeholder="Name, mobile, email, or PAN" /></label>
-            <button type="button" className="button button-outline" onClick={() => { setSectionLoading(true); setSectionRefresh((refresh) => refresh + 1) }} disabled={sectionLoading}><RotateCcw /> Refresh</button>
+            <button type="button" className="button button-outline" onClick={() => { setSectionLoading(true); setSectionRefresh((refresh) => refresh + 1) }} disabled={sectionLoading}><Spinner size={16} active={sectionLoading} /> Refresh</button>
           </div>
           {sectionLoading && !customers.length && <p className="admin-activity-empty">Loading customer records…</p>}
           <article className="dashboard-card admin-activity-card">
@@ -3973,7 +3989,7 @@ function AdminPage() {
           </article>
         </> : activeSection === 'tickets' ? <>
           <div className="admin-heading"><span>CUSTOMER SUPPORT</span><h1>Helpline tickets</h1><p>Review customer-submitted requests, reply in the ticket conversation, assign an owner, and update status. Website callback requests are also added here.</p></div>
-          <div className="admin-ticket-toolbar"><label>Status filter<select value={ticketStatus} onChange={(event) => { setTicketStatus(event.target.value); setSectionLoading(true) }}><option value="">All tickets</option><option value="open">Open</option><option value="in_progress">In progress</option><option value="resolved">Resolved</option><option value="closed">Closed</option></select></label><button className="button button-outline" type="button" onClick={() => { setSectionLoading(true); setSectionRefresh((refresh) => refresh + 1) }} disabled={sectionLoading}><RotateCcw /> Refresh</button></div>
+          <div className="admin-ticket-toolbar"><label>Status filter<select value={ticketStatus} onChange={(event) => { setTicketStatus(event.target.value); setSectionLoading(true) }}><option value="">All tickets</option><option value="open">Open</option><option value="in_progress">In progress</option><option value="resolved">Resolved</option><option value="closed">Closed</option></select></label><button className="button button-outline" type="button" onClick={() => { setSectionLoading(true); setSectionRefresh((refresh) => refresh + 1) }} disabled={sectionLoading}><Spinner size={16} active={sectionLoading} /> Refresh</button></div>
           <div className="admin-ticket-list">{tickets.length ? tickets.map((ticket) => <article className="dashboard-card admin-ticket" key={ticket.id}>
             <div className="admin-ticket-top"><div><span className={`admin-status ${ticket.priority === 'urgent' || ticket.priority === 'high' ? 'failed' : 'pending'}`}>{ticket.priority}</span><span className={`admin-status ${ticket.status === 'resolved' || ticket.status === 'closed' ? 'completed' : 'pending'}`}>{ticket.status.replace('_', ' ')}</span></div><time>{formatAdminTimestamp(ticket.created_at)}</time></div>
             <h2>{ticket.subject}</h2><p>{ticket.message}</p><div className="admin-ticket-customer"><strong>{ticket.requester_name}</strong><span>{ticket.requester_mobile}</span><small>Created by {ticket.created_by}</small></div>
@@ -4022,23 +4038,23 @@ function App() {
     const isCreditScorePage = pathname === '/creditscore'
     const isAdminPage = pathname === '/admin'
     const title = currentGuide
-      ? `${currentGuide.title} | Score Now`
+      ? `${currentGuide.title} | Scorenow`
       : isCreditScorePage
-      ? 'Credit Score Report Request | Score Now'
+      ? 'Credit Score Report Request | Scorenow'
       : isAdminPage
-        ? 'Administrator | Score Now'
+        ? 'Administrator | Scorenow'
         : isBusinessPage
-        ? 'Business Credit Report & CMR Guidance | Score Now'
-        : 'Credit Score Guidance & Report Help in India | Score Now'
+        ? 'Business Credit Report & CMR Guidance | Scorenow'
+        : 'Credit Score Guidance & Report Help in India | Scorenow'
     const description = currentGuide
       ? currentGuide.description
       : isBusinessPage
-      ? 'Understand your commercial credit report, identify CMR issues, and get practical business credit guidance from Score Now.'
+      ? 'Understand your commercial credit report, identify CMR issues, and get practical business credit guidance from Scorenow.'
       : isAdminPage
-        ? 'Private Score Now administration workspace.'
+        ? 'Private Scorenow administration workspace.'
         : isCreditScorePage
-        ? 'Securely request a CIBIL credit report through Score Now. This private report request page is restricted to authorised use.'
-        : 'Get practical credit score and credit report guidance in India. Score Now helps you understand CIBIL reports, identify errors, and plan next steps.'
+        ? 'Securely request a CIBIL credit report through Scorenow. This private report request page is restricted to authorised use.'
+        : 'Get practical credit score and credit report guidance in India. Scorenow helps you understand CIBIL reports, identify errors, and plan next steps.'
     const canonicalUrl = `https://scorenow.in${pathname || '/'}`
     const isDashboardPage = pathname === '/dashboard'
     const robotsContent = isCreditScorePage || isAdminPage || isDashboardPage ? 'noindex,nofollow,noarchive' : 'index,follow,max-image-preview:large'
