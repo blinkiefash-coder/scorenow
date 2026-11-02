@@ -3,5 +3,6 @@ Allow: /
 Disallow: /admin
 Disallow: /dashboard
 Disallow: /creditscore
+Disallow: /*?*token=
 
 Sitemap: https://scorenow.in/sitemap.xml

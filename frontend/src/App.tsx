@@ -515,9 +515,11 @@ function AuthModal({ open, notice, onClose, onSuccess }: { open: boolean; notice
     const onKeyDown = (event: KeyboardEvent) => { if (event.key === 'Escape') onClose() }
     document.addEventListener('keydown', onKeyDown)
     document.body.style.overflow = 'hidden'
+    document.documentElement.classList.add('auth-open')
     return () => {
       document.removeEventListener('keydown', onKeyDown)
       document.body.style.overflow = ''
+      document.documentElement.classList.remove('auth-open')
     }
   }, [open, onClose])
 
@@ -4689,7 +4691,7 @@ function App() {
         ? 'Administrator | Scorenow'
         : isBusinessPage
         ? 'Business Credit Report & CMR Guidance | Scorenow'
-        : 'Credit Score Guidance & Report Help in India | Scorenow'
+        : 'Scorenow | Check & Improve Your Credit Score in India'
     const description = currentGuide
       ? currentGuide.description
       : isBusinessPage
@@ -4698,7 +4700,7 @@ function App() {
         ? 'Private Scorenow administration workspace.'
         : isCreditScorePage
         ? 'Securely request a CIBIL credit report through Scorenow. This private report request page is restricted to authorised use.'
-        : 'Get practical credit score and credit report guidance in India. Scorenow helps you understand CIBIL reports, identify errors, and plan next steps.'
+        : 'Scorenow helps you check, understand and improve your credit score in India. Get expert CIBIL, Experian and Equifax report review, error correction guidance and a personalised plan to become loan-ready.'
     const canonicalUrl = `https://scorenow.in${pathname || '/'}`
     const isDashboardPage = pathname === '/dashboard'
     const robotsContent = isCreditScorePage || isAdminPage || isDashboardPage ? 'noindex,nofollow,noarchive' : 'index,follow,max-image-preview:large'
