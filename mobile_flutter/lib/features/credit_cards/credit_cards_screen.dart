@@ -9,7 +9,9 @@ import 'package:scorenow_mobile/widgets/notice_dialog.dart';
 import 'package:scorenow_mobile/widgets/segmented_chips.dart';
 
 class CreditCardsScreen extends StatefulWidget {
-  const CreditCardsScreen({super.key});
+  const CreditCardsScreen({super.key, this.embedded = false});
+
+  final bool embedded;
 
   @override
   State<CreditCardsScreen> createState() => _CreditCardsScreenState();
@@ -27,41 +29,45 @@ class _CreditCardsScreenState extends State<CreditCardsScreen> {
   @override
   Widget build(BuildContext context) {
     final cards = _visibleCards;
-    return ModalPage(
-      title: 'Credit cards',
-      children: [
-        SegmentedChips<CardCategory>(
-          options: [
-            for (final entry in cardCategoryLabels.entries)
-              (value: entry.key, label: entry.value),
-          ],
-          selected: _category,
-          onChanged: (value) => setState(() => _category = value),
-        ),
-        const SizedBox(height: 14),
-        if (cards.isEmpty)
-          const EmptyState(title: 'No cards in this category')
-        else
-          for (final card in cards)
-            CardOfferTile(
-              card: card,
-              onCheckEligibility: () => showNotice(
-                context,
-                DashboardNotice(
-                  title: 'Coming soon',
-                  message:
-                      'Applications for ${card.name} will open here soon. Fees, rewards and eligibility are set by the issuer.',
-                ),
+    final children = <Widget>[
+      SegmentedChips<CardCategory>(
+        options: [
+          for (final entry in cardCategoryLabels.entries)
+            (value: entry.key, label: entry.value),
+        ],
+        selected: _category,
+        onChanged: (value) => setState(() => _category = value),
+      ),
+      const SizedBox(height: 14),
+      if (cards.isEmpty)
+        const EmptyState(title: 'No cards in this category')
+      else
+        for (final card in cards)
+          CardOfferTile(
+            card: card,
+            onCheckEligibility: () => showNotice(
+              context,
+              DashboardNotice(
+                title: 'Coming soon',
+                message:
+                    'Applications for ${card.name} will open here soon. Fees, rewards and eligibility are set by the issuer.',
               ),
             ),
-        const Padding(
-          padding: EdgeInsets.only(top: 4),
-          child: Text(
-            'Card details are indicative. Fees, rewards and eligibility are decided by each issuer.',
-            style: TextStyle(fontSize: 11, color: AppColors.muted),
           ),
+      const Padding(
+        padding: EdgeInsets.only(top: 4),
+        child: Text(
+          'Card details are indicative. Fees, rewards and eligibility are decided by each issuer.',
+          style: TextStyle(fontSize: 11, color: AppColors.muted),
         ),
-      ],
-    );
+      ),
+    ];
+    if (widget.embedded) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: children,
+      );
+    }
+    return ModalPage(title: 'Credit cards', children: children);
   }
 }

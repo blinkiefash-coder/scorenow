@@ -44,10 +44,10 @@ class BureauPills extends StatelessWidget {
               padding: const EdgeInsets.symmetric(horizontal: 16),
               alignment: Alignment.center,
               decoration: BoxDecoration(
-                color: active ? AppColors.navy : Colors.white,
+                color: active ? AppColors.buttonBlue : Colors.white,
                 borderRadius: BorderRadius.circular(AppRadius.pill),
                 border: Border.all(
-                  color: active ? AppColors.navy : AppColors.line,
+                  color: active ? AppColors.buttonBlue : AppColors.line,
                 ),
               ),
               child: Text(

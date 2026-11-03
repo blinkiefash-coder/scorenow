@@ -19,7 +19,9 @@ const _avatarColors = [
 ];
 
 class FixedDepositsScreen extends StatefulWidget {
-  const FixedDepositsScreen({super.key});
+  const FixedDepositsScreen({super.key, this.embedded = false});
+
+  final bool embedded;
 
   @override
   State<FixedDepositsScreen> createState() => _FixedDepositsScreenState();
@@ -64,66 +66,67 @@ class _FixedDepositsScreenState extends State<FixedDepositsScreen> {
     final minInvest = fdPlans
         .map((plan) => plan.min)
         .reduce((a, b) => a < b ? a : b);
-    return ModalPage(
-      title: 'Fixed deposits',
-      children: [
-        Row(
-          children: [
-            Expanded(
-              child: StatTile(
-                label: 'Top rate',
-                value: '${topRate.toStringAsFixed(2)}%',
-                tone: AppColors.green,
-              ),
+    final children = <Widget>[
+      Row(
+        children: [
+          Expanded(
+            child: StatTile(
+              label: 'Top rate',
+              value: '${topRate.toStringAsFixed(2)}%',
+              tone: AppColors.green,
             ),
-            Expanded(
-              child: StatTile(
-                label: 'Partner banks',
-                value: '${fdPlans.length}',
-              ),
-            ),
-            Expanded(
-              child: StatTile(
-                label: 'Min. invest',
-                value: formatMoney(minInvest),
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 14),
-        SelectField(
-          label: 'Tenure',
-          value: _tenureLabel,
-          options: [for (final tenure in fdTenures) tenure.label],
-          onChanged: _selectTenureLabel,
-        ),
-        const SizedBox(height: 12),
-        SegmentedChips<bool>(
-          options: const [
-            (value: true, label: 'Highest rate first'),
-            (value: false, label: 'Lowest rate first'),
-          ],
-          selected: _descending,
-          onChanged: (value) => setState(() => _descending = value),
-        ),
-        const SizedBox(height: 12),
-        if (visible.isEmpty)
-          const EmptyState(title: 'No banks offer this tenure')
-        else
-          for (var index = 0; index < visible.length; index++)
-            _PlanCard(
-              plan: visible[index],
-              color: _avatarColors[index % _avatarColors.length],
-            ),
-        const Padding(
-          padding: EdgeInsets.only(top: 8),
-          child: Text(
-            'Interest rates are indicative and may change. Please confirm the latest rate and terms with the bank before investing.',
-            style: TextStyle(fontSize: 11, color: AppColors.muted),
           ),
+          Expanded(
+            child: StatTile(label: 'Partner banks', value: '${fdPlans.length}'),
+          ),
+          Expanded(
+            child: StatTile(
+              label: 'Min. invest',
+              value: formatMoney(minInvest),
+            ),
+          ),
+        ],
+      ),
+      const SizedBox(height: 14),
+      SelectField(
+        label: 'Tenure',
+        value: _tenureLabel,
+        options: [for (final tenure in fdTenures) tenure.label],
+        onChanged: _selectTenureLabel,
+      ),
+      const SizedBox(height: 12),
+      SegmentedChips<bool>(
+        options: const [
+          (value: true, label: 'Highest rate first'),
+          (value: false, label: 'Lowest rate first'),
+        ],
+        selected: _descending,
+        onChanged: (value) => setState(() => _descending = value),
+      ),
+      const SizedBox(height: 12),
+      if (visible.isEmpty)
+        const EmptyState(title: 'No banks offer this tenure')
+      else
+        for (var index = 0; index < visible.length; index++)
+          _PlanCard(
+            plan: visible[index],
+            color: _avatarColors[index % _avatarColors.length],
+          ),
+      const Padding(
+        padding: EdgeInsets.only(top: 8),
+        child: Text(
+          'Interest rates are indicative and may change. Please confirm the latest rate and terms with the bank before investing.',
+          style: TextStyle(fontSize: 11, color: AppColors.muted),
         ),
-      ],
-    );
+      ),
+    ];
+    if (widget.embedded) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: children,
+      );
+    }
+    return ModalPage(title: 'Fixed deposits', children: children);
   }
 }
 

@@ -4,7 +4,6 @@ import 'package:scorenow_mobile/core/theme.dart';
 import 'package:scorenow_mobile/features/home/score_factors.dart';
 import 'package:scorenow_mobile/models/report.dart';
 import 'package:scorenow_mobile/widgets/app_card.dart';
-import 'package:scorenow_mobile/widgets/app_pill.dart';
 
 class FactorSection extends StatelessWidget {
   const FactorSection({
@@ -19,6 +18,7 @@ class FactorSection extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final factors = buildFactorInsights(report: report, accounts: accounts);
+    void openReport() => context.push('/report/${report.requestId}');
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -26,103 +26,172 @@ class FactorSection extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              const Text(
-                'Score factors',
-                style: TextStyle(
-                  color: AppColors.navy,
-                  fontSize: 15,
-                  fontWeight: FontWeight.w800,
-                ),
-              ),
-              const SizedBox(height: 4),
-              const Text(
-                'What is shaping your score today',
-                style: TextStyle(color: AppColors.muted, fontSize: 12),
-              ),
-              for (final factor in factors) ...[
-                const Divider(height: 22, color: AppColors.line),
-                _FactorRow(factor: factor),
-              ],
-              const SizedBox(height: 8),
-              InkWell(
-                borderRadius: BorderRadius.circular(AppRadius.sm),
-                onTap: () => context.push('/report/${report.requestId}'),
-                child: const Padding(
-                  padding: EdgeInsets.symmetric(vertical: 8),
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Text(
-                        'View report details',
-                        style: TextStyle(
-                          color: AppColors.blue,
-                          fontSize: 12,
-                          fontWeight: FontWeight.w800,
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Score factors',
+                          style: TextStyle(
+                            color: AppColors.navy,
+                            fontSize: 18,
+                            fontWeight: FontWeight.w800,
+                          ),
                         ),
-                      ),
-                      SizedBox(width: 6),
-                      Icon(
-                        Icons.arrow_forward,
-                        size: 14,
-                        color: AppColors.blue,
-                      ),
-                    ],
+                        SizedBox(height: 2),
+                        Text(
+                          'What is shaping your score today?',
+                          style: TextStyle(
+                            color: AppColors.muted,
+                            fontSize: 12,
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
-                ),
+                  InkWell(
+                    onTap: openReport,
+                    child: const Padding(
+                      padding: EdgeInsets.only(top: 3),
+                      child: Row(
+                        children: [
+                          Text(
+                            'View details',
+                            style: TextStyle(
+                              color: AppColors.blueDark,
+                              fontSize: 12,
+                              fontWeight: FontWeight.w800,
+                            ),
+                          ),
+                          SizedBox(width: 4),
+                          Icon(
+                            Icons.arrow_forward,
+                            size: 14,
+                            color: AppColors.blueDark,
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
               ),
+              const SizedBox(height: 6),
+              for (var i = 0; i < factors.length; i++) ...[
+                if (i > 0) const Divider(height: 1, color: AppColors.line),
+                _FactorRow(factor: factors[i], onTap: openReport),
+              ],
             ],
           ),
         ),
-        const SizedBox(height: 14),
         _NextStepsCard(factors: factors),
       ],
     );
   }
 }
 
+Color _factorTone(FactorInsight factor) => switch (factor.status) {
+  FactorStatus.excellent => AppColors.green,
+  FactorStatus.good => AppColors.blue,
+  FactorStatus.needsWork => AppColors.red,
+  FactorStatus.noData => AppColors.muted,
+};
+
+const _tileColors = {
+  'Payment history': AppColors.red,
+  'Credit utilisation': AppColors.blue,
+  'Credit age': AppColors.violet,
+  'Credit mix': AppColors.green,
+  'Recent enquiries': AppColors.gold,
+};
+
 class _FactorRow extends StatelessWidget {
-  const _FactorRow({required this.factor});
+  const _FactorRow({required this.factor, required this.onTap});
 
   final FactorInsight factor;
+  final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        Row(
+    final tone = _factorTone(factor);
+    final tile = _tileColors[factor.title] ?? AppColors.blue;
+    return InkWell(
+      onTap: onTap,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 12),
+        child: Row(
           children: [
-            Icon(factor.icon, size: 18, color: AppColors.blue),
-            const SizedBox(width: 8),
+            Container(
+              width: 40,
+              height: 40,
+              decoration: BoxDecoration(
+                color: tile.withValues(alpha: 0.12),
+                borderRadius: BorderRadius.circular(AppRadius.sm),
+              ),
+              child: Icon(factor.icon, size: 20, color: tile),
+            ),
+            const SizedBox(width: 12),
             Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    factor.title,
+                    style: const TextStyle(
+                      color: AppColors.navy,
+                      fontSize: 13,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(AppRadius.pill),
+                    child: LinearProgressIndicator(
+                      value: factor.status == FactorStatus.noData
+                          ? 0
+                          : factor.progress,
+                      minHeight: 5,
+                      color: tone,
+                      backgroundColor: AppColors.line,
+                    ),
+                  ),
+                  const SizedBox(height: 5),
+                  Text(
+                    factor.detail,
+                    style: const TextStyle(
+                      color: AppColors.muted,
+                      fontSize: 10.5,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 10),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
+              decoration: BoxDecoration(
+                color: tone.withValues(alpha: 0.12),
+                borderRadius: BorderRadius.circular(AppRadius.pill),
+              ),
               child: Text(
-                factor.title,
-                style: const TextStyle(
-                  color: AppColors.navy,
-                  fontSize: 13,
+                factor.statusLabel,
+                style: TextStyle(
+                  color: tone,
+                  fontSize: 10,
                   fontWeight: FontWeight.w800,
                 ),
               ),
             ),
-            AppPill(label: factor.statusLabel, color: factor.tone),
+            const Icon(
+              Icons.chevron_right_rounded,
+              size: 20,
+              color: AppColors.muted,
+            ),
           ],
         ),
-        const SizedBox(height: 6),
-        ClipRRect(
-          borderRadius: BorderRadius.circular(AppRadius.pill),
-          child: LinearProgressIndicator(
-            value: factor.status == FactorStatus.noData ? 0 : factor.progress,
-            minHeight: 6,
-            color: factor.tone,
-            backgroundColor: AppColors.line,
-          ),
-        ),
-        const SizedBox(height: 6),
-        Text(
-          factor.detail,
-          style: const TextStyle(color: AppColors.muted, fontSize: 11),
-        ),
-      ],
+      ),
     );
   }
 }
@@ -134,7 +203,7 @@ class _NextStepsCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final steps = buildNextSteps(factors);
+    final steps = buildNextSteps(factors).take(4).toList();
     return AppCard(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -143,43 +212,70 @@ class _NextStepsCard extends StatelessWidget {
             'Your next steps',
             style: TextStyle(
               color: AppColors.navy,
-              fontSize: 15,
+              fontSize: 18,
               fontWeight: FontWeight.w800,
             ),
           ),
-          const SizedBox(height: 10),
+          const SizedBox(height: 2),
+          const Text(
+            'Personalised actions to improve your score',
+            style: TextStyle(color: AppColors.muted, fontSize: 12),
+          ),
+          const SizedBox(height: 14),
           if (steps.isEmpty)
-            const Text(
-              'Great work. Keep paying on time and keep your usage low.',
-              style: TextStyle(color: AppColors.muted, fontSize: 12),
+            const Padding(
+              padding: EdgeInsets.only(bottom: 10),
+              child: Text(
+                'Great work. Keep paying on time and keep your usage low.',
+                style: TextStyle(color: AppColors.muted, fontSize: 12),
+              ),
             )
           else
-            for (final step in steps.take(4)) ...[
-              _StepRow(title: step.title, area: step.detail, high: step.high),
+            for (var i = 0; i < steps.length; i++) ...[
+              _StepRow(
+                index: i + 1,
+                title: steps[i].title,
+                area: steps[i].detail,
+                high: steps[i].high,
+                onTap: () =>
+                    steps[i].detail == 'Payment history' ||
+                        steps[i].detail == 'Credit age'
+                    ? context.go('/payments')
+                    : context.push('/guides'),
+              ),
               const SizedBox(height: 10),
             ],
-          const SizedBox(height: 4),
           InkWell(
             borderRadius: BorderRadius.circular(AppRadius.sm),
             onTap: () => context.push('/guides'),
-            child: const Padding(
-              padding: EdgeInsets.symmetric(vertical: 6),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.center,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 13),
+              decoration: BoxDecoration(
+                color: AppColors.sky,
+                borderRadius: BorderRadius.circular(AppRadius.sm),
+              ),
+              child: const Row(
                 children: [
-                  Text(
-                    'Learn how to improve',
-                    style: TextStyle(
-                      color: AppColors.blue,
-                      fontSize: 12,
-                      fontWeight: FontWeight.w800,
+                  Icon(
+                    Icons.checklist_rtl_rounded,
+                    size: 20,
+                    color: AppColors.blueDark,
+                  ),
+                  SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      'View all personalised recommendations',
+                      style: TextStyle(
+                        color: AppColors.navy,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w800,
+                      ),
                     ),
                   ),
-                  SizedBox(width: 6),
                   Icon(
-                    Icons.menu_book_outlined,
-                    size: 14,
-                    color: AppColors.blue,
+                    Icons.chevron_right_rounded,
+                    size: 20,
+                    color: AppColors.blueDark,
                   ),
                 ],
               ),
@@ -192,47 +288,99 @@ class _NextStepsCard extends StatelessWidget {
 }
 
 class _StepRow extends StatelessWidget {
-  const _StepRow({required this.title, required this.area, required this.high});
+  const _StepRow({
+    required this.index,
+    required this.title,
+    required this.area,
+    required this.high,
+    required this.onTap,
+  });
 
+  final int index;
   final String title;
   final String area;
   final bool high;
+  final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
     final tone = high ? AppColors.red : AppColors.gold;
-    return Container(
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: AppColors.fieldFill,
-        borderRadius: BorderRadius.circular(AppRadius.md),
-        border: Border.all(color: AppColors.cardBorder),
-      ),
-      child: Row(
-        children: [
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  title,
-                  style: const TextStyle(
-                    color: AppColors.navy,
-                    fontSize: 13,
-                    fontWeight: FontWeight.w800,
-                  ),
+    final pillText = high ? AppColors.red : const Color(0xFFB07A00);
+    return InkWell(
+      borderRadius: BorderRadius.circular(AppRadius.md),
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+        decoration: BoxDecoration(
+          color: tone.withValues(alpha: 0.1),
+          borderRadius: BorderRadius.circular(AppRadius.md),
+        ),
+        child: Row(
+          children: [
+            Container(
+              width: 26,
+              height: 26,
+              alignment: Alignment.center,
+              decoration: BoxDecoration(
+                color: tone.withValues(alpha: 0.2),
+                shape: BoxShape.circle,
+              ),
+              child: Text(
+                '$index',
+                style: TextStyle(
+                  color: pillText,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w800,
                 ),
-                const SizedBox(height: 2),
-                Text(
-                  area,
-                  style: const TextStyle(color: AppColors.muted, fontSize: 11),
-                ),
-              ],
+              ),
             ),
-          ),
-          const SizedBox(width: 8),
-          AppPill(label: high ? 'High' : 'Medium', color: tone),
-        ],
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    title,
+                    style: const TextStyle(
+                      color: AppColors.navy,
+                      fontSize: 13,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    area,
+                    style: const TextStyle(
+                      color: AppColors.muted,
+                      fontSize: 11,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 8),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+              decoration: BoxDecoration(
+                color: tone.withValues(alpha: 0.18),
+                borderRadius: BorderRadius.circular(AppRadius.pill),
+              ),
+              child: Text(
+                high ? 'High' : 'Medium',
+                style: TextStyle(
+                  color: pillText,
+                  fontSize: 10.5,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+            ),
+            const Icon(
+              Icons.chevron_right_rounded,
+              size: 20,
+              color: AppColors.muted,
+            ),
+          ],
+        ),
       ),
     );
   }

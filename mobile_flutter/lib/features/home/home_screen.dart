@@ -7,8 +7,10 @@ import 'package:scorenow_mobile/features/dashboard/completed_reports.dart';
 import 'package:scorenow_mobile/features/dashboard/dashboard_scope.dart';
 import 'package:scorenow_mobile/features/home/bureau_pills.dart';
 import 'package:scorenow_mobile/features/home/complete_profile_banner.dart';
+import 'package:scorenow_mobile/features/home/home_banner.dart';
 import 'package:scorenow_mobile/features/home/home_header.dart';
 import 'package:scorenow_mobile/features/home/home_tabs.dart';
+import 'package:scorenow_mobile/features/home/score_predictor.dart';
 import 'package:scorenow_mobile/features/landing/assessment_api.dart';
 import 'package:scorenow_mobile/models/report.dart';
 import 'package:scorenow_mobile/widgets/animations.dart';
@@ -90,38 +92,20 @@ class _HomeScreenState extends State<HomeScreen> {
               initials: initials.isEmpty ? 'S' : initials,
               topInset: padding.top,
             ),
+            SlideUpAnimation(
+              delay: const Duration(milliseconds: 100),
+              child: HomeBanner(
+                name: firstName,
+                subtitle: reportDate == null
+                    ? 'Get your first report to see your score'
+                    : 'Your Credit Health Report • ${formatReportDate(reportDate)}',
+              ),
+            ),
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  const SizedBox(height: 6),
-                  SlideUpAnimation(
-                    delay: const Duration(milliseconds: 100),
-                    child: Text(
-                      'Hey $firstName 👋',
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        color: AppColors.navy,
-                        fontSize: 22,
-                        fontWeight: FontWeight.w800,
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 2),
-                  SlideUpAnimation(
-                    delay: const Duration(milliseconds: 150),
-                    child: Text(
-                      reportDate == null
-                          ? 'Get your first report to see your score'
-                          : 'Your Credit Score for ${formatReportDate(reportDate)}',
-                      style: const TextStyle(
-                        color: AppColors.muted,
-                        fontSize: 13,
-                      ),
-                    ),
-                  ),
                   const SizedBox(height: 14),
                   SlideUpAnimation(
                     delay: const Duration(milliseconds: 200),
@@ -129,6 +113,75 @@ class _HomeScreenState extends State<HomeScreen> {
                       completed: completed,
                       selected: best?.bureau,
                       onSelect: (bureau) => setState(() => _selected = bureau),
+                    ),
+                  ),
+                  const SizedBox(height: 14),
+                  ScaleInAnimation(
+                    delay: const Duration(milliseconds: 300),
+                    child: AppCard(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          Row(
+                            children: [
+                              ScoreGauge(
+                                score: score,
+                                band: best?.scoreBand,
+                                size: 160,
+                                compact: true,
+                              ),
+                              Container(
+                                width: 1,
+                                height: 78,
+                                margin: const EdgeInsets.symmetric(
+                                  horizontal: 12,
+                                ),
+                                color: AppColors.line,
+                              ),
+                              Expanded(
+                                child: _ScoreSummary(
+                                  score: score,
+                                  onTap: () => context.push('/guides'),
+                                ),
+                              ),
+                            ],
+                          ),
+                          if (best != null) ...[
+                            const SizedBox(height: 4),
+                            _DownloadButton(
+                              onTap: () =>
+                                  context.push('/report/${best.requestId}'),
+                            ),
+                          ],
+                        ],
+                      ),
+                    ),
+                  ),
+                  IntrinsicHeight(
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        Expanded(
+                          child: _QuickCard(
+                            icon: Icons.description_outlined,
+                            label: 'Report Summary',
+                            onTap: () => context.push('/reports'),
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: _QuickCard(
+                            icon: Icons.trending_up_rounded,
+                            label: 'Score Predictor',
+                            badge: best?.creditScore == null
+                                ? null
+                                : 'Personalised',
+                            onTap: best?.creditScore == null
+                                ? null
+                                : () => showScorePredictor(context, best!),
+                          ),
+                        ),
+                      ],
                     ),
                   ),
                   if (overdue != null && overdue > 0) ...[
@@ -142,70 +195,13 @@ class _HomeScreenState extends State<HomeScreen> {
                       ),
                     ),
                   ],
-                  const SizedBox(height: 14),
-                  ScaleInAnimation(
-                    delay: const Duration(milliseconds: 300),
-                    child: AppCard(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.stretch,
-                        children: [
-                          if (score != null && score < 750)
-                            _NeedsAttentionBanner(
-                              onTap: () => context.push('/guides'),
-                            ),
-                          if (score != null && score < 750)
-                            const SizedBox(height: 8),
-                          Center(
-                            child: ScoreGauge(
-                              score: score,
-                              band: best?.scoreBand,
-                              size: 200,
-                            ),
-                          ),
-                          const SizedBox(height: 12),
-                          if (best != null)
-                            FilledButton.icon(
-                              style: FilledButton.styleFrom(
-                                minimumSize: const Size.fromHeight(48),
-                              ),
-                              onPressed: () =>
-                                  context.push('/report/${best.requestId}'),
-                              icon: const Icon(Icons.download_rounded, size: 18),
-                              label: const Text(
-                                'Download Report',
-                                style: TextStyle(fontWeight: FontWeight.w800),
-                              ),
-                            ),
-                        ],
-                      ),
-                    ),
-                  ),
                   const SizedBox(height: 4),
                   StaggeredListAnimation(
                     baseDelay: const Duration(milliseconds: 350),
                     delayBetween: const Duration(milliseconds: 50),
                     animationType: AnimationType.slideUp,
                     children: [
-                      Row(
-                        children: [
-                          Expanded(
-                            child: _QuickTile(
-                              icon: Icons.description_outlined,
-                              label: 'Report Summary',
-                              onTap: () => context.push('/reports'),
-                            ),
-                          ),
-                          Container(width: 1, height: 22, color: AppColors.line),
-                          Expanded(
-                            child: _QuickTile(
-                              icon: Icons.trending_up_rounded,
-                              label: 'Score Predictor',
-                              comingSoon: true,
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 16),
+                      const SizedBox(height: 4),
                       UnderlineTabs<HomeTab>(
                         options: homeTabOptions,
                         selected: _tab,
@@ -289,11 +285,7 @@ class _AlertTile extends StatelessWidget {
         ),
         child: Row(
           children: [
-            const Icon(
-              Icons.error_outline_rounded,
-              color: AppColors.red,
-              size: 20,
-            ),
+            const Icon(Icons.error_rounded, color: AppColors.red, size: 22),
             const SizedBox(width: 10),
             Expanded(
               child: Text(
@@ -313,45 +305,6 @@ class _AlertTile extends StatelessWidget {
   }
 }
 
-class _NeedsAttentionBanner extends StatelessWidget {
-  const _NeedsAttentionBanner({required this.onTap});
-
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    return InkWell(
-      borderRadius: BorderRadius.circular(999),
-      onTap: onTap,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
-        decoration: BoxDecoration(
-          color: AppColors.red.withValues(alpha: 0.1),
-          borderRadius: BorderRadius.circular(999),
-        ),
-        child: const Row(
-          mainAxisSize: MainAxisSize.min,
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(Icons.error_rounded, color: AppColors.red, size: 18),
-            SizedBox(width: 8),
-            Text(
-              'Your Score Needs Attention',
-              style: TextStyle(
-                color: AppColors.red,
-                fontSize: 13,
-                fontWeight: FontWeight.w800,
-              ),
-            ),
-            SizedBox(width: 6),
-            Icon(Icons.arrow_forward_rounded, color: AppColors.red, size: 16),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
 class _AskNehaCard extends StatelessWidget {
   const _AskNehaCard({required this.onTap});
 
@@ -363,21 +316,66 @@ class _AskNehaCard extends StatelessWidget {
       borderRadius: BorderRadius.circular(AppRadius.md),
       onTap: onTap,
       child: Container(
-        padding: const EdgeInsets.all(14),
+        padding: const EdgeInsets.all(16),
         decoration: BoxDecoration(
-          color: AppColors.card,
-          borderRadius: BorderRadius.circular(AppRadius.md),
-          border: Border.all(color: AppColors.cardBorder),
+          gradient: const LinearGradient(
+            begin: Alignment.centerLeft,
+            end: Alignment.centerRight,
+            colors: [Colors.white, Color(0xFFEAF3FF)],
+          ),
+          borderRadius: BorderRadius.circular(AppRadius.lg),
+          border: Border.all(color: const Color(0xFFD6E6FA)),
           boxShadow: AppShadow.card,
         ),
         child: Row(
           children: [
-            SvgPicture.asset(
-              'assets/brand/neha-avatar.svg',
-              width: 44,
-              height: 44,
+            SizedBox(
+              width: 60,
+              height: 60,
+              child: Stack(
+                clipBehavior: Clip.none,
+                children: [
+                  Container(
+                    width: 60,
+                    height: 60,
+                    padding: const EdgeInsets.all(3),
+                    decoration: const BoxDecoration(
+                      shape: BoxShape.circle,
+                      gradient: LinearGradient(
+                        colors: [AppColors.buttonBlue, Color(0xFF7CC4FF)],
+                      ),
+                    ),
+                    child: Container(
+                      padding: const EdgeInsets.all(2),
+                      decoration: const BoxDecoration(
+                        color: Colors.white,
+                        shape: BoxShape.circle,
+                      ),
+                      child: ClipOval(
+                        child: SvgPicture.asset(
+                          'assets/brand/neha-avatar.svg',
+                          fit: BoxFit.cover,
+                        ),
+                      ),
+                    ),
+                  ),
+                  Positioned(
+                    right: 0,
+                    bottom: 2,
+                    child: Container(
+                      width: 14,
+                      height: 14,
+                      decoration: BoxDecoration(
+                        color: AppColors.green,
+                        shape: BoxShape.circle,
+                        border: Border.all(color: Colors.white, width: 2),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
             ),
-            const SizedBox(width: 12),
+            const SizedBox(width: 14),
             const Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -398,13 +396,26 @@ class _AskNehaCard extends StatelessWidget {
                   ),
                   SizedBox(height: 2),
                   Text(
-                    'Get personal guidance on your credit score',
+                    'Get personalised insights, tips and answers about your credit score.',
                     style: TextStyle(color: AppColors.muted, fontSize: 11),
                   ),
                 ],
               ),
             ),
-            const Icon(Icons.chevron_right_rounded, color: AppColors.blue),
+            const SizedBox(width: 10),
+            Container(
+              width: 36,
+              height: 36,
+              decoration: const BoxDecoration(
+                color: AppColors.blue,
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(
+                Icons.arrow_forward_rounded,
+                color: Colors.white,
+                size: 18,
+              ),
+            ),
           ],
         ),
       ),
@@ -426,14 +437,26 @@ class _ImproveCard extends StatelessWidget {
         padding: const EdgeInsets.all(16),
         decoration: BoxDecoration(
           gradient: const LinearGradient(
-            colors: [AppColors.blue, AppColors.blueDark],
+            colors: [AppColors.buttonBlueDark, AppColors.blue],
           ),
           borderRadius: BorderRadius.circular(AppRadius.md),
         ),
-        child: const Row(
+        child: Row(
           children: [
-            Icon(Icons.menu_book_outlined, color: Colors.white, size: 26),
-            SizedBox(width: 12),
+            Container(
+              width: 44,
+              height: 44,
+              decoration: BoxDecoration(
+                color: Colors.white.withValues(alpha: 0.14),
+                borderRadius: BorderRadius.circular(AppRadius.sm),
+              ),
+              child: const Icon(
+                Icons.menu_book_outlined,
+                color: Colors.white,
+                size: 24,
+              ),
+            ),
+            const SizedBox(width: 12),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -454,7 +477,20 @@ class _ImproveCard extends StatelessWidget {
                 ],
               ),
             ),
-            Icon(Icons.arrow_forward_rounded, color: Colors.white),
+            const SizedBox(width: 10),
+            Container(
+              width: 36,
+              height: 36,
+              decoration: const BoxDecoration(
+                color: Colors.white,
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(
+                Icons.arrow_forward_rounded,
+                color: AppColors.blueDark,
+                size: 18,
+              ),
+            ),
           ],
         ),
       ),
@@ -462,60 +498,191 @@ class _ImproveCard extends StatelessWidget {
   }
 }
 
-class _QuickTile extends StatelessWidget {
-  const _QuickTile({
+class _ScoreSummary extends StatelessWidget {
+  const _ScoreSummary({required this.score, required this.onTap});
+
+  final int? score;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final value = score;
+    final label = value == null
+        ? null
+        : value >= 750
+        ? 'Excellent'
+        : value >= 700
+        ? 'Good'
+        : value >= 600
+        ? 'Average'
+        : 'Poor';
+    final color = value == null ? AppColors.muted : scoreColor(value);
+    final hint = value == null
+        ? 'Get your first report to see your score'
+        : value >= 750
+        ? 'Great work! Keep paying on time to stay on track'
+        : 'Take a few steps to improve it to 750+';
+    return Row(
+      children: [
+        Expanded(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'Your Credit Score',
+                style: TextStyle(
+                  color: AppColors.navy,
+                  fontSize: 13,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+              if (label != null)
+                Text.rich(
+                  TextSpan(
+                    text: 'is ',
+                    children: [
+                      TextSpan(
+                        text: label,
+                        style: TextStyle(color: color),
+                      ),
+                    ],
+                  ),
+                  style: const TextStyle(
+                    color: AppColors.navy,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+              const SizedBox(height: 8),
+              Text(
+                hint,
+                style: const TextStyle(color: AppColors.muted, fontSize: 11),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(width: 6),
+        InkWell(
+          customBorder: const CircleBorder(),
+          onTap: onTap,
+          child: Container(
+            width: 30,
+            height: 30,
+            decoration: const BoxDecoration(
+              color: AppColors.blue,
+              shape: BoxShape.circle,
+            ),
+            child: const Icon(
+              Icons.chevron_right_rounded,
+              color: Colors.white,
+              size: 20,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _DownloadButton extends StatelessWidget {
+  const _DownloadButton({required this.onTap});
+
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Colors.transparent,
+      child: Ink(
+        decoration: BoxDecoration(
+          gradient: const LinearGradient(
+            colors: [AppColors.buttonBlue, AppColors.buttonBlueDark],
+          ),
+          borderRadius: BorderRadius.circular(AppRadius.pill),
+        ),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(AppRadius.pill),
+          onTap: onTap,
+          child: const SizedBox(
+            height: 44,
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(Icons.download_rounded, size: 18, color: Colors.white),
+                SizedBox(width: 8),
+                Text(
+                  'Download Report',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _QuickCard extends StatelessWidget {
+  const _QuickCard({
     required this.icon,
     required this.label,
     this.onTap,
-    this.comingSoon = false,
+    this.badge,
   });
 
   final IconData icon;
   final String label;
   final VoidCallback? onTap;
-  final bool comingSoon;
+  final String? badge;
 
   @override
   Widget build(BuildContext context) {
-    final muted = comingSoon;
     return InkWell(
       borderRadius: BorderRadius.circular(AppRadius.md),
-      onTap: comingSoon ? null : onTap,
+      onTap: onTap,
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 12),
+        decoration: BoxDecoration(
+          color: AppColors.card,
+          borderRadius: BorderRadius.circular(AppRadius.md),
+          border: Border.all(color: AppColors.cardBorder),
+          boxShadow: AppShadow.card,
+        ),
         child: Row(
           children: [
-            Icon(
-              icon,
-              color: muted ? AppColors.placeholder : AppColors.blue,
-              size: 22,
-            ),
-            const SizedBox(width: 8),
+            Icon(icon, color: AppColors.blue, size: 22),
+            const SizedBox(width: 6),
             Expanded(
               child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
                     label,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      color: muted ? AppColors.muted : AppColors.navy,
-                      fontSize: 12,
-                      fontWeight: FontWeight.w700,
+                    style: const TextStyle(
+                      color: AppColors.navy,
+                      fontSize: 11,
+                      fontWeight: FontWeight.w800,
                     ),
                   ),
-                  if (comingSoon)
-                    const Text(
-                      'Coming soon',
-                      style: TextStyle(
-                        color: AppColors.placeholder,
-                        fontSize: 11,
-                      ),
-                    ),
+                  if (badge != null) ...[
+                    const SizedBox(height: 3),
+                    AppPill(label: badge!, color: AppColors.violet),
+                  ],
                 ],
               ),
             ),
+            if (onTap != null)
+              const Icon(
+                Icons.chevron_right_rounded,
+                color: AppColors.muted,
+                size: 18,
+              ),
           ],
         ),
       ),

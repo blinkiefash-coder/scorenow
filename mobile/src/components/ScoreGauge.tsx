@@ -15,11 +15,11 @@ const RADIUS = (SIZE - STROKE) / 2
 const CENTER = SIZE / 2
 
 const bands = [
-  { label: 'Poor', min: 300, max: 579, color: '#e5484d' },
-  { label: 'Fair', min: 580, max: 669, color: '#f08a3c' },
-  { label: 'Good', min: 670, max: 739, color: '#f4b523' },
-  { label: 'Very good', min: 740, max: 799, color: '#8ccf32' },
-  { label: 'Excellent', min: 800, max: 900, color: '#14bc78' },
+  { label: 'Poor', min: 300, max: 579, color: '#00c83f' },
+  { label: 'Fair', min: 580, max: 669, color: '#95c83d' },
+  { label: 'Good', min: 670, max: 739, color: '#ffcf32' },
+  { label: 'Very good', min: 740, max: 799, color: '#ff6a00' },
+  { label: 'Excellent', min: 800, max: 900, color: '#f10d17' },
 ]
 
 const point = (fraction: number, radius = RADIUS) => {

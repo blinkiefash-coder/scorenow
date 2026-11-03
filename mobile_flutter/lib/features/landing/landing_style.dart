@@ -153,9 +153,11 @@ class _GaugePainter extends CustomPainter {
       radius: radius - thickness / 2,
     );
     const segments = [
-      (Color(0xFFF04444), 30.0),
-      (Color(0xFFFFB02E), 38.0),
-      (Color(0xFF4AC95A), 22.0),
+      (Color(0xFF00C83F), 83.7),
+      (Color(0xFF95C83D), 27.0),
+      (Color(0xFFFFCF32), 21.0),
+      (Color(0xFFFF6A00), 18.0),
+      (Color(0xFFF10D17), 30.3),
     ];
     var start = math.pi;
     for (final (color, degrees) in segments) {
@@ -182,10 +184,10 @@ class _GaugePainter extends CustomPainter {
     canvas.drawCircle(
       dot,
       dotSize * 1.9,
-      Paint()..color = const Color(0xFF14BC78).withValues(alpha: 0.18),
+      Paint()..color = const Color(0xFFFF6A00).withValues(alpha: 0.18),
     );
     canvas.drawCircle(dot, dotSize + 1.5, Paint()..color = Colors.white);
-    canvas.drawCircle(dot, dotSize, Paint()..color = const Color(0xFF14BC78));
+    canvas.drawCircle(dot, dotSize, Paint()..color = const Color(0xFFFF6A00));
   }
 
   @override

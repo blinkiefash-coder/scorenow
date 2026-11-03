@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:scorenow_mobile/core/format.dart';
 import 'package:scorenow_mobile/core/theme.dart';
 import 'package:scorenow_mobile/models/report.dart';
-import 'package:scorenow_mobile/widgets/app_card.dart';
+import 'package:scorenow_mobile/features/reports/report_detail_sections.dart';
 import 'package:scorenow_mobile/widgets/app_pill.dart';
 import 'package:scorenow_mobile/widgets/feedback_widgets.dart';
 
@@ -31,7 +31,8 @@ class _AccountCardState extends State<AccountCard> {
     final attention = needsAttention(account);
     final accountNumber = account.accountNumber;
     final sanctioned = account.sanctionedAmount ?? account.creditLimit;
-    return AppCard(
+    return ReportCard(
+      borderColor: attention ? AppColors.red.withValues(alpha: 0.35) : null,
       onTap: () => setState(() => _open = !_open),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -39,6 +40,21 @@ class _AccountCardState extends State<AccountCard> {
           Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
+              Container(
+                width: 40,
+                height: 40,
+                margin: const EdgeInsets.only(right: 12),
+                decoration: BoxDecoration(
+                  color: (attention ? AppColors.red : AppColors.blue)
+                      .withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Icon(
+                  Icons.account_balance_rounded,
+                  size: 22,
+                  color: attention ? AppColors.red : AppColors.blue,
+                ),
+              ),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,

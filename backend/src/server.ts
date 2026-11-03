@@ -10,10 +10,8 @@ import {
   bureauNames,
   type Applicant,
   fetchBureauReport,
-  downloadReportPdf,
   isBureau,
   isBureauAvailable,
-  livePdfUrl,
   missingApplicantFields,
   scoreBand,
   stateCodes,
@@ -69,6 +67,12 @@ import {
   cancelCustomerInvitation,
   saveAssessment,
   saveReportPdf,
+  createSubscriptionPayment,
+  findSubscriptionPayment,
+  activateSubscription,
+  getUserSubscriptions,
+  saveReportDocument,
+  saveAdminReportDocument,
   saveWebsiteInquiry,
   saveKycProfile,
   setUserEmailIfMissing,
@@ -85,7 +89,9 @@ import {
   getHealthStats,
   type AdminActivityFilters,
 } from "./database.js";
+import { SUBSCRIPTION_PLANS, findSubscriptionPlan, gstIncluded } from "./subscriptions.js";
 import { generateReportPdf } from "./reportPdf.js";
+import { captureBureauDocument, htmlToPdf } from "./bureauDocument.js";
 import { verifyFirebaseGoogleToken, verifyFirebasePhoneToken } from "./firebaseAdmin.js";
 import { demoReportResponses, isReportsDemoMode } from "./demoReports.js";
 import { createRazorpayOrder, isRazorpayConfigured, isSimulatedPayments, isValidPaymentSignature, simulatedId } from "./razorpay.js";
@@ -829,6 +835,10 @@ app.post("/api/admin/reports", requireAdmin, requireAdminRoles("owner", "manager
     const report = normalizeReport(bureau, result.raw);
     await completeAdminReportAudit({ auditId, status: "completed", providerTransactionId: result.providerTxnId, creditScore: report.score, failureReason: null,
       providerResponse: result.raw, normalizedReport: report });
+    const document = await captureBureauDocument(result.raw);
+    if (document.pdf || document.html) {
+      await saveAdminReportDocument(auditId, document).catch((error) => console.error("Admin report document save failed", error));
+    }
     response.json({ auditId: String(auditId), bureau, providerTxnId: result.providerTxnId, report });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unable to fetch this credit report.";
@@ -850,10 +860,24 @@ app.get("/api/admin/reports/:auditId/pdf", requireAdmin, requireAdminRoles("owne
       response.status(404).json({ message: "Completed admin report not found." });
       return;
     }
-    const pdf = await generateReportPdf({ report: record.report, reportDate: record.reportDate });
+    let pdf = record.pdf;
+    if (!pdf && record.html) {
+      pdf = await htmlToPdf(record.html);
+      if (pdf) await saveAdminReportDocument(auditId, { pdf, html: null });
+    }
+    if (!pdf && record.html) {
+      response.set({
+        "Content-Type": "text/html; charset=utf-8",
+        "Content-Disposition": `attachment; filename="ScoreNow-${record.bureau}-report-${record.reportDate}.html"`,
+        "Cache-Control": "private, no-store",
+      }).send(record.html);
+      return;
+    }
+    const generated = !pdf;
+    pdf ??= await generateReportPdf({ report: record.report, reportDate: record.reportDate });
     response.set({
       "Content-Type": "application/pdf",
-      "Content-Disposition": `attachment; filename="ScoreNow-${record.bureau}-report-copy-${record.reportDate}.pdf"`,
+      "Content-Disposition": `attachment; filename="ScoreNow-${record.bureau}-report${generated ? "-copy" : ""}-${record.reportDate}.pdf"`,
       "Cache-Control": "private, no-store",
     }).send(pdf);
   } catch (error) {
@@ -1135,16 +1159,11 @@ const runReportFetch = async (userId: string, requestId: string, bureau: Bureau,
     report,
     raw: result.raw,
   });
-  const pdfUrl = livePdfUrl(result.raw);
-  console.log(`PDF URL for ${bureau} report:`, pdfUrl ? "found" : "not found", { 
-    hasData: !!((result.raw as any)?.data?.data),
-    hasPdfUrl: !!((result.raw as any)?.data?.data?.pdf_report_url),
-  });
-  const pdf = await downloadReportPdf(pdfUrl);
-  if (pdf) {
-    await saveReportPdf(requestId, pdf).catch((error) => console.error("Report PDF save failed", error));
+  const document = await captureBureauDocument(result.raw);
+  if (document.pdf || document.html) {
+    await saveReportDocument(requestId, document).catch((error) => console.error("Report document save failed", error));
   } else {
-    console.warn(`Failed to download PDF for ${bureau} report ${requestId}`);
+    console.warn(`No downloadable document captured for ${bureau} report ${requestId}`);
   }
   return result.diagnostics;
 };
@@ -1164,10 +1183,24 @@ app.get("/api/reports/:requestId/pdf", requireUser, async (request, response) =>
       firstAccountLender: record.report.accounts[0]?.lender,
     });
     let pdf = record.pdf;
+    let html = record.html;
     let generatedCopy = false;
-    if (!pdf) {
-      pdf = await downloadReportPdf(livePdfUrl(record.raw));
+    if (!pdf && !html && record.raw) {
+      const document = await captureBureauDocument(record.raw);
+      pdf = document.pdf;
+      html = document.html;
+      if (pdf || html) await saveReportDocument(record.requestId, document);
+    } else if (!pdf && html) {
+      pdf = await htmlToPdf(html);
       if (pdf) await saveReportPdf(record.requestId, pdf);
+    }
+    if (!pdf && html) {
+      response.set({
+        "Content-Type": "text/html; charset=utf-8",
+        "Content-Disposition": `attachment; filename="ScoreNow-${record.bureau}-report-${record.reportDate}.html"`,
+        "Cache-Control": "private, no-store",
+      }).send(html);
+      return;
     }
     if (!pdf) {
       pdf = await generateReportPdf({ report: record.report, reportDate: record.reportDate });
@@ -1316,6 +1349,88 @@ app.post("/api/reports/verify", requireUser, async (request, response) => {
   } catch (error) {
     console.error("Report payment verification failed", error);
     response.status(500).json({ message: "Payment received, but we could not fetch the report yet. Use Retry on your dashboard." });
+  }
+});
+
+app.get("/api/subscription", requireUser, async (_request, response) => {
+  try {
+    response.json({
+      plans: SUBSCRIPTION_PLANS,
+      paymentsEnabled: isSimulatedPayments() || isRazorpayConfigured(),
+      paymentsMode: isSimulatedPayments() ? "simulated" : "razorpay",
+      ...(await getUserSubscriptions(sessionUser(response).id)),
+    });
+  } catch (error) {
+    console.error("Subscription lookup failed", error);
+    response.status(500).json({ message: "Unable to load your subscription." });
+  }
+});
+
+app.post("/api/subscription/order", requireUser, async (request, response) => {
+  const user = sessionUser(response);
+  const plan = findSubscriptionPlan(request.body.planId);
+  if (!plan) {
+    response.status(400).json({ message: "Choose a valid plan." });
+    return;
+  }
+  if (!isSimulatedPayments() && !isRazorpayConfigured()) {
+    response.status(503).json({ message: "Online payments are not configured yet. Please try again later." });
+    return;
+  }
+  try {
+    const simulated = isSimulatedPayments();
+    const order = simulated
+      ? { id: simulatedId("order"), amount: plan.price * 100, currency: "INR" }
+      : await createRazorpayOrder({ amountPaise: plan.price * 100, receipt: `sub_${plan.id}_${Date.now()}`, notes: { userId: user.id, planId: plan.id } });
+    await createSubscriptionPayment({
+      userId: user.id, planId: plan.id, orderId: order.id, amount: plan.price, gstAmount: gstIncluded(plan.price),
+      gateway: simulated ? "simulated" : "razorpay",
+    });
+    response.status(201).json({
+      simulated,
+      orderId: order.id,
+      amount: order.amount,
+      currency: order.currency,
+      keyId: simulated ? undefined : process.env.RAZORPAY_KEY_ID,
+      planId: plan.id,
+      planName: plan.name,
+      prefill: { name: user.full_name, email: user.email ?? undefined, contact: `+91${user.mobile}` },
+    });
+  } catch (error) {
+    console.error("Subscription order creation failed", error);
+    response.status(502).json({ message: "Unable to start the payment. Please try again." });
+  }
+});
+
+app.post("/api/subscription/verify", requireUser, async (request, response) => {
+  const user = sessionUser(response);
+  const orderId = String(request.body.orderId || "");
+  let paymentId = String(request.body.paymentId || "");
+  const signature = String(request.body.signature || "");
+  const payment = orderId ? await findSubscriptionPayment(user.id, orderId) : null;
+  const plan = findSubscriptionPlan(payment?.plan_id);
+  if (!payment || !plan) {
+    response.status(404).json({ message: "We could not find that payment." });
+    return;
+  }
+  if (payment.gateway === "simulated") {
+    if (!isSimulatedPayments()) {
+      await markPaymentFailed(payment.id, "Simulated payment order was rejected.");
+      response.status(400).json({ message: "Simulated payments are no longer accepted. Please pay again." });
+      return;
+    }
+    paymentId = simulatedId("pay");
+  } else if (!paymentId || !signature || !isValidPaymentSignature(orderId, paymentId, signature)) {
+    await markPaymentFailed(payment.id, "Payment signature verification failed.");
+    response.status(400).json({ message: "Payment verification failed. If money was deducted, it will be refunded by Razorpay." });
+    return;
+  }
+  try {
+    await activateSubscription({ userId: user.id, paymentDbId: payment.id, gatewayPaymentId: paymentId, plan });
+    response.json({ plans: SUBSCRIPTION_PLANS, ...(await getUserSubscriptions(user.id)) });
+  } catch (error) {
+    console.error("Subscription activation failed", error);
+    response.status(500).json({ message: "Payment received, but we could not activate the plan. Please contact support." });
   }
 });
 

@@ -4,6 +4,7 @@ import 'package:scorenow_mobile/core/app_services.dart';
 import 'package:scorenow_mobile/core/format.dart';
 import 'package:scorenow_mobile/core/theme.dart';
 import 'package:scorenow_mobile/features/dashboard/dashboard_scope.dart';
+import 'package:scorenow_mobile/features/profile/plan_card.dart';
 import 'package:scorenow_mobile/features/profile/profile_widgets.dart';
 import 'package:scorenow_mobile/widgets/app_card.dart';
 import 'package:scorenow_mobile/widgets/app_scaffold.dart';
@@ -48,6 +49,7 @@ class ProfileScreen extends StatelessWidget {
       header: const ScreenHeader(title: 'Profile'),
       children: [
         ProfileHero(user: user),
+        const PlanCard(),
         AppCard(
           child: Column(
             children: [

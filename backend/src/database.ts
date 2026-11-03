@@ -47,12 +47,31 @@ export const initializeDatabase = async () => {
   await pool.query(`ALTER TABLE payments ADD COLUMN IF NOT EXISTS report_bureau TEXT`);
   await pool.query(`ALTER TABLE payments ADD COLUMN IF NOT EXISTS failure_reason TEXT`);
   await pool.query(`ALTER TABLE payments ADD COLUMN IF NOT EXISTS failure_at TIMESTAMPTZ`);
+  await pool.query(`ALTER TABLE payments ADD COLUMN IF NOT EXISTS plan_id TEXT`);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS user_subscriptions (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      user_id UUID NOT NULL REFERENCES users(id),
+      payment_id UUID UNIQUE REFERENCES payments(id),
+      plan_id TEXT NOT NULL,
+      plan_name TEXT NOT NULL,
+      months INTEGER NOT NULL,
+      amount NUMERIC(10, 2) NOT NULL,
+      starts_at TIMESTAMPTZ NOT NULL,
+      expires_at TIMESTAMPTZ NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+  await pool.query(`CREATE INDEX IF NOT EXISTS user_subscriptions_user_idx ON user_subscriptions (user_id, expires_at DESC)`);
   await pool.query(`ALTER TABLE credit_report_requests ADD COLUMN IF NOT EXISTS payment_id UUID REFERENCES payments(id)`);
   await pool.query(`ALTER TABLE credit_reports ADD COLUMN IF NOT EXISTS report_url TEXT`);
   await pool.query(`ALTER TABLE credit_reports ADD COLUMN IF NOT EXISTS raw_report JSONB`);
   await pool.query(`ALTER TABLE credit_reports ADD COLUMN IF NOT EXISTS normalized_report JSONB`);
   await pool.query(`ALTER TABLE credit_report_requests ADD COLUMN IF NOT EXISTS provider_response JSONB`);
   await pool.query(`ALTER TABLE credit_reports ADD COLUMN IF NOT EXISTS report_pdf BYTEA`);
+  await pool.query(`ALTER TABLE credit_reports ADD COLUMN IF NOT EXISTS report_html TEXT`);
+  await pool.query(`ALTER TABLE admin_report_audit ADD COLUMN IF NOT EXISTS report_pdf BYTEA`);
+  await pool.query(`ALTER TABLE admin_report_audit ADD COLUMN IF NOT EXISTS report_html TEXT`);
 
   await pool.query(`
     CREATE TABLE IF NOT EXISTS admin_sessions (
@@ -390,8 +409,10 @@ export const getAdminReportDocument = async (auditId: number) => {
     bureau: Bureau;
     report_date: string;
     normalized_report: NormalizedReport | null;
+    report_pdf: Buffer | null;
+    report_html: string | null;
   }>(
-    `SELECT id, bureau, to_char(COALESCE(completed_at, created_at), 'YYYY-MM-DD') AS report_date, normalized_report
+    `SELECT id, bureau, to_char(COALESCE(completed_at, created_at), 'YYYY-MM-DD') AS report_date, normalized_report, report_pdf, report_html
      FROM admin_report_audit
      WHERE id = $1 AND status = 'completed' AND normalized_report IS NOT NULL`,
     [auditId],
@@ -402,6 +423,8 @@ export const getAdminReportDocument = async (auditId: number) => {
     bureau: row.bureau,
     reportDate: row.report_date,
     report: row.normalized_report!,
+    pdf: row.report_pdf,
+    html: row.report_html,
   } : null;
 };
 
@@ -1406,10 +1429,11 @@ export const getReportPdf = async (userId: string, requestId: string) => {
     bureau: Bureau;
     report_date: string;
     report_pdf: Buffer | null;
+    report_html: string | null;
     raw_report: unknown;
     normalized_report: NormalizedReport | null;
   }>(
-    `SELECT c.request_id, c.bureau, to_char(c.report_date, 'YYYY-MM-DD') AS report_date, c.report_pdf,
+    `SELECT c.request_id, c.bureau, to_char(c.report_date, 'YYYY-MM-DD') AS report_date, c.report_pdf, c.report_html,
             c.raw_report, c.normalized_report
      FROM credit_reports c JOIN credit_report_requests r ON r.id = c.request_id
      WHERE c.request_id::text = $1 AND c.user_id = $2 AND ${VISIBLE_REQUEST}`,
@@ -1427,13 +1451,28 @@ export const getReportPdf = async (userId: string, requestId: string) => {
     bureau: row.bureau,
     reportDate: row.report_date,
     pdf: row.report_pdf,
-    raw: row.report_pdf ? null : row.raw_report,
+    html: row.report_html,
+    raw: row.report_pdf || row.report_html ? null : row.raw_report,
     report,
   };
 };
 
 export const saveReportPdf = async (requestId: string, pdf: Buffer) => {
   await pool.query(`UPDATE credit_reports SET report_pdf = $2 WHERE request_id = $1`, [requestId, pdf]);
+};
+
+export const saveReportDocument = async (requestId: string, document: { pdf: Buffer | null; html: string | null }) => {
+  await pool.query(
+    `UPDATE credit_reports SET report_pdf = COALESCE($2, report_pdf), report_html = COALESCE($3, report_html) WHERE request_id = $1`,
+    [requestId, document.pdf, document.html],
+  );
+};
+
+export const saveAdminReportDocument = async (auditId: number, document: { pdf: Buffer | null; html: string | null }) => {
+  await pool.query(
+    `UPDATE admin_report_audit SET report_pdf = COALESCE($2, report_pdf), report_html = COALESCE($3, report_html) WHERE id = $1`,
+    [auditId, document.pdf, document.html],
+  );
 };
 
 export const saveKycProfile = async ({
@@ -1727,4 +1766,81 @@ export const getHealthStats = async () => {
     },
     bureaus: bureaus.rows.map((row) => ({ ...row, failures_7d: Number(row.failures_7d), successes_7d: Number(row.successes_7d) })),
   };
+};
+
+export const createSubscriptionPayment = async ({
+  userId, planId, orderId, amount, gstAmount, gateway,
+}: { userId: string; planId: string; orderId: string; amount: number; gstAmount: number; gateway: "razorpay" | "simulated" }) => {
+  await pool.query(
+    `INSERT INTO payments (user_id, gateway, gateway_order_id, amount, gst_amount, status, plan_id)
+     VALUES ($1, $2, $3, $4, $5, 'created', $6)`,
+    [userId, gateway, orderId, amount - gstAmount, gstAmount, planId],
+  );
+};
+
+export const findSubscriptionPayment = async (userId: string, orderId: string) => {
+  const { rows } = await pool.query<{ id: string; gateway: string; plan_id: string | null }>(
+    `SELECT id, gateway, plan_id FROM payments WHERE user_id = $1 AND gateway_order_id = $2 AND plan_id IS NOT NULL`,
+    [userId, orderId],
+  );
+  return rows[0] ?? null;
+};
+
+// Marks the payment paid and starts the subscription exactly once; a plan bought while one is active starts when it ends.
+export const activateSubscription = async ({
+  userId, paymentDbId, gatewayPaymentId, plan,
+}: { userId: string; paymentDbId: string; gatewayPaymentId: string; plan: { id: string; name: string; months: number; price: number } }) => {
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const paid = await client.query(
+      `UPDATE payments SET status = 'paid', gateway_payment_id = $2, failure_reason = NULL, failure_at = NULL, paid_at = NOW()
+       WHERE id = $1 AND status = 'created'`,
+      [paymentDbId, gatewayPaymentId],
+    );
+    if (paid.rowCount === 0) {
+      await client.query("ROLLBACK");
+      return false;
+    }
+    await client.query(`SELECT 1 FROM users WHERE id = $1 FOR UPDATE`, [userId]);
+    await client.query(
+      `INSERT INTO user_subscriptions (user_id, payment_id, plan_id, plan_name, months, amount, starts_at, expires_at)
+       SELECT $1, $2, $3, $4, $5, $6, s.start_at, s.start_at + make_interval(months => $5::int)
+       FROM (SELECT GREATEST(NOW(), COALESCE((SELECT MAX(expires_at) FROM user_subscriptions WHERE user_id = $1), NOW())) AS start_at) s`,
+      [userId, paymentDbId, plan.id, plan.name, plan.months, plan.price],
+    );
+    await client.query("COMMIT");
+    return true;
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
+};
+
+export const getUserSubscriptions = async (userId: string) => {
+  const { rows } = await pool.query<{
+    id: string; plan_id: string; plan_name: string; months: number; amount: string;
+    starts_at: Date; expires_at: Date; created_at: Date; status: "active" | "upcoming" | "expired";
+  }>(
+    `SELECT id, plan_id, plan_name, months, amount, starts_at, expires_at, created_at,
+            CASE WHEN expires_at <= NOW() THEN 'expired' WHEN starts_at > NOW() THEN 'upcoming' ELSE 'active' END AS status
+     FROM user_subscriptions WHERE user_id = $1 ORDER BY starts_at DESC LIMIT 50`,
+    [userId],
+  );
+  const items = rows.map((row) => ({
+    id: row.id,
+    planId: row.plan_id,
+    planName: row.plan_name,
+    months: row.months,
+    amount: Number(row.amount),
+    startsAt: row.starts_at.toISOString(),
+    expiresAt: row.expires_at.toISOString(),
+    purchasedAt: row.created_at.toISOString(),
+    status: row.status,
+  }));
+  const active = items.find((item) => item.status === "active") ?? null;
+  const lastExpiry = items.reduce((max, item) => (item.status !== "expired" && item.expiresAt > max ? item.expiresAt : max), "");
+  return { current: active, validUntil: lastExpiry || null, history: items };
 };

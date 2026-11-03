@@ -16,12 +16,14 @@ class ScoreGauge extends StatefulWidget {
     this.band,
     this.dark = false,
     this.size = _gaugeSize,
+    this.compact = false,
   });
 
   final int? score;
   final String? band;
   final bool dark;
   final double size;
+  final bool compact;
 
   @override
   State<ScoreGauge> createState() => _ScoreGaugeState();
@@ -64,6 +66,7 @@ class _ScoreGaugeState extends State<ScoreGauge>
         : (widget.band ?? _scoreBand(score.clamp(300, 900).toInt()));
     final dark = widget.dark;
     final scale = widget.size / _gaugeSize;
+    if (widget.compact) return _buildCompact(score, scoreText, band, fraction);
 
     return SizedBox(
       width: widget.size,
@@ -108,12 +111,7 @@ class _ScoreGaugeState extends State<ScoreGauge>
                         ),
                       )
                     else if (band.isNotEmpty)
-                      _BandPill(
-                        label: band,
-                        color: score != null && score >= 700
-                            ? AppColors.green
-                            : AppColors.gold,
-                      ),
+                      _BandPill(label: band, color: scoreColor(score)),
                   ],
                 ),
               ),
@@ -137,6 +135,75 @@ class _ScoreGaugeState extends State<ScoreGauge>
                     color: dark ? Colors.white54 : AppColors.muted,
                     fontSize: 11,
                   ),
+                ),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _buildCompact(
+    int? score,
+    String scoreText,
+    String band,
+    double fraction,
+  ) {
+    final scale = widget.size / _gaugeSize;
+    final cy = _gaugeCenter.dy * scale;
+    const labelStyle = TextStyle(color: AppColors.muted, fontSize: 11);
+    return SizedBox(
+      width: widget.size,
+      height: cy + 58,
+      child: AnimatedBuilder(
+        animation: _controller,
+        builder: (context, _) {
+          final eased = Curves.easeOutCubic.transform(_controller.value);
+          return Stack(
+            clipBehavior: Clip.none,
+            children: [
+              CustomPaint(
+                size: Size(widget.size, cy + 4),
+                painter: _GaugePainter(
+                  progress: fraction * eased,
+                  showNeedle: score != null,
+                  dark: false,
+                  scale: scale,
+                  compact: true,
+                ),
+              ),
+              Positioned(
+                top: cy - 46,
+                left: 0,
+                right: 0,
+                child: Text(
+                  scoreText,
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                    color: AppColors.navy,
+                    fontSize: 36,
+                    height: 1.1,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+              ),
+              Positioned(
+                left: 2,
+                top: cy + 4,
+                child: const Text('300', style: labelStyle),
+              ),
+              Positioned(
+                right: 2,
+                top: cy + 4,
+                child: const Text('900', style: labelStyle),
+              ),
+              Positioned(
+                top: cy + 24,
+                left: 0,
+                right: 0,
+                child: Center(
+                  child: _BandPill(label: band, color: scoreColor(score)),
                 ),
               ),
             ],
@@ -187,19 +254,21 @@ class _GaugePainter extends CustomPainter {
     required this.showNeedle,
     required this.dark,
     required this.scale,
+    this.compact = false,
   });
 
   final double progress;
   final bool showNeedle;
   final bool dark;
   final double scale;
+  final bool compact;
 
   static const _bands = [
-    (0.0, 279 / 600, Color(0xFFE5484D)),
-    (280 / 600, 369 / 600, Color(0xFFF08A3C)),
-    (370 / 600, 439 / 600, Color(0xFFF4B523)),
-    (440 / 600, 499 / 600, Color(0xFF8CCF32)),
-    (500 / 600, 1.0, Color(0xFF14BC78)),
+    (0.0, 279 / 600, Color(0xFF00C83F)),
+    (280 / 600, 369 / 600, Color(0xFF95C83D)),
+    (370 / 600, 439 / 600, Color(0xFFFFCF32)),
+    (440 / 600, 499 / 600, Color(0xFFFF6A00)),
+    (500 / 600, 1.0, Color(0xFFF10D17)),
   ];
 
   @override
@@ -216,10 +285,30 @@ class _GaugePainter extends CustomPainter {
         false,
         Paint()
           ..style = PaintingStyle.stroke
-          ..strokeWidth = _gaugeStroke * scale
+          ..strokeWidth = (compact ? 16 : _gaugeStroke) * scale
           ..strokeCap = StrokeCap.butt
           ..color = color,
       );
+    }
+
+    if (compact) {
+      if (showNeedle) {
+        final angle = math.pi + math.pi * progress;
+        final dot = Offset(
+          center.dx + _gaugeRadius * scale * math.cos(angle),
+          center.dy + _gaugeRadius * scale * math.sin(angle),
+        );
+        canvas.drawCircle(dot, 10 * scale + 1, Paint()..color = Colors.white);
+        canvas.drawCircle(
+          dot,
+          8 * scale + 1,
+          Paint()
+            ..color = const Color(0xFF303238)
+            ..style = PaintingStyle.stroke
+            ..strokeWidth = 3,
+        );
+      }
+      return;
     }
 
     if (showNeedle) {
@@ -266,5 +355,6 @@ class _GaugePainter extends CustomPainter {
       old.progress != progress ||
       old.showNeedle != showNeedle ||
       old.dark != dark ||
+      old.compact != compact ||
       old.scale != scale;
 }

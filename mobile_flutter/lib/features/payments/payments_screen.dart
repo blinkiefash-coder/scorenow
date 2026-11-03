@@ -6,7 +6,6 @@ import 'package:scorenow_mobile/features/dashboard/dashboard_scope.dart';
 import 'package:scorenow_mobile/features/home/report_detail_section.dart';
 import 'package:scorenow_mobile/features/payments/payment_history.dart';
 import 'package:scorenow_mobile/models/report.dart';
-import 'package:scorenow_mobile/widgets/app_card.dart';
 import 'package:scorenow_mobile/widgets/app_pill.dart';
 import 'package:scorenow_mobile/widgets/app_scaffold.dart';
 import 'package:scorenow_mobile/widgets/brand_spinner.dart';
@@ -137,6 +136,13 @@ class _PaymentsBodyState extends State<_PaymentsBody> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
+        _PaymentsHero(
+          emi: formatMoney(totalEmi),
+          overdue: formatMoney(totalOverdue),
+          hasOverdue: totalOverdue > 0,
+          overdueCount: defaulted.length,
+        ),
+        const SizedBox(height: 12),
         Row(
           children: [
             Expanded(
@@ -147,35 +153,13 @@ class _PaymentsBodyState extends State<_PaymentsBody> {
                 color: AppColors.blue,
               ),
             ),
-            const SizedBox(width: 10),
+            const SizedBox(width: 12),
             Expanded(
               child: _StatTile(
                 icon: Icons.check_circle_outline_rounded,
                 label: 'Running loans',
                 value: '${running.length}',
                 color: AppColors.green,
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 10),
-        Row(
-          children: [
-            Expanded(
-              child: _StatTile(
-                icon: Icons.currency_rupee_rounded,
-                label: 'Monthly EMI',
-                value: formatMoney(totalEmi),
-                color: AppColors.gold,
-              ),
-            ),
-            const SizedBox(width: 10),
-            Expanded(
-              child: _StatTile(
-                icon: Icons.schedule_rounded,
-                label: 'Overdue',
-                value: formatMoney(totalOverdue),
-                color: AppColors.red,
               ),
             ),
           ],
@@ -239,27 +223,125 @@ class _StatTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return AppCard(
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(AppRadius.lg),
+        boxShadow: AppShadow.card,
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 40,
+            height: 40,
+            decoration: BoxDecoration(
+              color: color.withValues(alpha: 0.12),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Icon(icon, color: color, size: 22),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  label,
+                  style: const TextStyle(color: AppColors.muted, fontSize: 12),
+                ),
+                Text(
+                  value,
+                  style: const TextStyle(
+                    color: AppColors.navy,
+                    fontSize: 20,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _PaymentsHero extends StatelessWidget {
+  const _PaymentsHero({
+    required this.emi,
+    required this.overdue,
+    required this.hasOverdue,
+    required this.overdueCount,
+  });
+
+  final String emi;
+  final String overdue;
+  final bool hasOverdue;
+  final int overdueCount;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        gradient: const LinearGradient(
+          colors: [Color(0xFF0B3C9C), Color(0xFF1B5FD6)],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        borderRadius: BorderRadius.circular(AppRadius.lg),
+        boxShadow: AppShadow.card,
+      ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(icon, color: color, size: 22),
-          const SizedBox(height: 10),
-          Text(
-            label,
-            style: const TextStyle(color: AppColors.muted, fontSize: 12),
+          const Text(
+            'Monthly EMI',
+            style: TextStyle(color: Colors.white70, fontSize: 13),
           ),
-          const SizedBox(height: 2),
+          const SizedBox(height: 4),
           FittedBox(
             fit: BoxFit.scaleDown,
-            alignment: Alignment.centerLeft,
             child: Text(
-              value,
+              emi,
               style: const TextStyle(
-                color: AppColors.navy,
-                fontSize: 18,
+                color: Colors.white,
+                fontSize: 32,
                 fontWeight: FontWeight.w800,
               ),
+            ),
+          ),
+          const SizedBox(height: 14),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            decoration: BoxDecoration(
+              color: Colors.white.withValues(alpha: 0.14),
+              borderRadius: BorderRadius.circular(14),
+            ),
+            child: Row(
+              children: [
+                Icon(
+                  hasOverdue
+                      ? Icons.error_outline_rounded
+                      : Icons.check_circle_outline_rounded,
+                  color: hasOverdue ? const Color(0xFFFFB4B4) : Colors.white,
+                  size: 20,
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    hasOverdue
+                        ? '$overdue overdue on $overdueCount account${overdueCount == 1 ? '' : 's'}'
+                        : 'No overdue payments. Great job!',
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.w600,
+                      fontSize: 13,
+                    ),
+                  ),
+                ),
+              ],
             ),
           ),
         ],
@@ -290,12 +372,35 @@ class _LoanCard extends StatelessWidget {
       if (account.accountNumber != null) account.accountNumber!,
     ].join(' · ');
 
-    return AppCard(
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(AppRadius.lg),
+        boxShadow: AppShadow.card,
+        border: defaulted
+            ? Border.all(color: AppColors.red.withValues(alpha: 0.35))
+            : null,
+      ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             children: [
+              Container(
+                width: 40,
+                height: 40,
+                margin: const EdgeInsets.only(right: 12),
+                decoration: BoxDecoration(
+                  color: statusColor.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Icon(
+                  Icons.account_balance_rounded,
+                  color: statusColor,
+                  size: 22,
+                ),
+              ),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -355,7 +460,15 @@ class _LoanCard extends StatelessWidget {
           ],
           if (payable) ...[
             const SizedBox(height: 12),
-            FilledButton(onPressed: onPay, child: const Text('Pay now')),
+            SizedBox(
+              width: double.infinity,
+              height: 46,
+              child: FilledButton(
+                style: FilledButton.styleFrom(shape: const StadiumBorder()),
+                onPressed: onPay,
+                child: const Text('Pay now'),
+              ),
+            ),
           ],
         ],
       ),

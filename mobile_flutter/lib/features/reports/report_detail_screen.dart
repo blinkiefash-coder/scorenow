@@ -8,7 +8,6 @@ import 'package:scorenow_mobile/core/resource.dart';
 import 'package:scorenow_mobile/features/reports/report_account_card.dart';
 import 'package:scorenow_mobile/features/reports/report_detail_sections.dart';
 import 'package:scorenow_mobile/models/report.dart';
-import 'package:scorenow_mobile/widgets/app_pill.dart';
 import 'package:scorenow_mobile/widgets/app_scaffold.dart';
 import 'package:scorenow_mobile/widgets/brand_spinner.dart';
 import 'package:scorenow_mobile/widgets/feedback_widgets.dart';
@@ -88,12 +87,23 @@ class _ReportDetailScreenState extends State<ReportDetailScreen> {
         token: token,
       );
       final dir = await getTemporaryDirectory();
+      final isPdf =
+          bytes.length > 4 &&
+          String.fromCharCodes(bytes.take(5)) == '%PDF-';
+      final extension = isPdf ? 'pdf' : 'html';
       final file = File(
-        '${dir.path}/scorenow-${report.bureau.name}-report.pdf',
+        '${dir.path}/scorenow-${report.bureau.name}-report.$extension',
       );
       await file.writeAsBytes(bytes, flush: true);
       await SharePlus.instance.share(
-        ShareParams(files: [XFile(file.path, mimeType: 'application/pdf')]),
+        ShareParams(
+          files: [
+            XFile(
+              file.path,
+              mimeType: isPdf ? 'application/pdf' : 'text/html',
+            ),
+          ],
+        ),
       );
     } catch (_) {
       if (mounted) {
@@ -145,7 +155,11 @@ class _ReportDetailScreenState extends State<ReportDetailScreen> {
             if (report.pdfAvailable)
               Padding(
                 padding: const EdgeInsets.only(bottom: 14),
-                child: OutlinedButton.icon(
+                child: FilledButton.icon(
+                  style: FilledButton.styleFrom(
+                    minimumSize: const Size.fromHeight(50),
+                    shape: const StadiumBorder(),
+                  ),
                   onPressed: _downloading ? null : () => _downloadPdf(report),
                   icon: _downloading
                       ? const SizedBox(
@@ -154,12 +168,16 @@ class _ReportDetailScreenState extends State<ReportDetailScreen> {
                           child: CircularProgressIndicator(strokeWidth: 2),
                         )
                       : const Icon(Icons.download_outlined, size: 18),
-                  label: const Text('Download PDF'),
+                  label: const Text('Download report'),
                 ),
               ),
             if (report.scoreFactors != null && report.scoreFactors!.isNotEmpty)
               ScoreFactorsSection(factors: report.scoreFactors!),
-            SectionTitle('Accounts (${accounts.length})'),
+            ReportSectionHeader(
+              icon: Icons.account_balance_wallet_rounded,
+              title: 'Accounts',
+              subtitle: '${accounts.length} shown',
+            ),
             SegmentedChips<AccountFilter>(
               options: _filterOptions,
               selected: _filter,
@@ -170,12 +188,6 @@ class _ReportDetailScreenState extends State<ReportDetailScreen> {
             if (report.enquiries.isNotEmpty)
               RecentEnquiriesSection(enquiries: report.enquiries),
             PersonalDetailsSection(personal: report.personal),
-            Center(
-              child: TextButton(
-                onPressed: () => Navigator.of(context).maybePop(),
-                child: const Text('Back to dashboard'),
-              ),
-            ),
           ],
         );
       },

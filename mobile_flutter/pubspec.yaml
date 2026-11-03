@@ -47,6 +47,7 @@ dependencies:
   share_plus: ^13.3.1
   file_picker: ^13.3.0
   http_parser: ^4.1.2
+  flutter_tts: ^4.2.5
 
 dev_dependencies:
   flutter_test:
