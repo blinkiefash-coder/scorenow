@@ -3,10 +3,16 @@ import 'package:go_router/go_router.dart';
 import 'package:scorenow_mobile/core/theme.dart';
 
 class HomeHeader extends StatelessWidget {
-  const HomeHeader({super.key, required this.initials, required this.topInset});
+  const HomeHeader({
+    super.key,
+    required this.initials,
+    required this.topInset,
+    this.alerts = 0,
+  });
 
   final String initials;
   final double topInset;
+  final int alerts;
 
   @override
   Widget build(BuildContext context) {
@@ -24,36 +30,62 @@ class HomeHeader extends StatelessWidget {
           Row(
             children: [
               Semantics(
-                label: 'Notifications',
-                child: Container(
-                  width: 36,
-                  height: 36,
-                  decoration: BoxDecoration(
-                    color: AppColors.card,
-                    shape: BoxShape.circle,
-                    border: Border.all(color: AppColors.cardBorder),
+                button: true,
+                label: alerts > 0
+                    ? 'Notifications, $alerts need attention'
+                    : 'Notifications',
+                child: Material(
+                  color: AppColors.card,
+                  shape: const CircleBorder(
+                    side: BorderSide(color: AppColors.cardBorder),
                   ),
-                  child: Stack(
-                    alignment: Alignment.center,
-                    children: [
-                      const Icon(
-                        Icons.notifications_outlined,
-                        size: 18,
-                        color: AppColors.navy,
-                      ),
-                      Positioned(
-                        top: 8,
-                        right: 8,
-                        child: Container(
-                          width: 7,
-                          height: 7,
-                          decoration: const BoxDecoration(
-                            color: AppColors.red,
-                            shape: BoxShape.circle,
+                  child: InkWell(
+                    customBorder: const CircleBorder(),
+                    onTap: () => context.push('/notifications'),
+                    child: SizedBox(
+                      width: 40,
+                      height: 40,
+                      child: Stack(
+                        clipBehavior: Clip.none,
+                        alignment: Alignment.center,
+                        children: [
+                          const Icon(
+                            Icons.notifications_outlined,
+                            size: 20,
+                            color: AppColors.navy,
                           ),
-                        ),
+                          if (alerts > 0)
+                            Positioned(
+                              top: 2,
+                              right: 0,
+                              child: Container(
+                                constraints: const BoxConstraints(minWidth: 17),
+                                height: 17,
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 4,
+                                ),
+                                alignment: Alignment.center,
+                                decoration: BoxDecoration(
+                                  color: AppColors.red,
+                                  borderRadius: BorderRadius.circular(9),
+                                  border: Border.all(
+                                    color: Colors.white,
+                                    width: 1.5,
+                                  ),
+                                ),
+                                child: Text(
+                                  alerts > 9 ? '9+' : '$alerts',
+                                  style: const TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 9.5,
+                                    fontWeight: FontWeight.w800,
+                                  ),
+                                ),
+                              ),
+                            ),
+                        ],
                       ),
-                    ],
+                    ),
                   ),
                 ),
               ),
@@ -63,7 +95,7 @@ class HomeHeader extends StatelessWidget {
                 label: 'Profile',
                 child: InkWell(
                   customBorder: const CircleBorder(),
-                  onTap: () => context.push('/profile'),
+                  onTap: () => context.go('/profile'),
                   child: Container(
                     width: 36,
                     height: 36,

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:scorenow_mobile/features/notifications/notifications_screen.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import 'package:go_router/go_router.dart';
 import 'package:scorenow_mobile/core/app_services.dart';
@@ -91,6 +92,9 @@ class _HomeScreenState extends State<HomeScreen> {
             HomeHeader(
               initials: initials.isEmpty ? 'S' : initials,
               topInset: padding.top,
+              alerts: buildNotifications(
+                dashboard,
+              ).where((item) => item.important).length,
             ),
             SlideUpAnimation(
               delay: const Duration(milliseconds: 100),
@@ -122,29 +126,34 @@ class _HomeScreenState extends State<HomeScreen> {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.stretch,
                         children: [
-                          Row(
-                            children: [
-                              ScoreGauge(
-                                score: score,
-                                band: best?.scoreBand,
-                                size: 160,
-                                compact: true,
-                              ),
-                              Container(
-                                width: 1,
-                                height: 78,
-                                margin: const EdgeInsets.symmetric(
-                                  horizontal: 12,
-                                ),
-                                color: AppColors.line,
-                              ),
-                              Expanded(
-                                child: _ScoreSummary(
+                          LayoutBuilder(
+                            builder: (context, box) => Row(
+                              children: [
+                                ScoreGauge(
                                   score: score,
-                                  onTap: () => context.push('/guides'),
+                                  band: best?.scoreBand,
+                                  size: (box.maxWidth * 0.5).clamp(
+                                    120.0,
+                                    160.0,
+                                  ),
+                                  compact: true,
                                 ),
-                              ),
-                            ],
+                                Container(
+                                  width: 1,
+                                  height: 78,
+                                  margin: const EdgeInsets.symmetric(
+                                    horizontal: 12,
+                                  ),
+                                  color: AppColors.line,
+                                ),
+                                Expanded(
+                                  child: _ScoreSummary(
+                                    score: score,
+                                    onTap: () => context.push('/guides'),
+                                  ),
+                                ),
+                              ],
+                            ),
                           ),
                           if (best != null) ...[
                             const SizedBox(height: 4),

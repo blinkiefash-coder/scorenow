@@ -16,6 +16,7 @@ import 'package:scorenow_mobile/features/guides/guide_detail_screen.dart';
 import 'package:scorenow_mobile/features/guides/guides_screen.dart';
 import 'package:scorenow_mobile/features/home/home_screen.dart';
 import 'package:scorenow_mobile/features/landing/landing_page.dart';
+import 'package:scorenow_mobile/features/notifications/notifications_screen.dart';
 import 'package:scorenow_mobile/features/products/products_screen.dart';
 import 'package:scorenow_mobile/features/payments/payments_screen.dart';
 import 'package:scorenow_mobile/features/profile/profile_screen.dart';
@@ -108,6 +109,10 @@ GoRouter createRouter(AppServices services) {
             ],
           ),
         ],
+      ),
+      GoRoute(
+        path: '/notifications',
+        builder: (context, state) => const NotificationsScreen(),
       ),
       GoRoute(
         path: '/reports',

@@ -42,7 +42,10 @@ class _ScoreNowAppState extends State<ScoreNowApp> {
             value: SystemUiOverlayStyle.dark,
             child: Stack(
               children: [
-                child ?? const SizedBox.shrink(),
+                MediaQuery.withClampedTextScaling(
+                  maxScaleFactor: 1.15,
+                  child: child ?? const SizedBox.shrink(),
+                ),
                 if (!_splashDone)
                   ListenableBuilder(
                     listenable: auth,

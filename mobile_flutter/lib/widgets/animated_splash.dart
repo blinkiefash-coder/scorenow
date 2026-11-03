@@ -135,37 +135,40 @@ class _AnimatedSplashState extends State<AnimatedSplash>
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          SizedBox(
-            width: 300,
-            height: 260,
-            child: Stack(
-              alignment: Alignment.center,
-              children: [
-                _ring(_ringA, Duration.zero),
-                _ring(_ringB, const Duration(milliseconds: 700)),
-                AnimatedBuilder(
-                  animation: _logo,
-                  builder: (context, child) {
-                    final t = _logo.value;
-                    return Opacity(
-                      opacity: t.clamp(0.0, 1.0),
-                      child: Transform.translate(
-                        offset: Offset(0, 24 * (1 - t)),
-                        child: Transform.scale(
-                          scale: 0.4 + 0.6 * t,
-                          child: child,
+          FittedBox(
+            fit: BoxFit.scaleDown,
+            child: SizedBox(
+              width: 300,
+              height: 260,
+              child: Stack(
+                alignment: Alignment.center,
+                children: [
+                  _ring(_ringA, Duration.zero),
+                  _ring(_ringB, const Duration(milliseconds: 700)),
+                  AnimatedBuilder(
+                    animation: _logo,
+                    builder: (context, child) {
+                      final t = _logo.value;
+                      return Opacity(
+                        opacity: t.clamp(0.0, 1.0),
+                        child: Transform.translate(
+                          offset: Offset(0, 24 * (1 - t)),
+                          child: Transform.scale(
+                            scale: 0.4 + 0.6 * t,
+                            child: child,
+                          ),
                         ),
-                      ),
-                    );
-                  },
-                  child: Image.asset(
-                    'assets/brand/logo-full.jpg',
-                    width: 290,
-                    height: 102,
-                    fit: BoxFit.contain,
+                      );
+                    },
+                    child: Image.asset(
+                      'assets/brand/logo-full.jpg',
+                      width: 290,
+                      height: 102,
+                      fit: BoxFit.contain,
+                    ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
           ),
           const SizedBox(height: 8),

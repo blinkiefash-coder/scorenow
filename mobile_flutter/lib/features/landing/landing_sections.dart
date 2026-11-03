@@ -1866,42 +1866,45 @@ class LandingServices extends StatelessWidget {
                     ),
                     const SizedBox(height: 6),
                     _Body(service.text),
-                    ExpansionTile(
-                      tilePadding: EdgeInsets.zero,
-                      childrenPadding: EdgeInsets.zero,
-                      title: const Text(
-                        "What's included",
-                        style: TextStyle(
-                          color: LP.blue,
-                          fontWeight: FontWeight.w700,
+                    Material(
+                      type: MaterialType.transparency,
+                      child: ExpansionTile(
+                        tilePadding: EdgeInsets.zero,
+                        childrenPadding: EdgeInsets.zero,
+                        title: const Text(
+                          "What's included",
+                          style: TextStyle(
+                            color: LP.blue,
+                            fontWeight: FontWeight.w700,
+                          ),
                         ),
-                      ),
-                      children: [
-                        for (final item in service.included)
-                          Padding(
-                            padding: const EdgeInsets.only(bottom: 6),
-                            child: Row(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                const Icon(
-                                  Icons.check,
-                                  size: 16,
-                                  color: AppColors.green,
-                                ),
-                                const SizedBox(width: 8),
-                                Expanded(
-                                  child: Text(
-                                    item,
-                                    style: const TextStyle(
-                                      color: LP.navy,
-                                      fontSize: 14,
+                        children: [
+                          for (final item in service.included)
+                            Padding(
+                              padding: const EdgeInsets.only(bottom: 6),
+                              child: Row(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  const Icon(
+                                    Icons.check,
+                                    size: 16,
+                                    color: AppColors.green,
+                                  ),
+                                  const SizedBox(width: 8),
+                                  Expanded(
+                                    child: Text(
+                                      item,
+                                      style: const TextStyle(
+                                        color: LP.navy,
+                                        fontSize: 14,
+                                      ),
                                     ),
                                   ),
-                                ),
-                              ],
+                                ],
+                              ),
                             ),
-                          ),
-                      ],
+                        ],
+                      ),
                     ),
                   ],
                 ),

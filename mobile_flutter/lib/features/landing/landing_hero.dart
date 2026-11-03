@@ -251,47 +251,62 @@ class _HeroVisual extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return SizedBox(
-      height: 580,
-      child: Stack(
-        clipBehavior: Clip.none,
-        alignment: Alignment.topCenter,
-        children: [
-          Positioned(
-            top: 6,
-            child: Transform.rotate(
-              angle: 4 * math.pi / 180,
-              child: const _Phone(),
+    // Below the design width the whole mockup scales down instead of overlapping.
+    return LayoutBuilder(
+      builder: (context, box) {
+        const designWidth = 340.0;
+        final narrow = box.maxWidth < designWidth;
+        final visual = SizedBox(
+          width: narrow ? designWidth : box.maxWidth,
+          height: 580,
+          child: _stack(),
+        );
+        return narrow
+            ? FittedBox(fit: BoxFit.scaleDown, child: visual)
+            : visual;
+      },
+    );
+  }
+
+  Widget _stack() {
+    return Stack(
+      clipBehavior: Clip.none,
+      alignment: Alignment.topCenter,
+      children: [
+        Positioned(
+          top: 6,
+          child: Transform.rotate(
+            angle: 4 * math.pi / 180,
+            child: const _Phone(),
+          ),
+        ),
+        Positioned(
+          left: 0,
+          top: 70,
+          child: Transform.rotate(
+            angle: -4 * math.pi / 180,
+            child: const _FloatingCard(
+              icon: Icons.bar_chart,
+              bold: '+42 points',
+              light: 'in 6 months',
             ),
           ),
-          Positioned(
-            left: 0,
-            top: 70,
-            child: Transform.rotate(
-              angle: -4 * math.pi / 180,
-              child: const _FloatingCard(
-                icon: Icons.bar_chart,
-                bold: '+42 points',
-                light: 'in 6 months',
-              ),
+        ),
+        Positioned(
+          right: 0,
+          top: 135,
+          child: Transform.rotate(
+            angle: 7 * math.pi / 180,
+            child: const _FloatingCard(
+              icon: Icons.currency_rupee,
+              bold: 'Better loan',
+              light: 'approval chances',
+              circled: true,
             ),
           ),
-          Positioned(
-            right: 0,
-            top: 135,
-            child: Transform.rotate(
-              angle: 7 * math.pi / 180,
-              child: const _FloatingCard(
-                icon: Icons.currency_rupee,
-                bold: 'Better loan',
-                light: 'approval chances',
-                circled: true,
-              ),
-            ),
-          ),
-          const Positioned(right: 0, bottom: 32, child: _LoanCard()),
-        ],
-      ),
+        ),
+        const Positioned(right: 0, bottom: 32, child: _LoanCard()),
+      ],
     );
   }
 }
