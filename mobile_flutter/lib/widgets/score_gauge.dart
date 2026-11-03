@@ -55,18 +55,19 @@ class _ScoreGaugeState extends State<ScoreGauge>
   @override
   Widget build(BuildContext context) {
     final score = widget.score;
-    final tone = scoreColor(score);
     final fraction = score == null
         ? 0.0
         : ((score.clamp(300, 900) - 300) / 600);
     final scoreText = score?.toString() ?? '—';
-    final band = score == null ? 'No score yet' : (widget.band ?? '');
+    final band = score == null
+        ? 'No score yet'
+        : (widget.band ?? _scoreBand(score.clamp(300, 900).toInt()));
     final dark = widget.dark;
     final scale = widget.size / _gaugeSize;
 
     return SizedBox(
       width: widget.size,
-      height: 70 * scale + 92,
+      height: 140 * scale + 80,
       child: AnimatedBuilder(
         animation: _controller,
         builder: (context, _) {
@@ -78,13 +79,13 @@ class _ScoreGaugeState extends State<ScoreGauge>
                 size: Size(widget.size, widget.size / 2 + 10 * scale),
                 painter: _GaugePainter(
                   progress: fraction * eased,
+                  showNeedle: score != null,
                   dark: dark,
-                  markerColor: dark ? AppColors.gold : tone,
                   scale: scale,
                 ),
               ),
               Positioned(
-                top: 70 * scale,
+                top: 140 * scale,
                 left: 0,
                 right: 0,
                 child: Column(
@@ -93,7 +94,7 @@ class _ScoreGaugeState extends State<ScoreGauge>
                       scoreText,
                       style: TextStyle(
                         color: dark ? Colors.white : AppColors.navy,
-                        fontSize: 46,
+                        fontSize: 46 * scale,
                         fontWeight: FontWeight.w900,
                       ),
                     ),
@@ -146,6 +147,14 @@ class _ScoreGaugeState extends State<ScoreGauge>
   }
 }
 
+String _scoreBand(int score) {
+  if (score < 580) return 'Poor';
+  if (score < 670) return 'Fair';
+  if (score < 740) return 'Good';
+  if (score < 800) return 'Very good';
+  return 'Excellent';
+}
+
 class _BandPill extends StatelessWidget {
   const _BandPill({required this.label, required this.color});
 
@@ -175,61 +184,79 @@ class _BandPill extends StatelessWidget {
 class _GaugePainter extends CustomPainter {
   _GaugePainter({
     required this.progress,
+    required this.showNeedle,
     required this.dark,
-    required this.markerColor,
     required this.scale,
   });
 
   final double progress;
+  final bool showNeedle;
   final bool dark;
-  final Color markerColor;
   final double scale;
 
-  static const _gradient = [
-    Color(0xFFE5484D),
-    Color(0xFFF08A3C),
-    Color(0xFFF4B523),
-    Color(0xFF14BC78),
+  static const _bands = [
+    (0.0, 279 / 600, Color(0xFFE5484D)),
+    (280 / 600, 369 / 600, Color(0xFFF08A3C)),
+    (370 / 600, 439 / 600, Color(0xFFF4B523)),
+    (440 / 600, 499 / 600, Color(0xFF8CCF32)),
+    (500 / 600, 1.0, Color(0xFF14BC78)),
   ];
 
   @override
   void paint(Canvas canvas, Size size) {
     final center = _gaugeCenter * scale;
     final rect = Rect.fromCircle(center: center, radius: _gaugeRadius * scale);
-    final track = Paint()
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = _gaugeStroke * scale
-      ..strokeCap = StrokeCap.round
-      ..color = dark ? Colors.white.withValues(alpha: 0.16) : AppColors.line;
-    canvas.drawArc(rect, math.pi, math.pi, false, track);
-
-    if (progress > 0) {
-      final sweep = math.pi * progress;
-      final arc = Paint()
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = _gaugeStroke * scale
-        ..strokeCap = StrokeCap.round
-        ..shader = const SweepGradient(
-          startAngle: math.pi,
-          endAngle: 2 * math.pi,
-          colors: _gradient,
-          transform: GradientRotation(0),
-        ).createShader(rect);
-      canvas.drawArc(rect, math.pi, sweep, false, arc);
-
-      final angle = math.pi + sweep;
-      final marker = Offset(
-        center.dx + _gaugeRadius * scale * math.cos(angle),
-        center.dy + _gaugeRadius * scale * math.sin(angle),
-      );
-      canvas.drawCircle(marker, 9 * scale, Paint()..color = Colors.white);
-      canvas.drawCircle(
-        marker,
-        9 * scale,
+    for (final (start, end, color) in _bands) {
+      final startAngle = math.pi + math.pi * (start + 0.006);
+      final sweepAngle = math.pi * (end - start - 0.012);
+      canvas.drawArc(
+        rect,
+        startAngle,
+        sweepAngle,
+        false,
         Paint()
           ..style = PaintingStyle.stroke
-          ..strokeWidth = 4 * scale
-          ..color = markerColor,
+          ..strokeWidth = _gaugeStroke * scale
+          ..strokeCap = StrokeCap.butt
+          ..color = color,
+      );
+    }
+
+    if (showNeedle) {
+      final angle = math.pi + math.pi * progress;
+      final tip = Offset(
+        center.dx + (_gaugeRadius - 12) * scale * math.cos(angle),
+        center.dy + (_gaugeRadius - 12) * scale * math.sin(angle),
+      );
+      final side = Offset(
+        7 * scale * math.sin(angle),
+        -7 * scale * math.cos(angle),
+      );
+      final needle = Path()
+        ..moveTo(center.dx + side.dx, center.dy + side.dy)
+        ..lineTo(tip.dx, tip.dy)
+        ..lineTo(center.dx - side.dx, center.dy - side.dy)
+        ..close();
+      canvas.drawPath(needle, Paint()..color = const Color(0xFF303238));
+      canvas.drawCircle(
+        center,
+        15 * scale,
+        Paint()
+          ..color = Colors.white
+          ..style = PaintingStyle.fill,
+      );
+      canvas.drawCircle(
+        center,
+        15 * scale,
+        Paint()
+          ..color = const Color(0xFF303238)
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 5 * scale,
+      );
+      canvas.drawCircle(
+        center,
+        9 * scale,
+        Paint()..color = const Color(0xFF303238),
       );
     }
   }
@@ -237,7 +264,7 @@ class _GaugePainter extends CustomPainter {
   @override
   bool shouldRepaint(covariant _GaugePainter old) =>
       old.progress != progress ||
+      old.showNeedle != showNeedle ||
       old.dark != dark ||
-      old.markerColor != markerColor ||
       old.scale != scale;
 }

@@ -7,6 +7,7 @@ import 'package:scorenow_mobile/core/theme.dart';
 import 'package:scorenow_mobile/features/landing/landing_style.dart';
 import 'package:scorenow_mobile/features/landing/plans_data.dart';
 import 'package:scorenow_mobile/widgets/app_button.dart';
+import 'package:scorenow_mobile/widgets/cmr_risk_scale.dart';
 import 'package:scorenow_mobile/widgets/score_gauge.dart';
 
 // Section widgets for the guest home page. Content mirrors the web HomePage in frontend/src/App.tsx.
@@ -2330,11 +2331,11 @@ class LandingBusiness extends StatelessWidget {
                   ),
                 ),
                 const Text(
-                  'Your Business Credit Health',
+                  'Illustrative CMR rank 3',
                   style: TextStyle(color: LP.muted, fontSize: 12),
                 ),
                 const SizedBox(height: 8),
-                const Center(child: ScoreGauge(score: 728, size: 170)),
+                const CmrRiskScale(rank: 3),
                 const _StatusRow(
                   icon: Icons.credit_card,
                   label: 'Payment Behaviour',

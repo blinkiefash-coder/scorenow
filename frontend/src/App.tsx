@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useRef, useState, type CSSProperties, type FormEvent, type MouseEvent as ReactMouseEvent } from 'react'
+import { Fragment, useEffect, useRef, useState, type FormEvent, type MouseEvent as ReactMouseEvent } from 'react'
 import {
   AlertTriangle, ArrowLeft, ArrowRight, BadgeIndianRupee, BarChart3,
   Building2, CalendarDays, Check, ChevronDown, CircleHelp, Clock3, CreditCard, Download, ExternalLink,
@@ -795,16 +795,79 @@ function AppDownload() {
   )
 }
 
-function ScoreGauge({ score = 831 }: { score?: number }) {
-  const scoreProgress = Math.min(Math.max((score - 300) / 600, 0), 1)
-  const indicatorStyle = { '--score-angle': `${180 + scoreProgress * 180}deg` } as CSSProperties
+const scoreBands = [
+  { label: 'Poor', min: 300, max: 579, color: '#e5484d' },
+  { label: 'Fair', min: 580, max: 669, color: '#f08a3c' },
+  { label: 'Good', min: 670, max: 739, color: '#f4b523' },
+  { label: 'Very good', min: 740, max: 799, color: '#8ccf32' },
+  { label: 'Excellent', min: 800, max: 900, color: '#14bc78' },
+]
+
+function scoreBand(score: number) {
+  return scoreBands.find((band) => score <= band.max)?.label ?? 'Excellent'
+}
+
+function scorePoint(fraction: number, radius: number) {
+  const angle = Math.PI + Math.PI * fraction
+  return { x: 120 + radius * Math.cos(angle), y: 120 + radius * Math.sin(angle) }
+}
+
+function scoreArc(start: number, end: number, radius: number) {
+  const from = scorePoint(start, radius)
+  const to = scorePoint(end, radius)
+  return `M ${from.x} ${from.y} A ${radius} ${radius} 0 0 1 ${to.x} ${to.y}`
+}
+
+function ScoreGauge({ score = 831, dark = false }: { score?: number; dark?: boolean }) {
+  const boundedScore = Math.min(900, Math.max(300, score))
+  const scoreProgress = (boundedScore - 300) / 600
+  const angle = Math.PI + Math.PI * scoreProgress
+  const tip = { x: 120 + 88 * Math.cos(angle), y: 120 + 88 * Math.sin(angle) }
+  const side = { x: 8 * Math.sin(angle), y: -8 * Math.cos(angle) }
+  const needle = `M ${120 + side.x} ${120 + side.y} L ${tip.x} ${tip.y} L ${120 - side.x} ${120 - side.y} Z`
 
   return (
-    <div className="score-gauge" aria-label={`Credit score ${score}, ${score > 780 ? 'excellent' : 'good'}`}>
-      <div className="gauge-track" />
-      <span className="gauge-indicator" style={indicatorStyle} aria-hidden="true"><i /></span>
-      <div className="gauge-value"><strong>{score}</strong><span>{score > 780 ? 'Excellent' : 'Good'}</span></div>
+    <div
+      className={`score-gauge${dark ? ' dark' : ''}`}
+      role="img"
+      aria-label={`Credit score ${score}, ${scoreBand(boundedScore)}`}
+    >
+      <svg viewBox="0 0 240 132" aria-hidden="true">
+        {scoreBands.map((band) => {
+          const start = (band.min - 300) / 600
+          const end = (band.max - 300) / 600
+          return (
+            <path
+              key={band.label}
+              d={scoreArc(start + 0.006, end - 0.006, 101)}
+              fill="none"
+              stroke={band.color}
+              strokeWidth="22"
+            />
+          )
+        })}
+        <path d={needle} fill="#303238" />
+        <circle cx="120" cy="120" r="15" fill="#fff" stroke="#303238" strokeWidth="5" />
+        <circle cx="120" cy="120" r="9" fill="#303238" />
+      </svg>
+      <div className="gauge-value"><strong>{score}</strong><span>{scoreBand(boundedScore)}</span></div>
       <span className="gauge-min">300</span><span className="gauge-max">900</span>
+    </div>
+  )
+}
+
+function CmrRiskScale({ rank = 3 }: { rank?: number }) {
+  const boundedRank = Math.min(10, Math.max(1, Math.round(rank)))
+
+  return (
+    <div className="cmr-scale" role="img" aria-label={`Illustrative CMR rank ${boundedRank} of 10, ${boundedRank <= 3 ? 'low risk' : boundedRank <= 7 ? 'medium risk' : 'high risk'}`}>
+      <div className="cmr-rank-row">
+        {Array.from({ length: 10 }, (_, index) => (
+          <span className={index + 1 === boundedRank ? 'active' : ''} key={index + 1}>{index + 1}</span>
+        ))}
+      </div>
+      <div className="cmr-risk-labels"><span>Low Risk</span><span>Medium Risk</span><span>High Risk</span></div>
+      <small>Illustrative CMR scale · Lower ranks indicate lower risk</small>
     </div>
   )
 }
@@ -1227,7 +1290,7 @@ function CreditScoreEstimator() {
           <div className="estimator-options">{question.options.map((option, index) => <button type="button" key={option.label} onClick={() => chooseAnswer(index)}><span>{String.fromCharCode(65 + index)}</span>{option.label}<ArrowRight /></button>)}</div>
           {step > 0 && <button className="estimator-back" type="button" onClick={goBack}><ArrowLeft /> Previous question</button>}
         </div> : <div className="estimator-result">
-          <div className="estimator-score"><p>Your indicative score range</p><strong>{rangeLow}–{rangeHigh}</strong><span>{scoreLabel}</span><div className="estimator-score-scale"><i style={{ left: `${((estimatedScore - 300) / 600) * 100}%` }} /></div><div className="estimator-scale-labels"><span>300</span><span>600</span><span>750</span><span>900</span></div><small>Approximate estimate only</small></div>
+          <div className="estimator-score"><p>Your indicative score range</p><ScoreGauge score={estimatedScore} dark /><strong>{rangeLow}–{rangeHigh}</strong><span>{scoreLabel}</span><small>Approximate estimate only</small></div>
           <div className="estimator-advice"><span className="estimator-complete"><Check /> Your snapshot is ready</span><h3>Your next best steps</h3><p className="estimator-encouragement"><Sparkles />{encouragement}</p><div>{focusAreas.map((area) => <article key={area.factor}><strong>{area.factor}</strong><span>{area.tip}</span></article>)}</div><div className="estimator-actions"><button className="button button-outline" type="button" onClick={restart}><RotateCcw /> Try again</button><a className="button button-primary" href="#personal-assessment">Get a report review <ArrowRight /></a></div></div>
         </div>}
         <p className="estimator-disclaimer"><ShieldCheck /> This estimate uses general educational rules, not bureau data or a lender model. It is not an official score, financial advice, or a guarantee of credit eligibility.</p>
@@ -3139,7 +3202,7 @@ function HomePage() {
             <div className="report-card-wrap">
               <div className="report-card">
                 <div className="report-heading"><h3>Your Credit Score</h3><small>Updated: 10 Apr, 2024</small></div>
-                <ScoreGauge score={728} />
+                <CmrRiskScale rank={3} />
                 <div className="factor-panel">
                   <div className="factor-title"><strong>Key Factors</strong><a href="#resources">View Full Report <ArrowRight /></a></div>
                   <div className="factor-grid">
@@ -3174,7 +3237,7 @@ function HomePage() {
             <div className="business-visual">
               <div className="business-report">
                 <div className="report-heading"><div><h3>Commercial CIBIL Report</h3><small>Your Business Credit Health</small></div><span>CMR</span></div>
-                <ScoreGauge score={728} />
+                <CmrRiskScale rank={3} />
                 <div className="business-status"><div><CreditCard /><span>Payment Behaviour</span><b>Good</b></div><div><BarChart3 /><span>Credit Exposure</span><b>Moderate</b></div><div><ShieldCheck /><span>Lender Confidence</span><b>High</b></div></div>
                 <div className="business-factors"><div><Building2 /><strong>Business Details</strong><small>Verified</small></div><div><FileCheck2 /><strong>Trade Lines</strong><small>12 Accounts</small></div><div><Clock3 /><strong>Payment History</strong><small>On Time</small></div></div>
               </div>
@@ -3259,7 +3322,7 @@ function BusinessPage() {
         <section className="business-page-hero">
           <div className="container business-page-grid">
             <div><p className="section-kicker">Commercial Credit Guidance</p><h1>Build a Stronger <span>Business Credit Profile</span></h1><p>Understand your CMR, identify lender-reported issues, and prepare your business for healthier funding conversations.</p><div className="hero-actions"><a className="button button-primary" href="#business-assessment">Check CMR Health <ArrowRight /></a><a className="button button-outline" href={`https://wa.me/919114141011?text=${businessMessage}`} target="_blank" rel="noreferrer"><MessageCircle /> Talk to an Expert</a></div><div className="business-trust"><span><ShieldCheck /> Secure handling</span><span><FileSearch /> Detailed CMR review</span><span><Headphones /> Expert support</span></div></div>
-            <div className="business-hero-visual"><div className="business-dashboard"><div><Building2 /><span><small>Business credit health</small><strong>CMR 3</strong></span></div><ul><li><span>Payment behaviour</span><b>Strong</b></li><li><span>Credit exposure</span><b>Review</b></li><li><span>Trade lines</span><b>12 active</b></li><li><span>Lender confidence</span><b>Improving</b></li></ul><div className="business-rise"><BarChart3 /><span>Clearer profile. Better funding readiness.</span></div></div></div>
+            <div className="business-hero-visual"><div className="business-dashboard"><div><Building2 /><span><small>Illustrative business credit health</small><strong>CMR 3</strong></span></div><CmrRiskScale rank={3} /><ul><li><span>Payment behaviour</span><b>Strong</b></li><li><span>Credit exposure</span><b>Review</b></li><li><span>Trade lines</span><b>12 active</b></li><li><span>Lender confidence</span><b>Improving</b></li></ul><div className="business-rise"><BarChart3 /><span>Clearer profile. Better funding readiness.</span></div></div></div>
           </div>
         </section>
 
