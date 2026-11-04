@@ -214,13 +214,7 @@ class _ScoreGaugeState extends State<ScoreGauge>
   }
 }
 
-String _scoreBand(int score) {
-  if (score < 580) return 'Poor';
-  if (score < 670) return 'Fair';
-  if (score < 740) return 'Good';
-  if (score < 800) return 'Very good';
-  return 'Excellent';
-}
+String _scoreBand(int score) => scoreBandLabel(score);
 
 class _BandPill extends StatelessWidget {
   const _BandPill({required this.label, required this.color});
@@ -264,11 +258,10 @@ class _GaugePainter extends CustomPainter {
   final bool compact;
 
   static const _bands = [
-    (0.0, 279 / 600, Color(0xFF00C83F)),
-    (280 / 600, 369 / 600, Color(0xFF95C83D)),
-    (370 / 600, 439 / 600, Color(0xFFFFCF32)),
-    (440 / 600, 499 / 600, Color(0xFFFF6A00)),
-    (500 / 600, 1.0, Color(0xFFF10D17)),
+    (0.0, 250 / 600, AppColors.scorePoor),
+    (250 / 600, 350 / 600, AppColors.scoreAverage),
+    (350 / 600, 450 / 600, AppColors.scoreGood),
+    (450 / 600, 1.0, AppColors.scoreExcellent),
   ];
 
   @override

@@ -19,6 +19,10 @@ abstract final class AppColors {
   static const cardBorder = Color(0xFFE9EEF6);
   static const fieldFill = Color(0xFFF8FBFF);
   static const errorFill = Color(0xFFFDECEC);
+  static const scorePoor = Color(0xFFE3262B);
+  static const scoreAverage = Color(0xFFF08C1C);
+  static const scoreGood = Color(0xFFB2B21E);
+  static const scoreExcellent = Color(0xFF2E9B3A);
 }
 
 abstract final class AppRadius {
@@ -40,11 +44,20 @@ abstract final class AppShadow {
   ];
 }
 
+// Bands match the gauge: Poor 300-549, Average 550-649, Good 650-749, Excellent 750-900.
+String scoreBandLabel(int score) {
+  if (score < 550) return 'Poor';
+  if (score < 650) return 'Average';
+  if (score < 750) return 'Good';
+  return 'Excellent';
+}
+
 Color scoreColor(int? score) {
   if (score == null || score == 0) return AppColors.muted;
-  if (score >= 750) return AppColors.green;
-  if (score >= 650) return AppColors.gold;
-  return AppColors.red;
+  if (score < 550) return AppColors.scorePoor;
+  if (score < 650) return AppColors.scoreAverage;
+  if (score < 750) return AppColors.scoreGood;
+  return AppColors.scoreExcellent;
 }
 
 ThemeData buildAppTheme() {

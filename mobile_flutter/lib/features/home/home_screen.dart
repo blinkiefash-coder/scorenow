@@ -516,15 +516,7 @@ class _ScoreSummary extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final value = score;
-    final label = value == null
-        ? null
-        : value >= 750
-        ? 'Excellent'
-        : value >= 700
-        ? 'Good'
-        : value >= 600
-        ? 'Average'
-        : 'Poor';
+    final label = value == null ? null : scoreBandLabel(value);
     final color = value == null ? AppColors.muted : scoreColor(value);
     final hint = value == null
         ? 'Get your first report to see your score'

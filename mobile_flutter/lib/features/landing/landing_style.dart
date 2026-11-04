@@ -3,6 +3,8 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 
+import '../../core/theme.dart';
+
 // Palette and type used by the guest landing page. Values come from the web
 // stylesheet (frontend/src/index.css) so the page matches scorenow.in.
 abstract final class LP {
@@ -153,11 +155,10 @@ class _GaugePainter extends CustomPainter {
       radius: radius - thickness / 2,
     );
     const segments = [
-      (Color(0xFF00C83F), 83.7),
-      (Color(0xFF95C83D), 27.0),
-      (Color(0xFFFFCF32), 21.0),
-      (Color(0xFFFF6A00), 18.0),
-      (Color(0xFFF10D17), 30.3),
+      (AppColors.scorePoor, 75.0),
+      (AppColors.scoreAverage, 30.0),
+      (AppColors.scoreGood, 30.0),
+      (AppColors.scoreExcellent, 45.0),
     ];
     var start = math.pi;
     for (final (color, degrees) in segments) {
@@ -184,10 +185,10 @@ class _GaugePainter extends CustomPainter {
     canvas.drawCircle(
       dot,
       dotSize * 1.9,
-      Paint()..color = const Color(0xFFFF6A00).withValues(alpha: 0.18),
+      Paint()..color = AppColors.scoreExcellent.withValues(alpha: 0.18),
     );
     canvas.drawCircle(dot, dotSize + 1.5, Paint()..color = Colors.white);
-    canvas.drawCircle(dot, dotSize, Paint()..color = const Color(0xFFFF6A00));
+    canvas.drawCircle(dot, dotSize, Paint()..color = AppColors.scoreExcellent);
   }
 
   @override

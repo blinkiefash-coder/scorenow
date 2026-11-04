@@ -796,15 +796,18 @@ function AppDownload() {
 }
 
 const scoreBands = [
-  { label: 'Poor', min: 300, max: 579, color: '#00c83f' },
-  { label: 'Fair', min: 580, max: 669, color: '#95c83d' },
-  { label: 'Good', min: 670, max: 739, color: '#ffcf32' },
-  { label: 'Very good', min: 740, max: 799, color: '#ff6a00' },
-  { label: 'Excellent', min: 800, max: 900, color: '#f10d17' },
+  { label: 'Poor', tone: 'poor', min: 300, max: 550, color: '#e3262b' },
+  { label: 'Average', tone: 'average', min: 550, max: 650, color: '#f08c1c' },
+  { label: 'Good', tone: 'good', min: 650, max: 750, color: '#b2b21e' },
+  { label: 'Excellent', tone: 'excellent', min: 750, max: 900, color: '#2e9b3a' },
 ]
 
+function scoreBandInfo(score: number) {
+  return scoreBands.find((band) => score < band.max) ?? scoreBands[scoreBands.length - 1]
+}
+
 function scoreBand(score: number) {
-  return scoreBands.find((band) => score <= band.max)?.label ?? 'Excellent'
+  return scoreBandInfo(score).label
 }
 
 function scorePoint(fraction: number, radius: number) {
@@ -850,7 +853,7 @@ function ScoreGauge({ score = 831, dark = false }: { score?: number; dark?: bool
         <circle cx="120" cy="120" r="15" fill="#fff" stroke="#303238" strokeWidth="5" />
         <circle cx="120" cy="120" r="9" fill="#303238" />
       </svg>
-      <div className="gauge-value"><strong>{score}</strong><span>{scoreBand(boundedScore)}</span></div>
+      <div className="gauge-value"><strong>{score}</strong><span className={`sc-band-${scoreBandInfo(boundedScore).tone}`}>{scoreBand(boundedScore)}</span></div>
       <span className="gauge-min">300</span><span className="gauge-max">900</span>
     </div>
   )
@@ -2765,16 +2768,6 @@ function DashboardPage({ user, onLogout }: { user: AuthUser; onLogout: () => voi
     }
   }
 
-  const scoreBandTone = (band: string | null) => {
-    switch (band?.toLowerCase()) {
-      case 'excellent': return 'excellent'
-      case 'good': return 'good'
-      case 'fair': return 'fair'
-      case 'needs attention': return 'attention'
-      default: return 'neutral'
-    }
-  }
-
   const scoreProgress = activeReport?.credit_score
     ? Math.max(0, Math.min(1, (activeReport.credit_score - 300) / 600))
     : 0.5
@@ -2877,16 +2870,14 @@ function DashboardPage({ user, onLogout }: { user: AuthUser; onLogout: () => voi
                       <div className="sc-gauge" role="img" aria-label={`Credit score ${activeReport.credit_score ?? 'unavailable'} out of 900`}>
                         <svg viewBox="0 0 200 112" aria-hidden="true">
                           <path d={gaugeArc(0, 1)} className="sc-gauge-base" />
-                          <path d={gaugeArc(0, 0.465)} stroke="#00c83f" />
-                          <path d={gaugeArc(0.465, 0.615)} stroke="#95c83d" />
-                          <path d={gaugeArc(0.615, 0.732)} stroke="#ffcf32" />
-                          <path d={gaugeArc(0.732, 0.832)} stroke="#ff6a00" />
-                          <path d={gaugeArc(0.832, 1)} stroke="#f10d17" />
+                          {scoreBands.map((band) => <path key={band.label} d={gaugeArc((band.min - 300) / 600, (band.max - 300) / 600)} stroke={band.color} />)}
                           <circle cx={gaugeMarker.x} cy={gaugeMarker.y} r="7" className="sc-gauge-dot" />
                         </svg>
                         <div className="sc-gauge-value">
                           <strong>{activeReport.credit_score ?? '—'}</strong>
-                          <span className={`sc-band sc-band-${scoreBandTone(activeReport.score_band)}`}>Average <Info /></span>
+                          {activeReport.credit_score
+                            ? <span className={`sc-band sc-band-${scoreBandInfo(activeReport.credit_score).tone}`}>{scoreBand(activeReport.credit_score)} <Info /></span>
+                            : <span className="sc-band sc-band-neutral">No score <Info /></span>}
                         </div>
                         <span className="sc-gauge-min">300</span><span className="sc-gauge-max">900</span>
                       </div>
@@ -3314,7 +3305,7 @@ function HomePage() {
             <div className="report-card-wrap">
               <div className="report-card">
                 <div className="report-heading"><h3>Your Credit Score</h3><small>Updated: 10 Apr, 2024</small></div>
-                <CmrRiskScale rank={3} />
+                <ScoreGauge score={728} />
                 <div className="factor-panel">
                   <div className="factor-title"><strong>Key Factors</strong><a href="#resources">View Full Report <ArrowRight /></a></div>
                   <div className="factor-grid">
