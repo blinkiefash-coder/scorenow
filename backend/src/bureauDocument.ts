@@ -1,4 +1,4 @@
-import { downloadReportPdf, livePdfUrl } from "./bureaus.js";
+import { downloadReportPdf, livePdfUrl, type Bureau } from "./bureaus.js";
 
 const MAX_HTML_BYTES = 15 * 1024 * 1024;
 const INLINE_HTML_KEYS = ["html", "htmlContent", "html_content", "report_html", "reportHtml"];
@@ -72,8 +72,13 @@ export const htmlToPdf = async (html: string): Promise<Buffer | null> => {
 };
 
 // Called once, right after a successful bureau hit, so later downloads never depend on the provider again.
-export const captureBureauDocument = async (raw: unknown): Promise<BureauDocument> => {
+export const captureBureauDocument = async (raw: unknown, bureau?: Bureau): Promise<BureauDocument> => {
   const html = await extractBureauHtml(raw);
+  // CIBIL: the provider's HTML is the source of truth, rendered to PDF in the backend.
+  if (bureau === "cibil" && html) {
+    const rendered = await htmlToPdf(html);
+    if (rendered) return { pdf: rendered, html };
+  }
   let pdf = await downloadReportPdf(livePdfUrl(raw));
   if (!pdf && html) pdf = await htmlToPdf(html);
   return { pdf, html };
