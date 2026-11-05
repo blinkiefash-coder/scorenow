@@ -289,7 +289,8 @@ export const completeAdminReportAudit = async ({ auditId, status, providerTransa
         normalizedReport == null ? null : JSON.stringify(normalizedReport)]);
 };
 export const getAdminReportDocument = async (auditId) => {
-    const { rows } = await pool.query(`SELECT id, bureau, to_char(COALESCE(completed_at, created_at), 'YYYY-MM-DD') AS report_date, normalized_report, report_pdf, report_html
+    const { rows } = await pool.query(`SELECT id, bureau, to_char(COALESCE(completed_at, created_at), 'YYYY-MM-DD') AS report_date, normalized_report, report_pdf, report_html,
+            CASE WHEN report_pdf IS NULL THEN provider_response END AS provider_response
      FROM admin_report_audit
      WHERE id = $1 AND status = 'completed' AND normalized_report IS NOT NULL`, [auditId]);
     const row = rows[0];
@@ -300,6 +301,7 @@ export const getAdminReportDocument = async (auditId) => {
         report: row.normalized_report,
         pdf: row.report_pdf,
         html: row.report_html,
+        raw: row.provider_response,
     } : null;
 };
 const activityPaymentFilter = (filters) => {
@@ -935,10 +937,10 @@ export const getReportDetail = async (userId, requestId) => {
     };
 };
 export const getReportPdf = async (userId, requestId) => {
-    const { rows } = await pool.query(`SELECT c.request_id, c.bureau, to_char(c.report_date, 'YYYY-MM-DD') AS report_date, c.report_pdf, c.report_html,
+    const { rows } = await pool.query(`SELECT c.request_id, c.user_id, c.bureau, to_char(c.report_date, 'YYYY-MM-DD') AS report_date, c.report_pdf, c.report_html,
             c.raw_report, c.normalized_report
      FROM credit_reports c JOIN credit_report_requests r ON r.id = c.request_id
-     WHERE c.request_id::text = $1 AND c.user_id = $2 AND ${VISIBLE_REQUEST}`, [requestId, userId]);
+     WHERE c.request_id::text = $1 AND ($2::text IS NULL OR c.user_id::text = $2) AND ${VISIBLE_REQUEST}`, [requestId, userId]);
     const row = rows[0];
     if (!row)
         return null;
@@ -949,11 +951,12 @@ export const getReportPdf = async (userId, requestId) => {
     }
     return {
         requestId: row.request_id,
+        userId: row.user_id,
         bureau: row.bureau,
         reportDate: row.report_date,
         pdf: row.report_pdf,
         html: row.report_html,
-        raw: row.report_pdf || row.report_html ? null : row.raw_report,
+        raw: row.report_pdf ? null : row.raw_report,
         report,
     };
 };

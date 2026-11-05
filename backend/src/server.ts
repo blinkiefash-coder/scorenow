@@ -17,6 +17,7 @@ import {
   stateCodes,
   type Bureau,
   type ProviderDiagnostics,
+  downloadReportPdf,
 } from "./bureaus.js";
 import {
   completeReportRequest,
@@ -848,6 +849,46 @@ app.post("/api/admin/reports", requireAdmin, requireAdminRoles("owner", "manager
   }
 });
 
+// The bureau's own PDF link (never the single-use htmlUrl) is still valid for ~24h after the check.
+const bureauPdfUrl = (raw: unknown) => {
+  const url = (raw as { data?: { data?: { pdf_report_url?: unknown } } } | null)?.data?.data?.pdf_report_url;
+  return typeof url === "string" ? url : null;
+};
+
+type ReportFileRecord = {
+  bureau: Bureau;
+  reportDate: string;
+  pdf: Buffer | null;
+  html: string | null;
+  raw?: unknown;
+  report: Parameters<typeof generateReportPdf>[0]["report"];
+};
+
+const sendReportFile = async (response: Response, record: ReportFileRecord, savePdf: (pdf: Buffer) => Promise<void>) => {
+  let pdf = record.pdf;
+  if (!pdf && record.html) pdf = await htmlToPdf(record.html);
+  if (!pdf && record.raw) pdf = await downloadReportPdf(bureauPdfUrl(record.raw));
+  if (pdf && !record.pdf) await savePdf(pdf).catch((error) => console.error("Report PDF save failed", error));
+  const name = `ScoreNow-${record.bureau}-report-${record.reportDate}`;
+  if (!pdf && record.html) {
+    response.set({
+      "Content-Type": "text/html; charset=utf-8",
+      "Content-Disposition": `attachment; filename="${name}.html"`,
+      "Cache-Control": "private, no-store",
+    }).send(record.html);
+    return;
+  }
+  const generated = !pdf;
+  pdf ??= await generateReportPdf({ report: record.report, reportDate: record.reportDate });
+  response.set({
+    "Content-Type": "application/pdf",
+    "Content-Disposition": `attachment; filename="${generated ? `${name}-scorenow-summary` : name}.pdf"`,
+    "X-Report-Source": generated ? "scorenow-summary" : "bureau",
+    "Access-Control-Expose-Headers": "X-Report-Source",
+    "Cache-Control": "private, no-store",
+  }).send(pdf);
+};
+
 app.get("/api/admin/reports/:auditId/pdf", requireAdmin, requireAdminRoles("owner", "manager"), async (request, response) => {
   const auditId = Number(request.params.auditId);
   if (!Number.isSafeInteger(auditId) || auditId < 1) {
@@ -860,29 +901,30 @@ app.get("/api/admin/reports/:auditId/pdf", requireAdmin, requireAdminRoles("owne
       response.status(404).json({ message: "Completed admin report not found." });
       return;
     }
-    let pdf = record.pdf;
-    if (!pdf && record.html) {
-      pdf = await htmlToPdf(record.html);
-      if (pdf) await saveAdminReportDocument(auditId, { pdf, html: null });
-    }
-    if (!pdf && record.html) {
-      response.set({
-        "Content-Type": "text/html; charset=utf-8",
-        "Content-Disposition": `attachment; filename="ScoreNow-${record.bureau}-report-${record.reportDate}.html"`,
-        "Cache-Control": "private, no-store",
-      }).send(record.html);
-      return;
-    }
-    const generated = !pdf;
-    pdf ??= await generateReportPdf({ report: record.report, reportDate: record.reportDate });
-    response.set({
-      "Content-Type": "application/pdf",
-      "Content-Disposition": `attachment; filename="ScoreNow-${record.bureau}-report${generated ? "-copy" : ""}-${record.reportDate}.pdf"`,
-      "Cache-Control": "private, no-store",
-    }).send(pdf);
+    await sendReportFile(response, record, (pdf) => saveAdminReportDocument(auditId, { pdf, html: null }));
   } catch (error) {
     console.error("Admin report PDF generation failed", error);
     response.status(500).json({ message: "Unable to generate this report PDF." });
+  }
+});
+
+app.get("/api/admin/customer-reports/:requestId/pdf", requireAdmin, requireAdminRoles("owner", "manager"), async (request, response) => {
+  const requestId = String(request.params.requestId);
+  if (!/^[0-9a-f-]{36}$/i.test(requestId)) {
+    response.status(400).json({ message: "Choose a valid report." });
+    return;
+  }
+  try {
+    const record = await getReportPdf(null, requestId);
+    if (!record) {
+      response.status(404).json({ message: "Completed report not found." });
+      return;
+    }
+    auditAdmin(request, response, "customer_report_download", { type: "customer", id: record.userId, details: { bureau: record.bureau, requestId } });
+    await sendReportFile(response, record, (pdf) => saveReportPdf(record.requestId, pdf));
+  } catch (error) {
+    console.error("Admin customer report download failed", error);
+    response.status(500).json({ message: "Unable to download this report." });
   }
 });
 
@@ -1175,42 +1217,7 @@ app.get("/api/reports/:requestId/pdf", requireUser, async (request, response) =>
       response.status(404).json({ message: "Report not found." });
       return;
     }
-    console.log(`PDF generation for ${request.params.requestId}:`, {
-      bureau: record.bureau,
-      hasStoredPdf: !!record.pdf,
-      accountsCount: record.report.accounts.length,
-      enquiriesCount: record.report.enquiries.length,
-      firstAccountLender: record.report.accounts[0]?.lender,
-    });
-    let pdf = record.pdf;
-    let html = record.html;
-    let generatedCopy = false;
-    if (!pdf && !html && record.raw) {
-      const document = await captureBureauDocument(record.raw, record.bureau);
-      pdf = document.pdf;
-      html = document.html;
-      if (pdf || html) await saveReportDocument(record.requestId, document);
-    } else if (!pdf && html) {
-      pdf = await htmlToPdf(html);
-      if (pdf) await saveReportPdf(record.requestId, pdf);
-    }
-    if (!pdf && html) {
-      response.set({
-        "Content-Type": "text/html; charset=utf-8",
-        "Content-Disposition": `attachment; filename="ScoreNow-${record.bureau}-report-${record.reportDate}.html"`,
-        "Cache-Control": "private, no-store",
-      }).send(html);
-      return;
-    }
-    if (!pdf) {
-      pdf = await generateReportPdf({ report: record.report, reportDate: record.reportDate });
-      generatedCopy = true;
-    }
-    response.set({
-      "Content-Type": "application/pdf",
-      "Content-Disposition": `attachment; filename="ScoreNow-${record.bureau}-${generatedCopy ? "report-copy" : "report"}-${record.reportDate}.pdf"`,
-      "Cache-Control": "private, no-store",
-    }).send(pdf);
+    await sendReportFile(response, record, (pdf) => saveReportPdf(record.requestId, pdf));
   } catch (error) {
     console.error("Report PDF lookup failed", error);
     response.status(500).json({ message: "Unable to download the PDF right now." });

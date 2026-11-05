@@ -4105,27 +4105,30 @@ function AdminPage() {
     }
   }
 
-  const downloadAdminReportPdf = async (auditId: string, reportBureau: BureauId) => {
-    if (!auditId || !token) return
-    setReportPdfLoadingId(auditId)
+  const downloadAdminReportPdf = async (reportId: string, reportBureau: BureauId | string, source: 'admin' | 'customer' = 'admin') => {
+    if (!reportId || !token) return
+    setReportPdfLoadingId(reportId)
     setReportPdfError('')
     try {
-      const response = await fetch(`${apiUrl}/api/admin/reports/${auditId}/pdf`, {
+      const path = source === 'customer' ? `customer-reports/${reportId}/pdf` : `reports/${reportId}/pdf`
+      const response = await fetch(`${apiUrl}/api/admin/${path}`, {
         headers: { Authorization: `Bearer ${token}` },
       })
       if (!response.ok) {
         const result = await response.json().catch(() => null) as { message?: string } | null
-        throw new Error(result?.message || 'Unable to generate this report PDF.')
+        throw new Error(result?.message || 'Unable to download this report.')
       }
       const blob = await response.blob()
+      const summary = response.headers.get('X-Report-Source') === 'scorenow-summary'
       const url = URL.createObjectURL(blob)
       const link = document.createElement('a')
       link.href = url
-      link.download = `ScoreNow-${reportBureau}-report.${blob.type.includes('html') ? 'html' : 'pdf'}`
+      link.download = `ScoreNow-${reportBureau}-report${summary ? '-scorenow-summary' : ''}.${blob.type.includes('html') ? 'html' : 'pdf'}`
       link.click()
       window.setTimeout(() => URL.revokeObjectURL(url), 1000)
+      if (summary) setReportPdfError('The original bureau report is no longer available for this check, so a Scorenow summary was downloaded instead.')
     } catch (error) {
-      setReportPdfError(error instanceof Error ? error.message : 'Unable to generate this report PDF.')
+      setReportPdfError(error instanceof Error ? error.message : 'Unable to download this report.')
     } finally {
       setReportPdfLoadingId('')
     }
@@ -4590,8 +4593,8 @@ function AdminPage() {
           <button className="button button-primary" type="submit" disabled={loading}>{loading ? 'Requesting report…' : <>Fetch {bureauCatalog.find((item) => item.id === bureau)?.name} report <ArrowRight /></>}</button>
         </form>
         {report && <section className="admin-report-result" aria-live="polite">
-          <div className="report-toolbar-actions"><button className="button button-primary" type="button" onClick={() => void downloadAdminReportPdf(reportAuditId, report.bureau)} disabled={reportPdfLoadingId === reportAuditId || !reportAuditId}><Download /> {reportPdfLoadingId === reportAuditId ? 'Preparing PDF…' : 'Download Scorenow PDF'}</button></div>
-          <p className="dashboard-notice info">This is a Scorenow-generated copy based on bureau data, not an official bureau-issued report.</p>
+          <div className="report-toolbar-actions"><button className="button button-primary" type="button" onClick={() => void downloadAdminReportPdf(reportAuditId, report.bureau)} disabled={reportPdfLoadingId === reportAuditId || !reportAuditId}><Download /> {reportPdfLoadingId === reportAuditId ? 'Preparing report…' : 'Download report'}</button></div>
+          <p className="dashboard-notice info">The download is the original bureau report (for CIBIL, the bureau's own report saved at the time of the check).</p>
           {reportPdfError && <p className="dashboard-notice error" role="alert">{reportPdfError}</p>}
           <div className="admin-result-heading"><div><span>{bureauCatalog.find((item) => item.id === report.bureau)?.name} REPORT</span><h2>{report.personal.name || 'Client report'}</h2></div><strong>{report.score ?? '—'}<small>{report.score ? 'Credit score' : 'Score unavailable'}</small></strong></div>
           <div className="report-summary-strip">
@@ -4810,8 +4813,8 @@ function AdminPage() {
                 <button className="button button-outline" type="button" onClick={() => setFollowUpTarget({ id: customerDetail.customer.id, name: customerDetail.customer.full_name, stage: '' })}><MessageCircle /> Create follow-up</button>
                 {!customerDetail.customer.mobile.includes('•') && <a className="button button-outline" href={`tel:+91${customerDetail.customer.mobile}`}><Phone /> Call</a>}
               </div>
-              <section><h3>Report requests <small>{customerDetail.reports.length}</small></h3>{customerDetail.reports.length ? <table className="admin-activity-table admin-drawer-table"><thead><tr><th>Date</th><th>Bureau</th><th>Status</th><th>Score</th><th /></tr></thead><tbody>
-                {customerDetail.reports.map((item) => <tr key={item.id}><td>{formatAdminTimestamp(item.requested_at)}</td><td>{adminBureauName(item.bureau)}{!item.is_paid && <small>demo</small>}</td><td><span className={`admin-status ${item.status}`}>{item.status}</span>{item.failure_reason && <small className="admin-activity-error" title={item.failure_reason}>{item.failure_reason}</small>}</td><td>{item.credit_score ?? '—'}</td><td>{canManageCustomers && item.is_paid && item.status === 'failed' && <button className="button button-outline admin-small-button" type="button" disabled={retryingId === item.id} onClick={() => void retryReportRequest(item.id)}><RotateCcw /> {retryingId === item.id ? 'Retrying…' : 'Retry'}</button>}</td></tr>)}
+              <section><h3>Report requests <small>{customerDetail.reports.length}</small></h3>{reportPdfError && <p className="dashboard-notice error" role="alert">{reportPdfError}</p>}{customerDetail.reports.length ? <table className="admin-activity-table admin-drawer-table"><thead><tr><th>Date</th><th>Bureau</th><th>Status</th><th>Score</th><th /></tr></thead><tbody>
+                {customerDetail.reports.map((item) => <tr key={item.id}><td>{formatAdminTimestamp(item.requested_at)}</td><td>{adminBureauName(item.bureau)}{!item.is_paid && <small>demo</small>}</td><td><span className={`admin-status ${item.status}`}>{item.status}</span>{item.failure_reason && <small className="admin-activity-error" title={item.failure_reason}>{item.failure_reason}</small>}</td><td>{item.credit_score ?? '—'}</td><td>{canManageCustomers && item.status === 'completed' && <button className="button button-outline admin-small-button" type="button" disabled={reportPdfLoadingId === item.id} onClick={() => void downloadAdminReportPdf(item.id, item.bureau, 'customer')}><Download /> {reportPdfLoadingId === item.id ? 'Preparing…' : 'Download'}</button>}{canManageCustomers && item.is_paid && item.status === 'failed' && <button className="button button-outline admin-small-button" type="button" disabled={retryingId === item.id} onClick={() => void retryReportRequest(item.id)}><RotateCcw /> {retryingId === item.id ? 'Retrying…' : 'Retry'}</button>}</td></tr>)}
               </tbody></table> : <p className="admin-muted">No report requests.</p>}</section>
               <section><h3>Payments <small>{customerDetail.payments.length}</small></h3>{customerDetail.payments.length ? <table className="admin-activity-table admin-drawer-table"><thead><tr><th>Date</th><th>Bureau</th><th>Amount</th><th>Status</th></tr></thead><tbody>
                 {customerDetail.payments.map((item) => <tr key={item.id}><td>{formatAdminTimestamp(item.paid_at ?? item.created_at)}</td><td>{adminBureauName(item.bureau)}</td><td>{formatMoney(Number(item.amount))}<small>{item.gateway}</small></td><td><span className={`admin-status ${item.status === 'paid' ? 'paid' : item.failure_reason ? 'failed' : 'pending'}`}>{item.status === 'created' ? (item.failure_reason ? 'failed attempt' : 'pending') : item.status}</span>{item.failure_reason && <small className="admin-activity-error">{item.failure_reason}</small>}</td></tr>)}

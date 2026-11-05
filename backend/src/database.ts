@@ -411,8 +411,10 @@ export const getAdminReportDocument = async (auditId: number) => {
     normalized_report: NormalizedReport | null;
     report_pdf: Buffer | null;
     report_html: string | null;
+    provider_response: unknown;
   }>(
-    `SELECT id, bureau, to_char(COALESCE(completed_at, created_at), 'YYYY-MM-DD') AS report_date, normalized_report, report_pdf, report_html
+    `SELECT id, bureau, to_char(COALESCE(completed_at, created_at), 'YYYY-MM-DD') AS report_date, normalized_report, report_pdf, report_html,
+            CASE WHEN report_pdf IS NULL THEN provider_response END AS provider_response
      FROM admin_report_audit
      WHERE id = $1 AND status = 'completed' AND normalized_report IS NOT NULL`,
     [auditId],
@@ -425,6 +427,7 @@ export const getAdminReportDocument = async (auditId: number) => {
     report: row.normalized_report!,
     pdf: row.report_pdf,
     html: row.report_html,
+    raw: row.provider_response,
   } : null;
 };
 
@@ -1423,9 +1426,10 @@ export const getReportDetail = async (userId: string, requestId: string) => {
   };
 };
 
-export const getReportPdf = async (userId: string, requestId: string) => {
+export const getReportPdf = async (userId: string | null, requestId: string) => {
   const { rows } = await pool.query<{
     request_id: string;
+    user_id: string;
     bureau: Bureau;
     report_date: string;
     report_pdf: Buffer | null;
@@ -1433,10 +1437,10 @@ export const getReportPdf = async (userId: string, requestId: string) => {
     raw_report: unknown;
     normalized_report: NormalizedReport | null;
   }>(
-    `SELECT c.request_id, c.bureau, to_char(c.report_date, 'YYYY-MM-DD') AS report_date, c.report_pdf, c.report_html,
+    `SELECT c.request_id, c.user_id, c.bureau, to_char(c.report_date, 'YYYY-MM-DD') AS report_date, c.report_pdf, c.report_html,
             c.raw_report, c.normalized_report
      FROM credit_reports c JOIN credit_report_requests r ON r.id = c.request_id
-     WHERE c.request_id::text = $1 AND c.user_id = $2 AND ${VISIBLE_REQUEST}`,
+     WHERE c.request_id::text = $1 AND ($2::text IS NULL OR c.user_id::text = $2) AND ${VISIBLE_REQUEST}`,
     [requestId, userId],
   );
   const row = rows[0];
@@ -1448,11 +1452,12 @@ export const getReportPdf = async (userId: string, requestId: string) => {
   }
   return {
     requestId: row.request_id,
+    userId: row.user_id,
     bureau: row.bureau,
     reportDate: row.report_date,
     pdf: row.report_pdf,
     html: row.report_html,
-    raw: row.report_pdf || row.report_html ? null : row.raw_report,
+    raw: row.report_pdf ? null : row.raw_report,
     report,
   };
 };
