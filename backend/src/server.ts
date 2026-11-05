@@ -835,7 +835,7 @@ app.post("/api/admin/reports", requireAdmin, requireAdminRoles("owner", "manager
     const report = normalizeReport(bureau, result.raw);
     await completeAdminReportAudit({ auditId, status: "completed", providerTransactionId: result.providerTxnId, creditScore: report.score, failureReason: null,
       providerResponse: result.raw, normalizedReport: report });
-    const document = await captureBureauDocument(result.raw, bureau);
+    const document = await captureBureauDocument(result.raw, bureau, (html) => saveAdminReportDocument(auditId, { pdf: null, html }));
     if (document.pdf || document.html) {
       await saveAdminReportDocument(auditId, document).catch((error) => console.error("Admin report document save failed", error));
     }
@@ -1159,7 +1159,7 @@ const runReportFetch = async (userId: string, requestId: string, bureau: Bureau,
     report,
     raw: result.raw,
   });
-  const document = await captureBureauDocument(result.raw, bureau);
+  const document = await captureBureauDocument(result.raw, bureau, (html) => saveReportDocument(requestId, { pdf: null, html }));
   if (document.pdf || document.html) {
     await saveReportDocument(requestId, document).catch((error) => console.error("Report document save failed", error));
   } else {

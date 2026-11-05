@@ -23,27 +23,38 @@ const withBase = (html: string, baseUrl: string | null) => {
   return /<head[^>]*>/i.test(html) ? html.replace(/<head[^>]*>/i, (match) => `${match}${tag}`) : `${tag}${html}`;
 };
 
-// The provider returns either the HTML inline or a short-lived link to it, so capture it while it is still valid.
-export const extractBureauHtml = async (raw: unknown): Promise<string | null> => {
+const htmlUrlOf = (raw: unknown) => {
+  const value = (raw as { data?: { data?: Record<string, unknown> } } | null)?.data?.data?.htmlUrl;
+  return typeof value === "string" ? value : null;
+};
+
+// The provider's htmlUrl can be opened only once, so it is read exactly once and whatever it returns is kept.
+const extractBureauLinkDocument = async (raw: unknown): Promise<BureauDocument> => {
   const data = (raw as { data?: { data?: Record<string, unknown> } } | null)?.data?.data;
-  if (!data) return null;
+  if (!data) return { pdf: null, html: null };
   for (const key of INLINE_HTML_KEYS) {
     const value = data[key];
-    if (typeof value === "string" && looksLikeHtml(value)) return value;
+    if (typeof value === "string" && looksLikeHtml(value)) return { pdf: null, html: value };
   }
-  const url = typeof data.htmlUrl === "string" ? data.htmlUrl : null;
-  if (!url || !isPublicHttps(url)) return null;
+  const url = htmlUrlOf(raw);
+  if (!url || !isPublicHttps(url)) return { pdf: null, html: null };
   try {
-    const response = await fetch(url, { signal: AbortSignal.timeout(30000) });
-    if (!response.ok || Number(response.headers.get("content-length")) > MAX_HTML_BYTES) return null;
+    const response = await fetch(url, { signal: AbortSignal.timeout(60000) });
+    if (!response.ok) {
+      console.error(`Bureau HTML link returned ${response.status}; it may already have been opened.`);
+      return { pdf: null, html: null };
+    }
     const buffer = Buffer.from(await response.arrayBuffer());
-    if (buffer.length > MAX_HTML_BYTES) return null;
-    if (buffer.subarray(0, 5).toString("latin1") === "%PDF-") return null;
+    if (buffer.length > MAX_HTML_BYTES) {
+      console.error(`Bureau HTML document too large (${buffer.length} bytes).`);
+      return { pdf: null, html: null };
+    }
+    if (buffer.subarray(0, 5).toString("latin1") === "%PDF-") return { pdf: buffer, html: null };
     const html = buffer.toString("utf8");
-    return looksLikeHtml(html) ? withBase(html, url) : null;
+    return { pdf: null, html: looksLikeHtml(html) ? withBase(html, url) : null };
   } catch (error) {
     console.error("Bureau HTML download failed", error);
-    return null;
+    return { pdf: null, html: null };
   }
 };
 
@@ -72,14 +83,22 @@ export const htmlToPdf = async (html: string): Promise<Buffer | null> => {
 };
 
 // Called once, right after a successful bureau hit, so later downloads never depend on the provider again.
-export const captureBureauDocument = async (raw: unknown, bureau?: Bureau): Promise<BureauDocument> => {
-  const html = await extractBureauHtml(raw);
+export const captureBureauDocument = async (
+  raw: unknown,
+  bureau?: Bureau,
+  saveHtml?: (html: string) => Promise<void>,
+): Promise<BureauDocument> => {
+  const linked = await extractBureauLinkDocument(raw);
+  const html = linked.html;
+  // Persist before the slow PDF render so a render failure cannot lose the only copy.
+  if (html && saveHtml) await saveHtml(html).catch((error) => console.error("Bureau HTML save failed", error));
   // CIBIL: the provider's HTML is the source of truth, rendered to PDF in the backend.
   if (bureau === "cibil" && html) {
     const rendered = await htmlToPdf(html);
     if (rendered) return { pdf: rendered, html };
   }
-  let pdf = await downloadReportPdf(livePdfUrl(raw));
+  const pdfUrl = livePdfUrl(raw);
+  let pdf = linked.pdf ?? (pdfUrl && pdfUrl !== htmlUrlOf(raw) ? await downloadReportPdf(pdfUrl) : null);
   if (!pdf && html) pdf = await htmlToPdf(html);
   return { pdf, html };
 };

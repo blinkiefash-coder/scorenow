@@ -4117,10 +4117,11 @@ function AdminPage() {
         const result = await response.json().catch(() => null) as { message?: string } | null
         throw new Error(result?.message || 'Unable to generate this report PDF.')
       }
-      const url = URL.createObjectURL(await response.blob())
+      const blob = await response.blob()
+      const url = URL.createObjectURL(blob)
       const link = document.createElement('a')
       link.href = url
-      link.download = `ScoreNow-${reportBureau}-report-copy.pdf`
+      link.download = `ScoreNow-${reportBureau}-report.${blob.type.includes('html') ? 'html' : 'pdf'}`
       link.click()
       window.setTimeout(() => URL.revokeObjectURL(url), 1000)
     } catch (error) {
