@@ -941,8 +941,37 @@ const sendOtpEmail = async (to: string, code: string) => {
   return true;
 };
 
-const sendOtpSms = async (_mobile: string, _code: string) => {
-  return false;
+const sendOtpSms = async (mobile: string, code: string) => {
+  const apiKey = process.env.TWOFACTOR_API_KEY;
+  if (!apiKey) return false;
+  const template = process.env.TWOFACTOR_OTP_TEMPLATE || "Scorenow_Login_Otp";
+  try {
+    const url = `https://2factor.in/API/V1/${encodeURIComponent(apiKey)}/SMS/91${mobile}/${code}/${encodeURIComponent(template)}`;
+    const response = await fetch(url, { signal: AbortSignal.timeout(15000) });
+    const result = await response.json().catch(() => null) as { Status?: string; Details?: string } | null;
+    if (response.ok && result?.Status === "Success") return true;
+    console.error(`2Factor SMS failed for ******${mobile.slice(-4)}: HTTP ${response.status} ${String(result?.Details ?? "").slice(0, 200)}`);
+    return false;
+  } catch (error) {
+    console.error("2Factor SMS request failed", error instanceof Error ? error.message : error);
+    return false;
+  }
+};
+
+const smsOtpAttempts = new Map<string, { count: number; resetAt: number }>();
+const MAX_SMS_OTP_PER_IP = 10;
+const SMS_OTP_WINDOW_MS = 60 * 60 * 1000;
+
+const canSendSmsOtp = (ipAddress: string) => {
+  const now = Date.now();
+  const attempt = smsOtpAttempts.get(ipAddress);
+  if (!attempt || attempt.resetAt <= now) {
+    smsOtpAttempts.set(ipAddress, { count: 1, resetAt: now + SMS_OTP_WINDOW_MS });
+    return true;
+  }
+  if (attempt.count >= MAX_SMS_OTP_PER_IP) return false;
+  attempt.count += 1;
+  return true;
 };
 
 app.post("/api/auth/otp/request", async (request, response) => {
@@ -961,10 +990,18 @@ app.post("/api/auth/otp/request", async (request, response) => {
         response.status(400).json({ message: "Enter a valid 10-digit mobile number." });
         return;
       }
+      if (!process.env.TWOFACTOR_API_KEY) {
+        response.status(503).json({ message: "SMS verification is unavailable.", fallback: "firebase" });
+        return;
+      }
+      if (!canSendSmsOtp(requestIpAddress(request))) {
+        response.status(429).json({ message: "Too many verification codes requested. Try again in an hour." });
+        return;
+      }
       const { code } = await createOtp({ mobile, purpose: "login" });
       const delivered = await sendOtpSms(mobile, code);
       if (!delivered) {
-        response.status(503).json({ message: "SMS verification is unavailable. Please try Firebase phone sign-in." });
+        response.status(503).json({ message: "SMS verification is unavailable.", fallback: "firebase" });
         return;
       }
       response.json({ message: "A verification code was sent to your mobile number." });

@@ -533,17 +533,18 @@ function AuthModal({ open, notice, onClose, onSuccess }: { open: boolean; notice
   if (!open) return null
 
   const requestOtp = async (type: 'mobile' | 'email', value: string) => {
-    if (type === 'mobile') {
-      resetFirebaseRecaptcha()
-      firebaseConfirmationRef.current = await sendFirebasePhoneOtp(value)
-      return
-    }
     const response = await fetch(`${apiUrl}/api/auth/otp/request`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ type, value }),
     })
-    const result = await response.json() as { message?: string }
+    const result = await response.json().catch(() => ({})) as { message?: string; fallback?: string }
+    if (type === 'mobile') firebaseConfirmationRef.current = null
+    if (type === 'mobile' && response.status === 503 && result.fallback === 'firebase') {
+      resetFirebaseRecaptcha()
+      firebaseConfirmationRef.current = await sendFirebasePhoneOtp(value)
+      return
+    }
     if (!response.ok) throw new Error(result.message || 'Unable to send a verification code.')
   }
 
@@ -645,10 +646,9 @@ function AuthModal({ open, notice, onClose, onSuccess }: { open: boolean; notice
     setAuthError('')
     setAuthLoading(true)
     try {
-      const response = otpContact.type === 'mobile'
+      const confirmation = otpContact.type === 'mobile' ? firebaseConfirmationRef.current : null
+      const response = confirmation
         ? await (async () => {
-            const confirmation = firebaseConfirmationRef.current
-            if (!confirmation) throw new Error('Request a new SMS code and try again.')
             const credential = await confirmation.confirm(code)
             const idToken = await credential.user.getIdToken()
             return fetch(`${apiUrl}/api/auth/firebase-session`, {
