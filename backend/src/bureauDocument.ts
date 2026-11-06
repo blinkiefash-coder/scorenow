@@ -88,17 +88,16 @@ export const captureBureauDocument = async (
   bureau?: Bureau,
   saveHtml?: (html: string) => Promise<void>,
 ): Promise<BureauDocument> => {
-  const linked = await extractBureauLinkDocument(raw);
+  // The bureau PDF link's signing credentials can expire within hours, so it is fetched right away too.
+  const pdfUrl = livePdfUrl(raw);
+  const [linked, bureauPdf] = await Promise.all([
+    extractBureauLinkDocument(raw),
+    pdfUrl && pdfUrl !== htmlUrlOf(raw) ? downloadReportPdf(pdfUrl) : Promise.resolve(null),
+  ]);
   const html = linked.html;
   // Persist before the slow PDF render so a render failure cannot lose the only copy.
   if (html && saveHtml) await saveHtml(html).catch((error) => console.error("Bureau HTML save failed", error));
-  // CIBIL: the provider's HTML is the source of truth, rendered to PDF in the backend.
-  if (bureau === "cibil" && html) {
-    const rendered = await htmlToPdf(html);
-    if (rendered) return { pdf: rendered, html };
-  }
-  const pdfUrl = livePdfUrl(raw);
-  let pdf = linked.pdf ?? (pdfUrl && pdfUrl !== htmlUrlOf(raw) ? await downloadReportPdf(pdfUrl) : null);
-  if (!pdf && html) pdf = await htmlToPdf(html);
+  const pdf = bureauPdf ?? linked.pdf ?? (html ? await htmlToPdf(html) : null);
+  if (!pdf) console.warn(`No original PDF captured for ${bureau ?? "bureau"} report`);
   return { pdf, html };
 };

@@ -168,7 +168,11 @@ export const downloadReportPdf = async (url) => {
         return null;
     try {
         const response = await fetch(parsed, { signal: AbortSignal.timeout(30000) });
-        if (!response.ok || Number(response.headers.get("content-length")) > MAX_PDF_BYTES)
+        if (!response.ok) {
+            console.error(`Bureau PDF link returned HTTP ${response.status}; it may have expired.`);
+            return null;
+        }
+        if (Number(response.headers.get("content-length")) > MAX_PDF_BYTES)
             return null;
         const pdf = Buffer.from(await response.arrayBuffer());
         if (pdf.length > MAX_PDF_BYTES || pdf.subarray(0, 5).toString("latin1") !== "%PDF-")
