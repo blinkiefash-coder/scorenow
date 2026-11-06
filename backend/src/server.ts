@@ -991,7 +991,7 @@ app.post("/api/auth/otp/request", async (request, response) => {
         return;
       }
       if (!process.env.TWOFACTOR_API_KEY) {
-        response.status(503).json({ message: "SMS verification is unavailable.", fallback: "firebase" });
+        response.status(503).json({ message: "SMS verification is unavailable. Please try again later." });
         return;
       }
       if (!canSendSmsOtp(requestIpAddress(request))) {
@@ -1001,7 +1001,7 @@ app.post("/api/auth/otp/request", async (request, response) => {
       const { code } = await createOtp({ mobile, purpose: "login" });
       const delivered = await sendOtpSms(mobile, code);
       if (!delivered) {
-        response.status(503).json({ message: "SMS verification is unavailable.", fallback: "firebase" });
+        response.status(503).json({ message: "SMS verification is unavailable. Please try again later." });
         return;
       }
       response.json({ message: "A verification code was sent to your mobile number." });

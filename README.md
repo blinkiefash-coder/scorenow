@@ -39,7 +39,7 @@ Set `VITE_API_URL` in `frontend/.env` if the API is hosted somewhere other than 
 
 ## Customer login
 
-Customers can continue using mobile OTP or choose email and password. Account creation verifies the mobile number and requires an email and a password of at least 8 characters. Passwords are stored in PostgreSQL only as per-account salted scrypt hashes, never as plain text; the backend adds the password-hash columns to the existing `users` table on startup. Existing customers can create/set a password by choosing **Create Account** and verifying the mobile number and email already on their account. Email OTP sign-in remains available as a fallback.
+Customers can continue using mobile OTP or choose email and password. On the web app, mobile OTP verification is handled only through the backend 2Factor SMS flow (no Firebase fallback). Account creation verifies the mobile number and requires an email and a password of at least 8 characters. Passwords are stored in PostgreSQL only as per-account salted scrypt hashes, never as plain text; the backend adds the password-hash columns to the existing `users` table on startup. Existing customers can create/set a password by choosing **Create Account** and verifying the mobile number and email already on their account. Email OTP sign-in remains available as a fallback.
 
 ## Credit report PDF downloads
 

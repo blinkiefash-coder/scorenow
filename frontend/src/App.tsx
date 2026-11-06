@@ -8,7 +8,6 @@ import {
   ArrowUpDown, ArrowUpRight, ArrowDownLeft, Bell, Info, Target, TrendingUp, Users, Volume2, VolumeX, UserRound, WalletCards, X, Zap,
 } from 'lucide-react'
 import './App.css'
-import { resetFirebaseRecaptcha, sendFirebasePhoneOtp, signInWithGoogle, type ConfirmationResult } from './firebase.ts'
 
 const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:3000'
 
@@ -432,17 +431,6 @@ function AuthAvatarButton({ user, onClick, onLogout }: { user: AuthUser | null; 
   )
 }
 
-function GoogleIcon() {
-  return (
-    <svg viewBox="0 0 48 48" aria-hidden="true">
-      <path fill="#FFC107" d="M43.6 20.5H42V20H24v8h11.3C33.7 32.9 29.3 36 24 36c-6.6 0-12-5.4-12-12s5.4-12 12-12c3.1 0 5.9 1.2 8 3.1l5.7-5.7C34.5 6.1 29.5 4 24 4 12.9 4 4 12.9 4 24s8.9 20 20 20 20-8.9 20-20c0-1.3-.1-2.7-.4-3.5z" />
-      <path fill="#FF3D00" d="M6.3 14.7l6.6 4.8C14.6 15.9 18.9 13 24 13c3.1 0 5.9 1.2 8 3.1l5.7-5.7C34.5 6.1 29.5 4 24 4 16.3 4 9.7 8.3 6.3 14.7z" />
-      <path fill="#4CAF50" d="M24 44c5.2 0 10-2 13.6-5.2l-6.3-5.3C29.4 35.1 26.8 36 24 36c-5.3 0-9.7-3.1-11.3-7.6l-6.5 5C9.6 39.6 16.2 44 24 44z" />
-      <path fill="#1976D2" d="M43.6 20.5H42V20H24v8h11.3c-.8 2.3-2.3 4.3-4.1 5.7l6.3 5.3C40.9 36.3 44 30.7 44 24c0-1.3-.1-2.7-.4-3.5z" />
-    </svg>
-  )
-}
-
 function OtpInputs({ digits, onChange }: { digits: string[]; onChange: (digits: string[]) => void }) {
   const inputRefs = useRef<Array<HTMLInputElement | null>>([])
 
@@ -497,8 +485,6 @@ function AuthModal({ open, notice, onClose, onSuccess }: { open: boolean; notice
   const pendingFullNameRef = useRef('')
   const pendingEmailRef = useRef('')
   const pendingPasswordRef = useRef('')
-  const firebaseConfirmationRef = useRef<ConfirmationResult | null>(null)
-
   useEffect(() => {
     if (!open) return
     setView('login')
@@ -506,8 +492,6 @@ function AuthModal({ open, notice, onClose, onSuccess }: { open: boolean; notice
     setShowPassword(false)
     setOtpDigits(['', '', '', '', '', ''])
     setAuthError('')
-    firebaseConfirmationRef.current = null
-    resetFirebaseRecaptcha()
   }, [open])
 
   useEffect(() => {
@@ -538,13 +522,7 @@ function AuthModal({ open, notice, onClose, onSuccess }: { open: boolean; notice
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ type, value }),
     })
-    const result = await response.json().catch(() => ({})) as { message?: string; fallback?: string }
-    if (type === 'mobile') firebaseConfirmationRef.current = null
-    if (type === 'mobile' && response.status === 503 && result.fallback === 'firebase') {
-      resetFirebaseRecaptcha()
-      firebaseConfirmationRef.current = await sendFirebasePhoneOtp(value)
-      return
-    }
+    const result = await response.json().catch(() => ({})) as { message?: string }
     if (!response.ok) throw new Error(result.message || 'Unable to send a verification code.')
   }
 
@@ -576,28 +554,6 @@ function AuthModal({ open, notice, onClose, onSuccess }: { open: boolean; notice
       setView('otp')
     } catch (error) {
       setAuthError(error instanceof Error ? error.message : 'Unable to send a verification code.')
-    } finally {
-      setAuthLoading(false)
-    }
-  }
-
-  const submitGoogleLogin = async () => {
-    setAuthError('')
-    setAuthLoading(true)
-    try {
-      const idToken = await signInWithGoogle()
-      const response = await fetch(`${apiUrl}/api/auth/google-session`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ idToken }),
-      })
-      const result = await response.json() as { message?: string; user?: Omit<AuthUser, 'token'>; token?: string }
-      if (!response.ok) throw new Error(result.message || 'Unable to sign in with Google.')
-      if (!result.user || !result.token) throw new Error('Unable to complete Google sign-in.')
-      onSuccess({ ...result.user, token: result.token })
-      onClose()
-    } catch (error) {
-      setAuthError(error instanceof Error ? error.message : 'Unable to sign in with Google.')
     } finally {
       setAuthLoading(false)
     }
@@ -646,36 +602,19 @@ function AuthModal({ open, notice, onClose, onSuccess }: { open: boolean; notice
     setAuthError('')
     setAuthLoading(true)
     try {
-      const confirmation = otpContact.type === 'mobile' ? firebaseConfirmationRef.current : null
-      const response = confirmation
-        ? await (async () => {
-            const credential = await confirmation.confirm(code)
-            const idToken = await credential.user.getIdToken()
-            return fetch(`${apiUrl}/api/auth/firebase-session`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                idToken,
-                fullName: pendingFullNameRef.current,
-                email: pendingEmailRef.current,
-                password: pendingPasswordRef.current,
-                intent: otpOrigin,
-              }),
-            })
-          })()
-        : await fetch(`${apiUrl}/api/auth/otp/verify`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              type: otpContact.type,
-              value: otpContact.value,
-              code,
-              fullName: pendingFullNameRef.current,
-              email: pendingEmailRef.current,
-              password: pendingPasswordRef.current,
-              intent: otpOrigin,
-            }),
-          })
+      const response = await fetch(`${apiUrl}/api/auth/otp/verify`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          type: otpContact.type,
+          value: otpContact.value,
+          code,
+          fullName: pendingFullNameRef.current,
+          email: pendingEmailRef.current,
+          password: pendingPasswordRef.current,
+          intent: otpOrigin,
+        }),
+      })
       const result = await response.json() as { message?: string; user?: Omit<AuthUser, 'token'>; token?: string }
       if (!response.ok) throw new Error(result.message || 'Verification failed.')
       if (result.user && result.token) onSuccess({ ...result.user, token: result.token })
@@ -703,9 +642,8 @@ function AuthModal({ open, notice, onClose, onSuccess }: { open: boolean; notice
         {view === 'otp'
           ? <button className="auth-back" type="button" onClick={() => setView(otpOrigin)} aria-label="Go back"><ArrowLeft /></button>
           : <button className="auth-close" type="button" onClick={onClose} aria-label="Close"><X /></button>}
-
         <img className="auth-brand" src="/scorenow-logo-hd.png" alt="Scorenow" />
-        <div id="firebase-recaptcha" />
+        <img className="auth-brand" src="/scorenow-logo-hd.png" alt="Scorenow" />
 
         {view === 'otp' ? (
           <>
@@ -764,11 +702,6 @@ function AuthModal({ open, notice, onClose, onSuccess }: { open: boolean; notice
                 <button className="button button-primary" type="submit" disabled={authLoading}>{authLoading ? 'Sending…' : <>Create Account <ArrowRight /></>}</button>
               </form>
             )}
-
-            <div className="auth-divider"><span>or continue with</span></div>
-            <button className="auth-google" type="button" onClick={() => void submitGoogleLogin()} disabled={authLoading}>
-              <GoogleIcon /> {authLoading ? 'Signing in…' : 'Continue with Google'}
-            </button>
 
             <p className="auth-switch">
               {view === 'login'
