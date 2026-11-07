@@ -643,7 +643,6 @@ function AuthModal({ open, notice, onClose, onSuccess }: { open: boolean; notice
           ? <button className="auth-back" type="button" onClick={() => setView(otpOrigin)} aria-label="Go back"><ArrowLeft /></button>
           : <button className="auth-close" type="button" onClick={onClose} aria-label="Close"><X /></button>}
         <img className="auth-brand" src="/scorenow-logo-hd.png" alt="Scorenow" />
-        <img className="auth-brand" src="/scorenow-logo-hd.png" alt="Scorenow" />
 
         {view === 'otp' ? (
           <>
