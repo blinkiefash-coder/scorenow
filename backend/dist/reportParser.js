@@ -14,6 +14,16 @@ const firstOf = (value, ...paths) => {
     }
     return undefined;
 };
+const firstKeyOf = (value, ...keys) => {
+    if (!isObject(value))
+        return undefined;
+    const wanted = new Set(keys.map((key) => key.toLowerCase()));
+    for (const [key, entry] of Object.entries(value)) {
+        if (wanted.has(key.toLowerCase()))
+            return entry;
+    }
+    return undefined;
+};
 const asArray = (value) => (Array.isArray(value) ? value : value === undefined || value === null ? [] : [value]);
 const text = (value) => {
     if (value === undefined || value === null)
@@ -252,67 +262,158 @@ const cibilScoreFactors = (borrower) => {
             }];
     });
 };
+const collectByKeysDeep = (value, keys) => {
+    const wanted = new Set(keys.map((key) => key.toLowerCase()));
+    const results = [];
+    const walk = (node) => {
+        if (Array.isArray(node)) {
+            node.forEach(walk);
+            return;
+        }
+        if (!isObject(node))
+            return;
+        for (const [key, entry] of Object.entries(node)) {
+            if (wanted.has(key.toLowerCase()))
+                results.push(entry);
+            walk(entry);
+        }
+    };
+    walk(value);
+    return results;
+};
 const parseCibil = (raw) => {
     const data = firstOf(raw, "data.data", "data") ?? {};
     const report = firstOf(data, "cibilData.GetCustomerAssetsResponse.GetCustomerAssetsSuccess.Asset.TrueLinkCreditReport", "cibilData.TrueLinkCreditReport");
     const borrower = get(report, "Borrower");
     const reportDate = isoDate(firstOf(report, "SB.reportDate", "reportDate", "Sources.Source.InquiryDate")) ?? new Date().toISOString().slice(0, 10);
-    // Try multiple paths for TradeLinePartition as CIBIL API structure may vary
-    let tradeLinePartition = get(report, "TradeLinePartition") ?? get(report, "Tradeline") ?? get(data, "credit_report.Tradeline") ?? get(data, "credit_report.accounts");
-    let inquiryPartition = get(report, "InquiryPartition") ?? get(report, "Inquiry") ?? get(data, "credit_report.Inquiry") ?? get(data, "credit_report.enquiries");
-    if (!tradeLinePartition && isObject(report)) {
-        // Last resort: search for keys that might contain account/tradeline data
-        const reportObj = report;
-        tradeLinePartition = reportObj.TradeLinePartition ?? reportObj.Tradeline ?? reportObj.accounts ?? reportObj.credit_accounts;
-    }
-    if (!inquiryPartition && isObject(report)) {
-        const reportObj = report;
-        inquiryPartition = reportObj.InquiryPartition ?? reportObj.Inquiry ?? reportObj.enquiries ?? reportObj.credit_enquiries;
-    }
-    if ((tradeLinePartition === undefined || (asArray(tradeLinePartition).length === 0)) ||
-        (inquiryPartition === undefined || (asArray(inquiryPartition).length === 0))) {
-        console.warn("CIBIL parser: Accounts or Enquiries extraction returned empty or undefined", {
-            hasTradeLinePartition: tradeLinePartition !== undefined,
-            tradeLinePartitionCount: asArray(tradeLinePartition).length,
-            hasInquiryPartition: inquiryPartition !== undefined,
-            inquiryPartitionCount: asArray(inquiryPartition).length,
-            reportKeys: isObject(report) ? Object.keys(report).slice(0, 10) : "not an object",
-            dataKeys: isObject(data) ? Object.keys(data).slice(0, 10) : "not an object",
+    const tradeLineCandidates = [
+        get(report, "TradeLinePartition"),
+        get(report, "Tradeline"),
+        get(data, "credit_report.Tradeline"),
+        get(data, "credit_report.accounts"),
+        ...collectByKeysDeep(report, ["TradeLinePartition", "Tradeline", "TradeLine", "Tradelines"]),
+        ...collectByKeysDeep(data, ["TradeLinePartition", "Tradeline", "TradeLine", "Tradelines", "accounts"]),
+    ];
+    const inquiryCandidates = [
+        get(report, "InquiryPartition"),
+        get(report, "Inquiry"),
+        get(data, "credit_report.Inquiry"),
+        get(data, "credit_report.enquiries"),
+        ...collectByKeysDeep(report, ["InquiryPartition", "Inquiry", "Enquiry", "Enquiries"]),
+        ...collectByKeysDeep(data, ["InquiryPartition", "Inquiry", "Enquiry", "Enquiries", "enquiries"]),
+    ];
+    const tradeRecords = tradeLineCandidates.flatMap((candidate) => asArray(candidate))
+        .flatMap((partition) => {
+        if (!isObject(partition))
+            return asArray(partition);
+        const line = firstKeyOf(partition, "Tradeline", "TradeLine", "tradeline");
+        return asArray(line ?? partition);
+    })
+        .filter(isObject);
+    const inquiryRecords = inquiryCandidates.flatMap((candidate) => asArray(candidate))
+        .flatMap((partition) => {
+        if (!isObject(partition))
+            return asArray(partition);
+        const inquiry = firstKeyOf(partition, "Inquiry", "Enquiry", "inquiry", "enquiry");
+        return asArray(inquiry ?? partition);
+    })
+        .filter(isObject);
+    const accountSeen = new Set();
+    const accounts = tradeRecords.map((trade) => {
+        const granted = isObject(firstKeyOf(trade, "GrantedTrade", "grantedTrade")) ? firstKeyOf(trade, "GrantedTrade", "grantedTrade") : {};
+        const openClosed = text(firstOf(trade, "OpenClosed.symbol", "OpenClosed", "openClosed.symbol", "status"));
+        const paymentHistory = asArray(firstOf(granted, "PayStatusHistory.MonthlyPayStatus", "payStatusHistory.monthlyPayStatus", "MonthlyPayStatus"))
+            .filter(isObject)
+            .map((entry) => {
+            const status = text(firstOf(entry, "status", "Status", "payStatus"))?.toUpperCase() ?? "";
+            const parsed = /^\d+$/.test(status) ? Number(status) : status === "STD" ? 0 : null;
+            return {
+                month: (isoDate(firstOf(entry, "date", "Date", "month")) ?? "").slice(0, 7),
+                daysPastDue: parsed,
+            };
+        })
+            .filter((entry) => entry.month)
+            .sort((a, b) => b.month.localeCompare(a.month))
+            .slice(0, 24);
+        return {
+            lender: text(firstOf(trade, "creditorName", "subscriberName", "MemberName", "memberName")) ?? "Unknown lender",
+            type: text(firstOf(trade, "AccountType.description", "accountType", "AccountType", "type")) ??
+                accountType(firstOf(granted, "AccountType.symbol", "accountTypeSymbol", "accountType") ?? firstOf(trade, "AccountType.symbol", "accountTypeSymbol")),
+            accountNumber: maskAccount(firstOf(trade, "accountNumber", "AccountNumber", "accountNo", "acctNumber")),
+            status: (openClosed === "C" || Boolean(text(firstOf(trade, "dateClosed", "DateClosed", "closedDate"))) ? "closed" : "active"),
+            openedOn: isoDate(firstOf(trade, "dateOpened", "DateOpened", "openedOn", "disbursedDate")),
+            closedOn: isoDate(firstOf(trade, "dateClosed", "DateClosed", "closedDate")),
+            sanctionedAmount: reported(firstOf(trade, "highBalance", "sanctionedAmount", "sanctionAmount", "loanAmount")),
+            creditLimit: reported(firstOf(granted, "CreditLimit", "creditLimit", "limit")),
+            currentBalance: reported(firstOf(trade, "currentBalance", "CurrentBalance", "balance")),
+            overdueAmount: reported(firstOf(granted, "amountPastDue", "AmountPastDue", "overdueAmount", "pastDueAmount")),
+            lastPaymentOn: isoDate(firstOf(granted, "dateLastPayment", "DateLastPayment", "lastPaymentDate")),
+            emiAmount: reported(firstOf(granted, "EMIAmount", "emiAmount")),
+            interestRate: reported(firstOf(granted, "interestRate", "InterestRate")),
+            writtenOffAmount: reported(firstOf(trade, "writtenOffAmtTotal", "writtenOffAmount", "writeOffAmount")),
+            settlementAmount: reported(firstOf(trade, "settlementAmount", "settledAmount")),
+            paymentHistory,
+        };
+    }).filter((account) => {
+        const identifiable = account.lender !== "Unknown lender" || account.accountNumber !== null;
+        if (!identifiable)
+            return false;
+        const hasSignal = account.lender !== "Unknown lender" ||
+            account.accountNumber !== null ||
+            account.currentBalance !== null ||
+            account.sanctionedAmount !== null ||
+            account.creditLimit !== null;
+        if (!hasSignal)
+            return false;
+        const key = [
+            account.lender.toLowerCase(),
+            account.accountNumber ?? "",
+            account.openedOn ?? "",
+            account.currentBalance ?? "",
+            account.sanctionedAmount ?? "",
+        ].join("|");
+        if (accountSeen.has(key))
+            return false;
+        accountSeen.add(key);
+        return true;
+    });
+    const enquirySeen = new Set();
+    const enquiries = inquiryRecords.map((enquiry) => ({
+        lender: text(firstOf(enquiry, "subscriberName", "memberName", "MemberName", "lender")) ?? "Unknown lender",
+        purpose: text(firstOf(enquiry, "inquiryType", "purpose", "Purpose.description", "EnquiryPurpose")) ??
+            text(firstOf(enquiry, "enquiryTypeDescription", "InquiryType")),
+        date: isoDate(firstOf(enquiry, "inquiryDate", "enquiryDate", "DateOfEnquiry", "date")),
+        amount: reported(firstOf(enquiry, "amount", "Amount", "enquiryAmount")),
+    })).filter((enquiry) => {
+        const identifiable = enquiry.lender !== "Unknown lender";
+        if (!identifiable)
+            return false;
+        const hasSignal = enquiry.lender !== "Unknown lender" ||
+            enquiry.purpose !== null ||
+            enquiry.date !== null ||
+            enquiry.amount !== null;
+        if (!hasSignal)
+            return false;
+        const key = [
+            enquiry.lender.toLowerCase(),
+            enquiry.purpose ?? "",
+            enquiry.date ?? "",
+            enquiry.amount ?? "",
+        ].join("|");
+        if (enquirySeen.has(key))
+            return false;
+        enquirySeen.add(key);
+        return true;
+    });
+    if (!accounts.length || !enquiries.length) {
+        console.warn("CIBIL parser: extracted sparse trade/enquiry data", {
+            accountsCount: accounts.length,
+            enquiriesCount: enquiries.length,
+            tradeCandidates: tradeLineCandidates.filter((candidate) => candidate !== undefined).length,
+            inquiryCandidates: inquiryCandidates.filter((candidate) => candidate !== undefined).length,
+            reportKeys: isObject(report) ? Object.keys(report).slice(0, 12) : "not an object",
         });
     }
-    const accounts = asArray(tradeLinePartition).flatMap((partition) => asArray(isObject(partition) ? partition.Tradeline ?? partition : partition))
-        .filter(isObject).map((trade) => {
-        const granted = isObject(trade.GrantedTrade) ? trade.GrantedTrade : {};
-        const openClosed = text(get(trade, "OpenClosed.symbol")) ?? text(trade.OpenClosed);
-        return {
-            lender: text(trade.creditorName) ?? "Unknown lender",
-            type: text(get(trade, "AccountType.description")) ?? accountType(get(granted, "AccountType.symbol") ?? get(trade, "AccountType.symbol") ?? trade.accountTypeSymbol),
-            accountNumber: maskAccount(trade.accountNumber),
-            status: openClosed === "C" || Boolean(text(trade.dateClosed)) ? "closed" : "active",
-            openedOn: isoDate(trade.dateOpened),
-            closedOn: isoDate(trade.dateClosed),
-            sanctionedAmount: reported(trade.highBalance),
-            creditLimit: reported(granted.CreditLimit),
-            currentBalance: reported(trade.currentBalance),
-            overdueAmount: reported(granted.amountPastDue),
-            lastPaymentOn: isoDate(granted.dateLastPayment),
-            emiAmount: reported(granted.EMIAmount),
-            interestRate: reported(granted.interestRate),
-            writtenOffAmount: reported(trade.writtenOffAmtTotal),
-            settlementAmount: reported(trade.settlementAmount),
-            paymentHistory: asArray(get(granted, "PayStatusHistory.MonthlyPayStatus")).filter(isObject).map((entry) => ({
-                month: (isoDate(entry.date) ?? "").slice(0, 7),
-                daysPastDue: /^\d+$/.test(text(entry.status) ?? "") ? Number(entry.status) : null,
-            })).filter((entry) => entry.month).sort((a, b) => b.month.localeCompare(a.month)).slice(0, 24),
-        };
-    });
-    const enquiries = asArray(inquiryPartition).flatMap((partition) => asArray(isObject(partition) ? partition.Inquiry ?? partition : partition))
-        .filter(isObject).map((enquiry) => ({
-        lender: text(enquiry.subscriberName) ?? "Unknown lender",
-        purpose: text(enquiry.inquiryType) ? accountType(enquiry.inquiryType) : text(get(enquiry, "Purpose.description")),
-        date: isoDate(enquiry.inquiryDate),
-        amount: reported(enquiry.amount),
-    }));
     const name = [text(get(borrower, "BorrowerName.Name.Forename")), text(get(borrower, "BorrowerName.Name.Surname"))].filter(Boolean).join(" ");
     return {
         score: validScore(get(borrower, "CreditScore.riskScore")) ?? validScore(get(data, "credit_score")),

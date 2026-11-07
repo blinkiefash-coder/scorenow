@@ -44,6 +44,13 @@ const date = (value) => {
 const bureauLabel = (bureau) => bureauNames[bureau];
 const scoreBand = (score) => score === null ? "Not reported" : score >= 750 ? "Excellent" : score >= 700 ? "Good" : score >= 650 ? "Fair" : "Needs attention";
 const dpdColor = (daysPastDue) => daysPastDue === null ? colors.grey : daysPastDue === 0 ? colors.green : daysPastDue < 30 ? colors.amber : colors.red;
+const monthYear = (value) => {
+    const parsed = new Date(`${value}-01`);
+    if (Number.isNaN(parsed.getTime()))
+        return toPdfText(value);
+    return parsed.toLocaleDateString("en-IN", { month: "short", year: "numeric" });
+};
+const cibilPayStatus = (daysPastDue) => daysPastDue === null ? "XXX" : daysPastDue === 0 ? "STD" : String(daysPastDue);
 export const generateReportPdf = ({ report, reportDate }) => new Promise((resolve, reject) => {
     const theme = bureauThemes[report.bureau];
     const bureauName = bureauLabel(report.bureau);
@@ -241,6 +248,19 @@ export const generateReportPdf = ({ report, reportDate }) => new Promise((resolv
         doc.moveTo(left, y + height).lineTo(left + width, y + height).strokeColor(colors.line).lineWidth(0.6).stroke();
         doc.y = y + height;
     };
+    const finalizeFooter = (note) => {
+        const pages = doc.bufferedPageRange();
+        for (let index = 0; index < pages.count; index += 1) {
+            doc.switchToPage(pages.start + index);
+            doc.page.margins.bottom = 0;
+            const footerY = doc.page.height - 36;
+            doc.moveTo(left, footerY - 8).lineTo(left + width, footerY - 8).strokeColor(colors.line).lineWidth(0.6).stroke();
+            setText(false, 7.5, colors.muted);
+            doc.text(toPdfText(note), left, footerY, { width: width * 0.75, lineBreak: false });
+            doc.text(`Page ${index + 1} of ${pages.count}`, left, footerY, { width, align: "right", lineBreak: false });
+        }
+        doc.end();
+    };
     const enquiryColumns = [
         { label: "#", width: 22 },
         { label: "Lender", width: 180 },
@@ -271,6 +291,210 @@ export const generateReportPdf = ({ report, reportDate }) => new Promise((resolv
     doc.roundedRect(left, doc.y, width, noticeHeight + 14, 4).fill(colors.pale);
     doc.text(toPdfText(notice), left + 12, doc.y + 7, { width: width - 24 });
     doc.y += noticeHeight + 22;
+    if (report.bureau === "cibil") {
+        const reportDateLabel = date(report.reportDate ?? reportDate ?? null);
+        const scoreLine = report.score === null ? "NH" : String(report.score);
+        const hRule = () => {
+            doc.moveTo(left, doc.y).lineTo(left + width, doc.y).strokeColor(colors.line).lineWidth(0.6).stroke();
+            doc.y += 8;
+        };
+        const blockTitle = (title) => {
+            ensureSpace(26);
+            setText(true, 10.5, theme.accent);
+            doc.text(toPdfText(title), left, doc.y, { width, lineBreak: false });
+            doc.y += 2;
+            hRule();
+        };
+        const field = (label, value) => {
+            ensureSpace(16);
+            setText(true, 8, colors.muted);
+            doc.text(toPdfText(label), left, doc.y, { width: 180, lineBreak: false });
+            setText(false, 9, colors.ink);
+            doc.text(toPdfText(value), left + 184, doc.y, { width: width - 184 });
+            doc.y += 2;
+        };
+        const paragraphMuted = (value) => {
+            setText(false, 8.5, colors.muted);
+            ensureSpace(doc.heightOfString(value, { width }) + 2);
+            doc.text(toPdfText(value), left, doc.y, { width });
+            doc.y += 3;
+        };
+        setText(false, 9, colors.ink);
+        doc.text("Control Number", left, doc.y, { width: 160, lineBreak: false });
+        doc.text("-", left + 95, doc.y, { width: 10, lineBreak: false });
+        doc.text("Date", left + 160, doc.y, { width: 40, lineBreak: false });
+        doc.text(toPdfText(reportDateLabel), left + 190, doc.y, { width: 120, lineBreak: false });
+        doc.y += 18;
+        blockTitle("CIBIL Score & Report");
+        paragraphMuted("CIBIL Score is a 3 digit numeric summary of your credit history & ranges from 300 to 900.");
+        paragraphMuted("The closer your score is to 900, the more confidence lenders have in your repayment profile.");
+        ensureSpace(60);
+        setText(false, 8.5, colors.muted);
+        doc.text("300", left, doc.y, { lineBreak: false });
+        doc.text("900", left + width - 20, doc.y, { width: 20, align: "right", lineBreak: false });
+        const barY = doc.y + 12;
+        const barWidth = width - 4;
+        doc.rect(left + 2, barY, barWidth * 0.5, 8).fill(colors.red);
+        doc.rect(left + 2 + barWidth * 0.5, barY, barWidth * 0.17, 8).fill(colors.amber);
+        doc.rect(left + 2 + barWidth * 0.67, barY, barWidth * 0.16, 8).fill(colors.lightGreen);
+        doc.rect(left + 2 + barWidth * 0.83, barY, barWidth * 0.17, 8).fill(colors.green);
+        if (report.score !== null) {
+            const markerX = left + 2 + ((Math.min(900, Math.max(300, report.score)) - 300) / 600) * barWidth;
+            doc.moveTo(markerX - 5, barY - 7).lineTo(markerX + 5, barY - 7).lineTo(markerX, barY - 1).fill(colors.ink);
+        }
+        doc.y = barY + 18;
+        setText(true, 24, theme.accent);
+        doc.text(scoreLine, left, doc.y, { lineBreak: false });
+        setText(false, 8.5, colors.ink);
+        doc.text(toPdfText(`Your CIBIL Score is ${scoreLine} as of Date : ${reportDateLabel}`), left + 54, doc.y + 9, { width: width - 54 });
+        doc.y += 30;
+        setText(true, 12, colors.ink);
+        doc.text(toPdfText(`Hello, ${report.personal.name ?? "Customer"}`), left, doc.y, { width });
+        doc.y += 10;
+        blockTitle("PERSONAL DETAILS");
+        field("Name", report.personal.name ?? "-");
+        field("Date Of Birth", date(report.personal.dateOfBirth));
+        field("Gender", report.personal.gender ?? "-");
+        blockTitle("IDENTIFICATION DETAILS");
+        field("Identification Type", "Income Tax ID Number (PAN)");
+        field("ID Number", report.personal.pan ?? "-");
+        field("Issue Date", "-");
+        field("Expiry Date", "-");
+        blockTitle("ADDRESS DETAILS");
+        if (!report.personal.addresses.length) {
+            field("Address", "Not reported");
+        }
+        else {
+            report.personal.addresses.forEach((address) => {
+                field("Address", address);
+                field("Category", "Not Categorized");
+                field("Residence Code", "-");
+                field("Date Reported", reportDateLabel);
+                doc.y += 4;
+            });
+        }
+        blockTitle("CONTACT DETAILS");
+        if (!report.personal.phones.length) {
+            field("Telephone Number Type", "Mobile Phone");
+            field("Telephone Number", "-");
+        }
+        else {
+            report.personal.phones.forEach((phone) => {
+                field("Telephone Number Type", "Mobile Phone");
+                field("Telephone Number", phone);
+                field("Telephone Extension", "-");
+                doc.y += 4;
+            });
+        }
+        blockTitle("EMAIL DETAILS");
+        if (!report.personal.emails.length) {
+            field("Email ID", "-");
+        }
+        else {
+            report.personal.emails.forEach((email) => field("Email ID", email.toUpperCase()));
+        }
+        blockTitle("EMPLOYMENT DETAILS");
+        field("Occupation", "Not reported");
+        field("Income", "Not reported");
+        field("Monthly / Annual Income Indicator", "-");
+        field("Net / Gross Income Indicator", "-");
+        const renderAccount = (account) => {
+            ensureSpace(190);
+            setText(true, 8.5, colors.muted);
+            doc.text("Member Name", left, doc.y, { width: 140, lineBreak: false });
+            setText(true, 10, colors.ink);
+            doc.text(toPdfText(account.lender), left + 120, doc.y, { width: width - 120 });
+            doc.y += 4;
+            setText(true, 8.5, colors.muted);
+            doc.text("Account Type", left, doc.y, { width: 140, lineBreak: false });
+            setText(false, 9, colors.ink);
+            doc.text(toPdfText(account.type), left + 120, doc.y, { width: width - 120 });
+            doc.y += 3;
+            field("Account Number", account.accountNumber ?? "-");
+            field("Ownership", "Individual");
+            blockTitle("ACCOUNT DETAILS");
+            field("Credit Limit", money(account.creditLimit));
+            field("Sanctioned Amount", money(account.sanctionedAmount));
+            field("Current Balance", money(account.currentBalance));
+            field("Cash Limit", "-");
+            field("Amount Overdue", money(account.overdueAmount));
+            field("Rate of Interest", account.interestRate == null ? "-" : `${account.interestRate}%`);
+            field("Repayment Tenure", "-");
+            field("EMI Amount", money(account.emiAmount ?? null));
+            field("Payment Frequency", "-");
+            field("Actual Payment Amount", "-");
+            field("Date Opened / Disbursed", date(account.openedOn));
+            field("Date Closed", date(account.closedOn));
+            field("Date of Last Payment", date(account.lastPaymentOn));
+            field("Date Reported And Certified", reportDateLabel);
+            field("Value of Collateral", "-");
+            field("Type of Collateral", "-");
+            field("Suit - Filed / Wilful Default", "-");
+            field("Credit Facility Status", "-");
+            field("Written-off Amount (Total)", money(account.writtenOffAmount ?? null));
+            field("Written-off Amount (Principal)", "-");
+            field("Settlement Amount", money(account.settlementAmount ?? null));
+            const history = [...account.paymentHistory].sort((a, b) => b.month.localeCompare(a.month));
+            if (history.length) {
+                const latest = history[0];
+                const oldest = history[history.length - 1];
+                field("Payment Start Date", `${monthYear(oldest.month)} 01`);
+                field("Payment End Date", `${monthYear(latest.month)} 01`);
+                setText(true, 8.5, colors.muted);
+                doc.text("Payment History", left, doc.y, { width, lineBreak: false });
+                doc.y += 12;
+                history.slice(0, 36).forEach((entry) => {
+                    ensureSpace(13);
+                    setText(false, 8.5, colors.ink);
+                    doc.text(toPdfText(monthYear(entry.month)), left, doc.y, { width: 120, lineBreak: false });
+                    doc.text(toPdfText(cibilPayStatus(entry.daysPastDue)), left + 140, doc.y, { width: 100, lineBreak: false });
+                    doc.y += 12;
+                });
+            }
+            setText(true, 8, colors.muted);
+            doc.text("PAYMENT STATUS", left, doc.y, { width, lineBreak: false });
+            doc.y += 10;
+            setText(false, 7.5, colors.muted);
+            doc.text("STD: Standard   DBT: Doubtful   ###: Number of days past due", left, doc.y, { width });
+            doc.y += 10;
+            doc.text("SMA: Special Mention account   LSS: Loss   XXX: Not Reported   SUB: Substandard", left, doc.y, { width });
+            doc.y += 12;
+        };
+        blockTitle("ALL ACCOUNTS");
+        field("OPEN ACCOUNTS", report.summary.activeAccounts);
+        field("CLOSED ACCOUNTS", report.summary.closedAccounts);
+        const openAccounts = report.accounts.filter((account) => account.status === "active");
+        const closedAccounts = report.accounts.filter((account) => account.status === "closed");
+        blockTitle("OPEN ACCOUNTS");
+        if (!openAccounts.length)
+            paragraphMuted("No open account details were returned.");
+        openAccounts.forEach(renderAccount);
+        blockTitle("CLOSED ACCOUNTS");
+        if (!closedAccounts.length)
+            paragraphMuted("No closed account details were returned.");
+        closedAccounts.forEach(renderAccount);
+        blockTitle("ENQUIRY DETAILS");
+        paragraphMuted("(e) Indicates the value provided by bank when you applied for a credit facility.");
+        if (!report.enquiries.length) {
+            field("Member Name", "Not reported");
+        }
+        else {
+            report.enquiries.forEach((enquiry) => {
+                field("Member Name", enquiry.lender);
+                field("Date Of Enquiry", date(enquiry.date));
+                field("Enquiry Purpose", enquiry.purpose ?? "Not reported");
+                field("Enquiry Amount", money(enquiry.amount));
+                doc.y += 4;
+            });
+        }
+        ensureSpace(88);
+        blockTitle("Disclaimer");
+        paragraphMuted("All information in this credit report copy is based on bureau data and may change with newer lender updates.");
+        paragraphMuted("For any discrepancy in personal or account information, please contact the concerned lender for clarification.");
+        paragraphMuted("Scorenow report copy. Not issued or endorsed by TransUnion CIBIL.");
+        finalizeFooter(`Scorenow report copy. Not issued or endorsed by ${bureauName}.`);
+        return;
+    }
     section("Consumer details");
     kvGrid([
         ["Name", report.personal.name],
@@ -359,17 +583,5 @@ export const generateReportPdf = ({ report, reportDate }) => new Promise((resolv
     setText(false, 7.5, colors.muted);
     const disclaimer = "Figures are shown as reported by the bureau and may not reflect payments made after the report date. For the official report, request it directly from the bureau.";
     doc.text(toPdfText(disclaimer), left, doc.y, { width });
-    // The footer sits inside the bottom margin. Drop that margin while drawing it so PDFKit does not
-    // start a new page for each footer.
-    const pages = doc.bufferedPageRange();
-    for (let index = 0; index < pages.count; index += 1) {
-        doc.switchToPage(pages.start + index);
-        doc.page.margins.bottom = 0;
-        const footerY = doc.page.height - 36;
-        doc.moveTo(left, footerY - 8).lineTo(left + width, footerY - 8).strokeColor(colors.line).lineWidth(0.6).stroke();
-        setText(false, 7.5, colors.muted);
-        doc.text(toPdfText(`Scorenow report copy. Not issued or endorsed by ${bureauName}.`), left, footerY, { width: width * 0.75, lineBreak: false });
-        doc.text(`Page ${index + 1} of ${pages.count}`, left, footerY, { width, align: "right", lineBreak: false });
-    }
-    doc.end();
+    finalizeFooter(`Scorenow report copy. Not issued or endorsed by ${bureauName}.`);
 });
