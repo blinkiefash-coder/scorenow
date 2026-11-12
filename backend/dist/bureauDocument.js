@@ -1,4 +1,5 @@
 import { downloadReportPdf, livePdfUrl } from "./bureaus.js";
+import { tryGenerateCibilPdf } from "./cibilPdf.js";
 const MAX_HTML_BYTES = 15 * 1024 * 1024;
 const INLINE_HTML_KEYS = ["html", "htmlContent", "html_content", "report_html", "reportHtml"];
 const isPublicHttps = (value) => {
@@ -94,7 +95,8 @@ export const captureBureauDocument = async (raw, bureau, saveHtml) => {
     // Persist before the slow PDF render so a render failure cannot lose the only copy.
     if (html && saveHtml)
         await saveHtml(html).catch((error) => console.error("Bureau HTML save failed", error));
-    const pdf = bureauPdf ?? linked.pdf ?? (html ? await htmlToPdf(html) : null);
+    const cibilPdf = bureau === "cibil" ? await tryGenerateCibilPdf(raw) : null;
+    const pdf = cibilPdf ?? bureauPdf ?? linked.pdf ?? (html ? await htmlToPdf(html) : null);
     if (!pdf)
         console.warn(`No original PDF captured for ${bureau ?? "bureau"} report`);
     return { pdf, html };

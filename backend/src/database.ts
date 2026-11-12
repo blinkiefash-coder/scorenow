@@ -414,7 +414,7 @@ export const getAdminReportDocument = async (auditId: number) => {
     provider_response: unknown;
   }>(
     `SELECT id, bureau, to_char(COALESCE(completed_at, created_at), 'YYYY-MM-DD') AS report_date, normalized_report, report_pdf, report_html,
-            CASE WHEN report_pdf IS NULL THEN provider_response END AS provider_response
+            CASE WHEN report_pdf IS NULL OR bureau = 'cibil' THEN provider_response END AS provider_response
      FROM admin_report_audit
      WHERE id = $1 AND status = 'completed' AND normalized_report IS NOT NULL`,
     [auditId],
@@ -1457,7 +1457,7 @@ export const getReportPdf = async (userId: string | null, requestId: string) => 
     reportDate: row.report_date,
     pdf: row.report_pdf,
     html: row.report_html,
-    raw: row.report_pdf ? null : row.raw_report,
+    raw: row.report_pdf && row.bureau !== "cibil" ? null : row.raw_report,
     report,
   };
 };

@@ -4,12 +4,14 @@ services:
     runtime: node
     plan: free
     rootDir: backend
-    buildCommand: npm install && npm run build
+    buildCommand: npm install && npm run build && python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
     startCommand: npm start
     healthCheckPath: /api/health
     envVars:
       - key: NODE_ENV
         value: production
+      - key: CIBIL_PYTHON
+        value: .venv/bin/python
       - key: EMAIL_PREVIEW
         value: "false"
       - key: DATABASE_URL

@@ -1,1 +1,4 @@
 node_modules
+
+# Local Python venv for CIBIL PDF rendering
+.venv/

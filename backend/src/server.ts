@@ -93,6 +93,7 @@ import {
 import { SUBSCRIPTION_PLANS, findSubscriptionPlan, gstIncluded } from "./subscriptions.js";
 import { generateReportPdf } from "./reportPdf.js";
 import { captureBureauDocument, htmlToPdf } from "./bureauDocument.js";
+import { tryGenerateCibilPdf } from "./cibilPdf.js";
 import { verifyFirebaseGoogleToken, verifyFirebasePhoneToken } from "./firebaseAdmin.js";
 import { demoReportResponses, isReportsDemoMode } from "./demoReports.js";
 import { createRazorpayOrder, isRazorpayConfigured, isSimulatedPayments, isValidPaymentSignature, simulatedId } from "./razorpay.js";
@@ -865,10 +866,11 @@ type ReportFileRecord = {
 };
 
 const sendReportFile = async (response: Response, record: ReportFileRecord, savePdf: (pdf: Buffer) => Promise<void>) => {
-  let pdf = record.pdf;
+  const cibilPdf = record.bureau === "cibil" && record.raw ? await tryGenerateCibilPdf(record.raw) : null;
+  let pdf = cibilPdf ?? record.pdf;
   if (!pdf && record.html) pdf = await htmlToPdf(record.html);
   if (!pdf && record.raw) pdf = await downloadReportPdf(bureauPdfUrl(record.raw));
-  if (pdf && !record.pdf) await savePdf(pdf).catch((error) => console.error("Report PDF save failed", error));
+  if (pdf && pdf !== record.pdf) await savePdf(pdf).catch((error) => console.error("Report PDF save failed", error));
   const name = `ScoreNow-${record.bureau}-report-${record.reportDate}`;
   if (!pdf && record.html) {
     response.set({
