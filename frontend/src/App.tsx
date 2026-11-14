@@ -7,6 +7,8 @@ import {
   PiggyBank, Percent, Phone, Play, RotateCcw, Search, Settings, ShieldCheck, Smartphone, Sparkles, Star,
   ArrowUpDown, ArrowUpRight, ArrowDownLeft, Bell, Info, Target, TrendingUp, Users, Volume2, VolumeX, UserRound, WalletCards, X, Zap,
 } from 'lucide-react'
+import { PartnerManagement, PartnerPortal } from './AdminPartners'
+import { CrmManagement } from './AdminCrm'
 import './App.css'
 
 const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:3000'
@@ -291,6 +293,30 @@ function Brand({ href = '#home' }: { href?: string }) {
     <a className="brand" href={href} aria-label="Scorenow home">
       <img src="/scorenow-logo-2026.jpg" alt="Scorenow - Improve Your Credit Score" />
     </a>
+  )
+}
+
+// Entries with an empty href are hidden until their URL is provided.
+const socialLinks = [
+  { label: 'Facebook', href: 'https://www.facebook.com/share/1MXCNZL49L/', icon: '/icons-3d/social-facebook.png' },
+  { label: 'X (Twitter)', href: '', icon: '/icons-3d/social-x.png' },
+  { label: 'YouTube', href: '', icon: '/icons-3d/social-youtube.png' },
+  { label: 'LinkedIn', href: '', icon: '/icons-3d/social-linkedin.png' },
+  { label: 'Instagram', href: 'https://www.instagram.com/scorenow_official?obrf=MTM3a2xmaWNtcTlqZg==', icon: '/icons-3d/social-instagram.png' },
+  { label: 'Website', href: '', icon: '/icons-3d/social-web.png' },
+]
+
+function SocialLinks() {
+  const visible = socialLinks.filter((link) => link.href)
+  if (visible.length === 0) return null
+  return (
+    <div className="footer-social" aria-label="Follow Scorenow">
+      {visible.map((link) => (
+        <a key={link.label} href={link.href} target="_blank" rel="noreferrer" aria-label={`Scorenow on ${link.label}`} title={link.label}>
+          <img src={link.icon} alt="" />
+        </a>
+      ))}
+    </div>
   )
 }
 
@@ -642,7 +668,7 @@ function AuthModal({ open, notice, onClose, onSuccess }: { open: boolean; notice
         {view === 'otp'
           ? <button className="auth-back" type="button" onClick={() => setView(otpOrigin)} aria-label="Go back"><ArrowLeft /></button>
           : <button className="auth-close" type="button" onClick={onClose} aria-label="Close"><X /></button>}
-        <img className="auth-brand" src="/scorenow-logo-hd.png" alt="Scorenow" />
+        <img className="auth-brand" src="/scorenow-logo-2026-transparent.png" alt="Scorenow - Improve Your Credit Score" />
 
         {view === 'otp' ? (
           <>
@@ -1867,7 +1893,7 @@ function ReportDetailView({ user, requestId }: { user: AuthUser; requestId: stri
         </article>
 
         <article className="dashboard-card report-enquiries" id="credit-enquiries">
-          <div className="dashboard-card-heading"><strong><Search /> Credit Enquiries</strong><small>{detail.enquiries.length} total</small></div>
+          <div className="dashboard-card-heading"><strong><img className="dash-3d-icon" src="/icons-3d/image-f81d610aca38a64f.png" alt="" /> Credit Enquiries</strong><small>{detail.enquiries.length} total</small></div>
           {detail.enquiries.length ? <ul>{detail.enquiries.map((enquiry, index) => <li key={`${enquiry.lender}-${index}`}><div><strong>{enquiry.lender}</strong><small>{enquiry.purpose || 'Credit enquiry'}{enquiry.amount ? ` · ${formatMoney(enquiry.amount)}` : ''}</small></div><time>{formatDate(enquiry.date)}</time></li>)}</ul> : <p className="report-empty">No enquiries reported.</p>}
         </article>
       </div>
@@ -2562,17 +2588,17 @@ function DashboardPage({ user, onLogout }: { user: AuthUser; onLogout: () => voi
       setDownloadingReport(false)
     }
   }
-  const sidebarItems: { icon: typeof House; label: string; href: string; external?: boolean }[] = [
-    { icon: FileSearch, label: 'Credit score', href: '#dashboard-overview' },
-    { icon: FileCheck2, label: 'Download report', href: activeReport ? '#my-report' : '#credit-reports' },
-    { icon: Lightbulb, label: 'Report insights', href: '#score-insights' },
-    { icon: TrendingUp, label: 'Improve score', href: '#credit-learning' },
-    { icon: CreditCard, label: 'Loan payment', href: '#loan-payment' },
-    { icon: PiggyBank, label: 'Fixed deposits', href: '#fixed-deposits' },
-    { icon: CreditCard, label: 'Credit cards', href: '#credit-cards' },
-    { icon: UserRound, label: 'My profile', href: '#my-profile' },
-    { icon: Settings, label: 'Settings', href: '#settings' },
-    { icon: CircleHelp, label: 'Help & support', href: '#help-support' },
+  const sidebarItems: { icon: typeof House; image?: string; label: string; href: string; external?: boolean }[] = [
+    { icon: FileSearch, image: '/icons-3d/image-953d8caf7b33e789.png', label: 'Credit score', href: '#dashboard-overview' },
+    { icon: FileCheck2, image: '/icons-3d/image-595dc8b28b982a37.png', label: 'Download report', href: activeReport ? '#my-report' : '#credit-reports' },
+    { icon: Lightbulb, image: '/icons-3d/image-88ec06fd2a7fc36c.png', label: 'Report insights', href: '#score-insights' },
+    { icon: TrendingUp, image: '/icons-3d/image-78da614c0f6c1161.png', label: 'Improve score', href: '#credit-learning' },
+    { icon: CreditCard, image: '/icons-3d/image-0b1794fb465020f2.png', label: 'Loan payment', href: '#loan-payment' },
+    { icon: PiggyBank, image: '/icons-3d/image-1c2db40da8b9f3b7.png', label: 'Fixed deposits', href: '#fixed-deposits' },
+    { icon: CreditCard, image: '/icons-3d/image-1d4a9bf1ec71ab79.png', label: 'Credit cards', href: '#credit-cards' },
+    { icon: UserRound, image: '/icons-3d/image-ee4e7008110907f5.png', label: 'My profile', href: '#my-profile' },
+    { icon: Settings, image: '/icons-3d/image-5a88f5e812fceb30.png', label: 'Settings', href: '#settings' },
+    { icon: CircleHelp, image: '/icons-3d/image-7e7a446b84557e61.png', label: 'Help & support', href: '#help-support' },
   ]
 
   const reportSubnav: [string, string][] = [
@@ -2736,7 +2762,7 @@ function DashboardPage({ user, onLogout }: { user: AuthUser; onLogout: () => voi
           <button className="dashboard-nav-close" type="button" aria-label="Close menu" onClick={() => setMobileNavOpen(false)}><X /></button>
         </div>
         <nav aria-label="Dashboard navigation" onClick={(event) => { if ((event.target as HTMLElement).closest('a:not(.has-subnav)')) setMobileNavOpen(false) }}>
-          {sidebarItems.map(({ icon: Icon, label, href, external }) => {
+          {sidebarItems.map(({ icon: Icon, image, label, href, external }) => {
             const subItems = label === 'Report insights' ? reportSubnav : []
             const expandable = subItems.length > 0
             const expanded = expandable && insightsOpen
@@ -2749,7 +2775,7 @@ function DashboardPage({ user, onLogout }: { user: AuthUser; onLogout: () => voi
                   aria-expanded={expandable ? expanded : undefined}
                   aria-controls={expandable ? 'report-insights-subnav' : undefined}
                   onClick={(event) => { if (expandable) setInsightsOpen(!insightsOpen); openNav(event, href) }}
-                ><Icon /><span>{label}</span>{expandable ? <ChevronDown className="subnav-chevron" /> : !external && <ArrowRight />}</a>
+                >{image ? <img className="nav-3d-icon" src={image} alt="" /> : <Icon />}<span>{label}</span>{expandable ? <ChevronDown className="subnav-chevron" /> : !external && <ArrowRight />}</a>
                 {expandable && <div className={`dashboard-sidebar-subnav-wrap${expanded ? ' open' : ''}`} id="report-insights-subnav">
                   <div className="dashboard-sidebar-subnav" aria-label="Report sections">
                     {subItems.map(([section, target]) => <a href={target} key={section} tabIndex={expanded ? 0 : -1} className={activeNav === target ? 'active' : ''} onClick={(event) => openNav(event, target)}>{section}</a>)}
@@ -2787,7 +2813,7 @@ function DashboardPage({ user, onLogout }: { user: AuthUser; onLogout: () => voi
             {activeReport
               ? <article className="dashboard-card sc-card">
                   <div className="sc-head">
-                    <strong>Your Credit Score</strong>
+                    <strong><img className="dash-3d-icon" src="/icons-3d/image-f1bb395a241f532b.png" alt="" />Your Credit Score</strong>
                     <span className="sc-date"><Clock3 /> Updated {formatDate(activeReport.report_date)}{activeReport.is_demo ? ' · Sample' : ''}</span>
                   </div>
                   {completedReports.length > 1 && <div className="sc-tabs" role="tablist" aria-label="Choose a credit bureau">
@@ -2887,7 +2913,7 @@ function DashboardPage({ user, onLogout }: { user: AuthUser; onLogout: () => voi
           <PlansPanel user={user} onLogout={onLogout} />
 
           <section className="dashboard-card bureau-section" id="credit-reports">
-            <div className="dashboard-card-heading"><strong>Your Credit Reports</strong><small><LockKeyhole /> ₹{price} per report · secure payment by Razorpay</small></div>
+            <div className="dashboard-card-heading"><strong><img className="dash-3d-icon" src="/icons-3d/image-d2cf65475ec75a74.png" alt="" />Your Credit Reports</strong><small><LockKeyhole /> ₹{price} per report · secure payment by Razorpay</small></div>
             <div className="bureau-grid">
               {bureauCatalog.map((bureau) => {
                 const report = reportFor(bureau.id)
@@ -2932,7 +2958,7 @@ function DashboardPage({ user, onLogout }: { user: AuthUser; onLogout: () => voi
           <section className="dashboard-card learning-card" id="credit-learning">
             <div className="learning-heading">
               <div>
-                <h2><BarChart3 /> Improve your credit</h2>
+                <h2><img className="dash-3d-icon" src="/icons-3d/image-8fb4f1c790ba8c5a.png" alt="" /> Improve your credit</h2>
                 <p>Explore quick guides to understand your credit better and take control of your financial future.</p>
               </div>
               <span className="learning-count">3 quick guides</span>
@@ -2964,7 +2990,7 @@ function DashboardPage({ user, onLogout }: { user: AuthUser; onLogout: () => voi
 
           <section className="dashboard-account-grid">
             <article className="dashboard-card account-card" id="my-profile">
-              <div className="dashboard-card-heading"><strong><UserRound /> My profile</strong><span className={`kyc-badge${status.profile.kyc_status === 'verified' ? ' verified' : ''}`}>{status.profile.kyc_status === 'verified' ? <><Check /> Verified</> : status.profile.kyc_status.replace(/_/g, ' ')}</span></div>
+              <div className="dashboard-card-heading"><strong><img className="dash-3d-icon" src="/icons-3d/image-1bcac97a1936ebb9.png" alt="" /> My profile</strong><span className={`kyc-badge${status.profile.kyc_status === 'verified' ? ' verified' : ''}`}>{status.profile.kyc_status === 'verified' ? <><Check /> Verified</> : status.profile.kyc_status.replace(/_/g, ' ')}</span></div>
               <dl className="account-details">
                 <dt>Account name</dt><dd>{user.full_name}</dd>
                 <dt>Name as per PAN</dt><dd>{status.profile.name_as_per_pan}</dd>
@@ -2982,14 +3008,14 @@ function DashboardPage({ user, onLogout }: { user: AuthUser; onLogout: () => voi
               <ul className="settings-list">
                 <li><span><Smartphone /></span><div><strong>Sign-in method</strong><small>{user.mobile ? `Mobile OTP · +91 ${user.mobile}` : user.email ? `Email · ${user.email}` : 'Scorenow account'}</small></div></li>
                 <li><span><FileCheck2 /></span><div><strong>Update profile details</strong><small>To correct your PAN, name, or date of birth, contact our support team so the change can be verified.</small></div><a href="mailto:info@scorenow.in?subject=Profile%20update%20request">Request <ArrowRight /></a></li>
-                <li><span><LockKeyhole /></span><div><strong>Data &amp; privacy</strong><small>Your details are shared only with the credit bureau you choose when fetching a report.</small></div></li>
+                <li><span><img className="dash-3d-icon" src="/icons-3d/image-323f6902b5183bba.png" alt="" /></span><div><strong>Data &amp; privacy</strong><small>Your details are shared only with the credit bureau you choose when fetching a report.</small></div></li>
               </ul>
               <button type="button" className="button button-outline account-logout" onClick={onLogout}>Log out <ArrowRight /></button>
             </article>
           </section>
 
           <section className="dashboard-card help-card" id="help-support">
-            <div className="dashboard-card-heading"><strong><CircleHelp /> Help &amp; support</strong><small>Mon–Sat · 10 AM – 7 PM</small></div>
+            <div className="dashboard-card-heading"><strong><img className="dash-3d-icon" src="/icons-3d/image-b62083721987aca5.png" alt="" /> Help &amp; support</strong><small>Mon–Sat · 10 AM – 7 PM</small></div>
             
             <div className="help-tabs-section">
               <button className="help-tab-toggle" onClick={() => setShowFaqs(!showFaqs)} type="button">
@@ -3324,7 +3350,7 @@ function HomePage() {
       </main>
 
       <footer>
-        <div className="container footer-grid"><div><Brand /><p>Clear guidance for a stronger financial future.</p></div><div><strong>Company</strong><a href="#about">About Us</a><a href="#partner-opportunity">Partner with us</a><a href="#contact">Contact</a></div><div><strong>Services</strong><a href="#insights">Credit Report</a><a href="#services">Score Improvement</a></div><div><strong>Reach Us</strong><a href="tel:+919114141011">+91 91141 41011</a><a href="mailto:info@scorenow.in">info@scorenow.in</a></div><AppDownload /></div>
+        <div className="container footer-grid"><div><Brand /><p>Clear guidance for a stronger financial future.</p><SocialLinks /></div><div><strong>Company</strong><a href="#about">About Us</a><a href="#partner-opportunity">Partner with us</a><a href="#contact">Contact</a></div><div><strong>Services</strong><a href="#insights">Credit Report</a><a href="#services">Score Improvement</a></div><div><strong>Reach Us</strong><a href="tel:+919114141011">+91 91141 41011</a><a href="mailto:info@scorenow.in">info@scorenow.in</a></div><AppDownload /></div>
         <div className="container footer-bottom"><span>© 2026 Scorenow. All rights reserved.</span><span>Privacy Policy · Terms of Use</span></div>
       </footer>
       <ChatAssistant requireLogin={requireLogin} />
@@ -3375,7 +3401,7 @@ function BusinessPage() {
           <div className="container"><p className="section-kicker">Why Scorenow</p><h2>Practical Support for <span>Commercial Credit</span></h2><div className="confidence-grid"><div><ShieldCheck /><strong>Privacy first</strong><span>Business and report details are handled carefully.</span></div><div><FileSearch /><strong>Thorough review</strong><span>We examine payment behaviour, exposure, and trade lines.</span></div><div><Users /><strong>Human guidance</strong><span>Understand each issue with clear expert support.</span></div><div><TrendingUp /><strong>Actionable roadmap</strong><span>Prioritised next steps aligned to funding readiness.</span></div></div></div>
         </section>
       </main>
-      <footer><div className="container footer-grid"><div><Brand href="/" /><p>Clear guidance for a stronger financial future.</p></div><div><strong>Explore</strong><a href="/">Individuals</a><a href="/business">Businesses</a></div><div><strong>Business</strong><a href="#business-assessment">Assessment</a><a href="#business-plans">Plans</a></div><div><strong>Reach Us</strong><a href="tel:+919114141011">+91 91141 41011</a><a href="mailto:info@scorenow.in">info@scorenow.in</a></div><AppDownload /></div><div className="container footer-bottom"><span>© 2026 Scorenow. All rights reserved.</span><span>Privacy Policy · Terms of Use</span></div></footer>
+      <footer><div className="container footer-grid"><div><Brand href="/" /><p>Clear guidance for a stronger financial future.</p><SocialLinks /></div><div><strong>Explore</strong><a href="/">Individuals</a><a href="/business">Businesses</a></div><div><strong>Business</strong><a href="#business-assessment">Assessment</a><a href="#business-plans">Plans</a></div><div><strong>Reach Us</strong><a href="tel:+919114141011">+91 91141 41011</a><a href="mailto:info@scorenow.in">info@scorenow.in</a></div><AppDownload /></div><div className="container footer-bottom"><span>© 2026 Scorenow. All rights reserved.</span><span>Privacy Policy · Terms of Use</span></div></footer>
       <ChatAssistant requireLogin={requireLogin} />
       {authModal}
     </div>
@@ -3526,7 +3552,7 @@ function CreditScorePage() {
   )
 }
 
-type AdminRole = 'owner' | 'manager' | 'support' | 'analyst'
+type AdminRole = 'owner' | 'manager' | 'support' | 'analyst' | 'partner' | 'agent'
 
 type AdminActivity = {
   summary: {
@@ -3601,7 +3627,9 @@ type AdminAnalytics = {
   bureaus: { bureau: string; paid_orders: number; revenue: number; completed: number; failed: number }[]
 }
 
-type AdminSectionId = 'overview' | 'customers' | 'reports' | 'analytics' | 'tickets' | 'journey' | 'team' | 'failed' | 'health' | 'audit'
+type AdminSectionId = 'overview' | 'customers' | 'reports' | 'analytics' | 'tickets' | 'journey' | 'team' | 'failed' | 'health' | 'audit' | 'partners' | 'portal' | 'crm'
+const defaultAdminSection = (role?: AdminRole): AdminSectionId => role === 'support' ? 'customers' : role === 'analyst' ? 'analytics' : role === 'partner' || role === 'agent' ? 'portal' : 'overview'
+type PartnerAccountOption = { email: string; full_name: string; role: AdminRole; status: string }
 
 type AdminAttention = {
   failed_reports: number; stuck_reports: number; stuck_payments: number
@@ -3703,7 +3731,10 @@ const formatAdminTimestamp = (value: string | null) => value
 function AdminPage() {
   const [token, setToken] = useState(() => sessionStorage.getItem('scorenow-admin-token') || '')
   const [adminId, setAdminId] = useState('')
-  const [adminRole, setAdminRole] = useState<'owner' | 'manager' | 'support' | 'analyst'>('owner')
+  const [adminRole, setAdminRole] = useState<AdminRole>('owner')
+  const [partnerOptions, setPartnerOptions] = useState<PartnerAccountOption[]>([])
+  const [inviteRole, setInviteRole] = useState<AdminRole>('support')
+  const isPartnerRole = adminRole === 'partner' || adminRole === 'agent'
   const [activeSection, setActiveSection] = useState<AdminSectionId>('overview')
   const [authState, setAuthState] = useState<'checking' | 'signed-out' | 'signed-in'>(token ? 'checking' : 'signed-out')
   const [loginError, setLoginError] = useState('')
@@ -3780,7 +3811,7 @@ function AdminPage() {
         if (!cancelled) {
           setAdminId(result.adminId || 'Admin')
           setAdminRole(result.role || 'owner')
-          setActiveSection(result.role === 'support' ? 'customers' : result.role === 'analyst' ? 'analytics' : 'overview')
+          setActiveSection(defaultAdminSection(result.role))
           setAuthState('signed-in')
         }
       })
@@ -3833,7 +3864,7 @@ function AdminPage() {
   }, [activitySearch, activityQuery])
 
   useEffect(() => {
-    if (authState !== 'signed-in' || !token) return
+    if (authState !== 'signed-in' || !token || isPartnerRole) return
     let cancelled = false
     fetch(`${apiUrl}/api/admin/attention`, { headers: { Authorization: 'Bearer ' + token } })
       .then(async (response) => {
@@ -3843,7 +3874,7 @@ function AdminPage() {
       })
       .catch(() => undefined)
     return () => { cancelled = true }
-  }, [authState, token, activityRefresh, sectionRefresh, activeSection])
+  }, [authState, token, activityRefresh, sectionRefresh, activeSection, isPartnerRole])
 
   useEffect(() => {
     if (authState !== 'signed-in') return
@@ -3930,6 +3961,9 @@ function AdminPage() {
           setTeam(result.admins || [])
           setPrimaryAdmin(result.primaryAdmin || null)
         }
+        const partnersResponse = await fetch(`${apiUrl}/api/admin/partners`, { headers })
+        const partnerResult = await partnersResponse.json() as { accounts?: PartnerAccountOption[] }
+        if (partnersResponse.ok && !cancelled) setPartnerOptions((partnerResult.accounts || []).filter((account) => account.role === 'partner' && account.status === 'active'))
       } else if (activeSection === 'failed') {
         const response = await fetch(`${apiUrl}/api/admin/failed-operations`, { headers })
         const result = await response.json() as AdminFailedOperations & { message?: string }
@@ -3972,7 +4006,7 @@ function AdminPage() {
       sessionStorage.setItem('scorenow-admin-token', result.token)
       setAdminId(result.adminId || 'Admin')
       setAdminRole(result.role || 'owner')
-      setActiveSection(result.role === 'support' ? 'customers' : result.role === 'analyst' ? 'analytics' : 'overview')
+      setActiveSection(defaultAdminSection(result.role))
       setToken(result.token)
       setAuthState('signed-in')
     } catch (error) {
@@ -4082,7 +4116,7 @@ function AdminPage() {
       sessionStorage.setItem('scorenow-admin-token', result.token)
       setAdminId(result.adminId || 'Admin')
       setAdminRole(result.role || 'support')
-      setActiveSection(result.role === 'analyst' ? 'analytics' : result.role === 'support' ? 'customers' : 'overview')
+      setActiveSection(defaultAdminSection(result.role))
       setToken(result.token)
       setTeamInviteToken('')
       window.history.replaceState(null, '', '/admin')
@@ -4352,6 +4386,9 @@ function AdminPage() {
     { id: 'health', label: 'System health', icon: Gauge, roles: ['owner', 'manager'] },
     { id: 'audit', label: 'Audit log', icon: ShieldCheck, roles: ['owner', 'manager'] },
     { id: 'team', label: 'Manage admins', icon: LockKeyhole, roles: ['owner'] },
+    { id: 'crm', label: 'CRM', icon: Users, roles: ['owner', 'manager', 'support'] },
+    { id: 'partners', label: 'Partners & agents', icon: Handshake, roles: ['owner'] },
+    { id: 'portal', label: 'My referrals', icon: Handshake, roles: ['partner', 'agent'] },
   ]
   const visibleAdminSections = adminSections.filter((section) => section.roles.includes(adminRole))
   const changeAdminSection = (section: AdminSectionId) => {
@@ -4372,7 +4409,7 @@ function AdminPage() {
   const sectionHasData: Record<AdminSectionId, boolean> = {
     overview: Boolean(activity), reports: Boolean(report), customers: customers.length > 0, analytics: Boolean(analytics),
     journey: Boolean(analytics) && journeyCustomers.length > 0, tickets: tickets.length > 0, team: team.length > 0 || Boolean(primaryAdmin),
-    failed: Boolean(failedOps), health: Boolean(health), audit: Boolean(auditLog),
+    failed: Boolean(failedOps), health: Boolean(health), audit: Boolean(auditLog), partners: true, portal: true, crm: true,
   }
   const sectionIsLoading = activeSection === 'overview' ? activityLoading : activeSection === 'reports' ? loading : sectionLoading
   const canManageCustomers = adminRole === 'owner' || adminRole === 'manager'
@@ -4707,14 +4744,17 @@ function AdminPage() {
             </tbody></table></div> : <p className="admin-activity-empty">{auditLog ? 'No audit entries match these filters.' : ''}</p>}
           </article>
           {auditLog && auditTotalPages > 1 && <nav className="admin-activity-pagination" aria-label="Audit pages"><button className="button button-outline" type="button" disabled={auditPage <= 1 || sectionLoading} onClick={() => { setSectionLoading(true); setAuditPage((page) => page - 1) }}><ArrowLeft /> Previous</button><span>Page {auditPage} of {auditTotalPages}</span><button className="button button-outline" type="button" disabled={auditPage >= auditTotalPages || sectionLoading} onClick={() => { setSectionLoading(true); setAuditPage((page) => page + 1) }}>Next <ArrowRight /></button></nav>}
-        </> : <>
-          <div className="admin-heading"><span>ACCESS CONTROL</span><h1>Manage admins</h1><p>Invite trusted teammates with role-based access. Invitations expire after 48 hours and each admin chooses a private password and PIN.</p></div>
-          <article className="dashboard-card admin-management-card">
+        </> : activeSection === 'crm' ? <CrmManagement token={token} role={adminRole} refreshKey={sectionRefresh} />
+        : activeSection === 'partners' ? <PartnerManagement token={token} refreshKey={sectionRefresh} />
+        : activeSection === 'portal' ? <PartnerPortal token={token} role={adminRole === 'agent' ? 'agent' : 'partner'} refreshKey={sectionRefresh} />
+        : <>
+          <div className="admin-heading"><span>ACCESS CONTROL</span><h1>Manage admins</h1><p>Invite trusted teammates with role-based access. Invitations expire after 48 hours and each admin chooses a private password and PIN.</p></div>          <article className="dashboard-card admin-management-card">
             <div className="dashboard-card-heading"><strong>Invite an admin</strong><small>Invite link shown once; share it through a secure channel</small></div>
             <form className="admin-management-form" onSubmit={(event) => void inviteAdmin(event)}>
               <label>Full name<input name="fullName" minLength={2} maxLength={120} required /></label>
               <label>Email<input name="email" type="email" required /></label>
-              <label>Role<select name="role" defaultValue="support"><option value="manager">Manager — customers, analytics, tickets, reports</option><option value="support">Support — customer help and tickets</option><option value="analyst">Analyst — analytics and funnel</option></select></label>
+              <label>Role<select name="role" value={inviteRole} onChange={(event) => setInviteRole(event.target.value as AdminRole)}><option value="manager">Manager — customers, analytics, tickets, reports</option><option value="support">Support — customer help and tickets</option><option value="analyst">Analyst — analytics and funnel</option><option value="partner">Partner — own referred customers and earnings</option><option value="agent">Agent — referred customers under a partner</option></select></label>
+              {inviteRole === 'agent' && <label>Partner (optional)<select name="partnerEmail" defaultValue=""><option value="">No partner</option>{partnerOptions.map((partner) => <option value={partner.email} key={partner.email}>{partner.full_name} ({partner.email})</option>)}</select></label>}
               <button className="button button-primary" type="submit" disabled={sectionLoading}><UserRound /> Create invite</button>
             </form>
             {inviteUrl && <label className="admin-invite-link">One-time invite link<input readOnly value={inviteUrl} onFocus={(event) => event.currentTarget.select()} /><small>Copy and share privately. The invite is valid for 48 hours.</small></label>}

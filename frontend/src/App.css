@@ -483,7 +483,7 @@ h1 span, h2 span { color: var(--blue); }
 .contact-option small { color: var(--muted); font-size: 11px; }
 .contact-option strong { font-size: 15px; overflow-wrap: anywhere; }
 .contact-option.whatsapp > svg { color: #16a769; }
-footer { background: #071238; color: #bac5dc; padding: 65px 0 22px; }.footer-grid { display: grid; grid-template-columns: 2fr repeat(3,1fr); gap: 60px; opacity: 1; transform: none; transition: none; }.footer-grid > div { display: flex; flex-direction: column; gap: 12px; }.footer-grid > div:first-child p { max-width: 280px; font-size: 13px; line-height: 1.6; margin-top: 10px; }.footer-grid strong { color: #fff; }.footer-grid a { text-decoration: none; font-size: 13px; }.footer-grid a:hover { color: #fff; }.footer-grid .brand { width: fit-content; padding: 5px 8px; border-radius: 5px; background: #fff; }.footer-grid .brand img { width: 150px; height: 60px; }.footer-bottom { border-top: 1px solid #233058; margin-top: 50px; padding-top: 20px; display: flex; justify-content: space-between; font-size: 10px; opacity: 1; transform: none; transition: none; }
+footer { background: #071238; color: #bac5dc; padding: 65px 0 22px; }.footer-grid { display: grid; grid-template-columns: 2fr repeat(3,1fr); gap: 60px; opacity: 1; transform: none; transition: none; }.footer-grid > div { display: flex; flex-direction: column; gap: 12px; }.footer-grid > div:first-child p { max-width: 280px; font-size: 13px; line-height: 1.6; margin-top: 10px; }.footer-grid strong { color: #fff; }.footer-grid a { text-decoration: none; font-size: 13px; }.footer-grid a:hover { color: #fff; }.footer-grid .brand { width: fit-content; padding: 5px 8px; border-radius: 5px; background: #fff; }.footer-grid .brand img { width: 150px; height: 60px; }.footer-social { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 6px; }.footer-social a { width: 38px; height: 38px; display: grid; place-items: center; transition: transform .2s ease; }.footer-social a:hover, .footer-social a:focus-visible { transform: translateY(-3px) scale(1.06); }.footer-social img { width: 100%; height: 100%; object-fit: contain; filter: drop-shadow(0 3px 4px rgba(0,0,0,.35)); }.footer-bottom { border-top: 1px solid #233058; margin-top: 50px; padding-top: 20px; display: flex; justify-content: space-between; font-size: 10px; opacity: 1; transform: none; transition: none; }
 .app-download { grid-column: 1 / -1; display: flex; flex-direction: column; gap: 5px; padding-top: 25px; border-top: 1px solid #233058; }.app-download > strong { font-size: 13px; }.app-download > small { color: #8d9bbc; font-size: 11px; }.store-badges { display: flex; gap: 10px; margin-top: 7px; }.store-badge { min-width: 164px; min-height: 52px; display: inline-flex; align-items: center; gap: 9px; padding: 7px 12px; border: 1px solid #3b4a70; border-radius: 7px; color: #fff; background: #111e42; }.store-badge svg { width: 22px; height: 22px; color: #a9d6ff; flex: none; }.store-badge span { display: flex; flex-direction: column; gap: 2px; }.store-badge small { color: #aebbd4; font-size: 8px; line-height: 1; }.store-badge b { font-size: 14px; line-height: 1.1; }
 
 .reveal-section > .container { opacity: 0; transform: translateY(34px); transition: opacity .75s ease, transform .75s cubic-bezier(.2,.75,.25,1); }
@@ -894,6 +894,7 @@ html.auth-open, html.auth-open body { overflow: hidden; }
 .dashboard-grid-bottom { margin-top: 16px; }
 .dashboard-card { padding: 22px; border-color: #e5ecf4; border-radius: 15px; box-shadow: 0 8px 24px rgba(26, 59, 99, .045); }
 .dashboard-card-heading { margin-bottom: 17px; }
+.dash-3d-icon { width: 22px; height: 22px; display: inline-block; vertical-align: middle; object-fit: contain; }
 .dashboard-card-heading > strong { font-size: 16px; }
 .bureau-section { margin-bottom: 16px; }
 .bureau-section .dashboard-card-heading > strong { font-size: 18px; }
@@ -1283,6 +1284,7 @@ html.auth-open, html.auth-open body { overflow: hidden; }
 .dashboard-sidebar nav :is(a, button).active { box-shadow: inset 3px 0 #1b59bd; }
 .dashboard-sidebar nav :is(a, button) svg { width: 17px; height: 17px; flex: none; }
 .dashboard-sidebar nav :is(a, button) svg:last-child { width: 13px; height: 13px; margin-left: auto; }
+.dashboard-sidebar nav .nav-3d-icon { width: 24px; height: 24px; flex: none; object-fit: contain; }
 .dashboard-support > a { width: 100%; min-height: 40px; display: flex; align-items: center; justify-content: space-between; padding: 8px 10px; border: 1px solid #b6d4f1; border-radius: 9px; background: #fff; color: var(--blue-dark); font-size: 11px; font-weight: 800; text-decoration: none; }
 .dashboard-support > a svg { width: 14px; }
 .dashboard-page-heading { display: grid; gap: 3px; }

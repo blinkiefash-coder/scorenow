@@ -6,7 +6,7 @@ import multer from "multer";
 import nodemailer from "nodemailer";
 import path from "node:path";
 import { BUREAUS, bureauNames, fetchBureauReport, isBureau, isBureauAvailable, missingApplicantFields, scoreBand, stateCodes, downloadReportPdf, } from "./bureaus.js";
-import { completeReportRequest, authenticateCustomerByEmail, authenticateDatabaseAdmin, createDemoReportRequest, createAdminReportAudit, addSupportTicketComment, createAdminSession, completeAdminReportAudit, createOtp, createCustomerInvitation, createAdminInvitation, acceptAdminInvitation, createReportPayment, createSession, failReportRequest, findReportPayment, findReportRequest, findSessionUser, findAdminSession, findUserByEmail, getApplicant, getAdminActivity, getAdminAnalytics, getAdminCustomers, getAdminReportDocument, getDashboardStatus, getReportDetail, getReportPdf, initializeDatabase, listAdminAccounts, listAdminUsers, listCustomerInvitations, listSupportTickets, markEmailVerified, markPaymentFailed, markPaymentPaidAndCreateRequest, recordPaymentFailure, markReportProcessing, revokeSession, revokeAdminSession, setAdminAccountStatus, setCustomerPassword, setCustomerAccountStatus, updateSupportTicket, createSupportTicket, cancelCustomerInvitation, saveAssessment, saveReportPdf, createSubscriptionPayment, findSubscriptionPayment, activateSubscription, getUserSubscriptions, saveReportDocument, saveAdminReportDocument, saveWebsiteInquiry, saveKycProfile, setUserEmailIfMissing, upsertUserByMobile, verifyOtp, exportAdminActivity, recordAdminAudit, listAdminAudit, getAdminCustomerDetail, findCustomerForFollowUp, findAdminRetryableReport, getAdminAttention, getFailedOperations, getHealthStats, } from "./database.js";
+import { completeReportRequest, authenticateCustomerByEmail, authenticateDatabaseAdmin, createDemoReportRequest, createAdminReportAudit, addSupportTicketComment, createAdminSession, completeAdminReportAudit, createOtp, createCustomerInvitation, createAdminInvitation, acceptAdminInvitation, createReportPayment, createSession, failReportRequest, findReportPayment, findReportRequest, findSessionUser, findAdminSession, findUserByEmail, getApplicant, getAdminActivity, getAdminAnalytics, getAdminCustomers, getAdminReportDocument, getDashboardStatus, getReportDetail, getReportPdf, initializeDatabase, listAdminAccounts, listAdminUsers, listCustomerInvitations, listSupportTickets, markEmailVerified, markPaymentFailed, markPaymentPaidAndCreateRequest, recordPaymentFailure, markReportProcessing, revokeSession, revokeAdminSession, setAdminAccountStatus, setCustomerPassword, setCustomerAccountStatus, updateSupportTicket, createSupportTicket, cancelCustomerInvitation, saveAssessment, saveReportPdf, createSubscriptionPayment, findSubscriptionPayment, activateSubscription, getUserSubscriptions, saveReportDocument, saveAdminReportDocument, saveWebsiteInquiry, saveKycProfile, setUserEmailIfMissing, upsertUserByMobile, verifyOtp, exportAdminActivity, recordAdminAudit, listAdminAudit, getAdminCustomerDetail, findCustomerForFollowUp, findAdminRetryableReport, getAdminAttention, getFailedOperations, getHealthStats, listPartnerAccounts, getPortalCustomers, getPortalEarnings, getPayoutProfile, savePayoutProfile, listCommissions, createCommission, markCommissionPaid, assignCustomerToOwner, unassignCustomer, CRM_ACTIVITY_KINDS, CRM_STAGES, addCrmActivity, createCrmTask, getCrmExportRows, getCrmPipeline, getCrmTimeline, listCrmCustomers, listOpenCrmTasks, setCrmTaskStatus, updateCrmProfile, } from "./database.js";
 import { SUBSCRIPTION_PLANS, findSubscriptionPlan, gstIncluded } from "./subscriptions.js";
 import { generateReportPdf } from "./reportPdf.js";
 import { captureBureauDocument, htmlToPdf } from "./bureauDocument.js";
@@ -14,6 +14,7 @@ import { tryGenerateCibilPdf } from "./cibilPdf.js";
 import { verifyFirebaseGoogleToken, verifyFirebasePhoneToken } from "./firebaseAdmin.js";
 import { demoReportResponses, isReportsDemoMode } from "./demoReports.js";
 import { createRazorpayOrder, isRazorpayConfigured, isSimulatedPayments, isValidPaymentSignature, simulatedId } from "./razorpay.js";
+import { PayoutError, payPendingCommissions } from "./payouts.js";
 import { normalizeReport } from "./reportParser.js";
 const app = express();
 const port = Number(process.env.PORT) || 3000;
@@ -258,7 +259,7 @@ app.get("/api/admin/activity/export", requireAdmin, requireAdminRoles("owner", "
         response.status(500).json({ message: "Unable to export activity." });
     }
 });
-app.get("/api/admin/attention", requireAdmin, async (_request, response) => {
+app.get("/api/admin/attention", requireAdmin, requireAdminRoles("owner", "manager", "support", "analyst"), async (_request, response) => {
     try {
         response.json(await getAdminAttention());
     }
@@ -595,14 +596,16 @@ app.post("/api/admin/team/invitations", requireAdmin, requireAdminRoles("owner")
     const fullName = String(request.body.fullName || "").trim();
     const email = String(request.body.email || "").trim().toLowerCase();
     const role = request.body.role;
+    const parentEmail = role === "agent" && request.body.partnerEmail ? String(request.body.partnerEmail).trim().toLowerCase() : null;
     if (fullName.length < 2 || fullName.length > 120 || !/^\S+@\S+\.\S+$/.test(email) ||
-        !["manager", "support", "analyst"].includes(role) || email === (process.env.ADMIN_LOGIN_ID || "").toLowerCase()) {
+        !["manager", "support", "analyst", "partner", "agent"].includes(role) || email === (process.env.ADMIN_LOGIN_ID || "").toLowerCase() ||
+        (role === "agent" && parentEmail !== null && !/^\S+@\S+\.\S+$/.test(parentEmail))) {
         response.status(400).json({ message: "Enter a valid name, email, and non-owner role." });
         return;
     }
     try {
-        const invite = await createAdminInvitation({ fullName, email, role, invitedBy: sessionAdminId(response) });
-        auditAdmin(request, response, "admin_invited", { type: "admin", id: email, details: { role } });
+        const invite = await createAdminInvitation({ fullName, email, role, invitedBy: sessionAdminId(response), parentEmail });
+        auditAdmin(request, response, "admin_invited", { type: "admin", id: email, details: { role, partner: parentEmail } });
         const requestOrigin = request.get("origin");
         const requestAppUrl = requestOrigin && /^https?:\/\//i.test(requestOrigin) ? new URL(requestOrigin).origin : null;
         const baseUrl = process.env.ADMIN_APP_URL || requestAppUrl || `${request.protocol}://${request.get("host")}`;
@@ -649,6 +652,376 @@ app.patch("/api/admin/team/:email/status", requireAdmin, requireAdminRoles("owne
     }
     auditAdmin(request, response, status === "disabled" ? "admin_disabled" : "admin_enabled", { type: "admin", id: email });
     response.json({ ok: true });
+});
+const CRM_CUSTOMER_ROLES = ["owner", "manager", "support"];
+const crmCsvCell = (value) => {
+    let text = value instanceof Date ? value.toISOString() : String(value ?? "");
+    if (/^[=+\-@]/.test(text))
+        text = `'${text}`;
+    return /[",\r\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+};
+const parseCrmTags = (value) => {
+    if (value === undefined)
+        return undefined;
+    if (!Array.isArray(value))
+        return null;
+    const tags = [...new Set(value.map((tag) => String(tag).trim().toLowerCase()).filter(Boolean))];
+    if (tags.length > 10 || tags.some((tag) => tag.length > 30))
+        return null;
+    return tags;
+};
+app.get("/api/admin/crm/pipeline", requireAdmin, requireAdminRoles(...CRM_CUSTOMER_ROLES), async (_request, response) => {
+    try {
+        response.json({ stages: CRM_STAGES, counts: await getCrmPipeline() });
+    }
+    catch (error) {
+        console.error("CRM pipeline failed", error);
+        response.status(500).json({ message: "Unable to load the pipeline." });
+    }
+});
+app.get("/api/admin/crm/customers", requireAdmin, requireAdminRoles(...CRM_CUSTOMER_ROLES), async (request, response) => {
+    const page = Number(request.query.page ?? 1);
+    const stage = request.query.stage ? String(request.query.stage) : "";
+    const tag = request.query.tag ? String(request.query.tag).trim().toLowerCase() : "";
+    if (!Number.isSafeInteger(page) || page < 1 || (stage && !CRM_STAGES.includes(stage))) {
+        response.status(400).json({ message: "Choose a valid CRM filter." });
+        return;
+    }
+    try {
+        const result = await listCrmCustomers({
+            q: String(request.query.q || "").trim().slice(0, 100),
+            stage: (stage || null),
+            tag: tag || null,
+            page,
+            pageSize: 25,
+        });
+        const maskMobile = sessionAdminRole(response) === "support";
+        response.json({
+            ...result,
+            customers: result.customers.map((customer) => ({
+                ...customer,
+                mobile: maskMobile && customer.mobile ? `******${customer.mobile.slice(-4)}` : customer.mobile,
+            })),
+        });
+    }
+    catch (error) {
+        console.error("CRM customer list failed", error);
+        response.status(500).json({ message: "Unable to load CRM customers." });
+    }
+});
+app.get("/api/admin/crm/customers/:id", requireAdmin, requireAdminRoles(...CRM_CUSTOMER_ROLES), async (request, response) => {
+    const userId = String(request.params.id);
+    if (!/^[0-9a-f-]{36}$/i.test(userId)) {
+        response.status(400).json({ message: "Choose a valid customer." });
+        return;
+    }
+    try {
+        response.json(await getCrmTimeline(userId));
+    }
+    catch (error) {
+        console.error("CRM timeline failed", error);
+        response.status(500).json({ message: "Unable to load this customer's CRM record." });
+    }
+});
+app.put("/api/admin/crm/customers/:id/profile", requireAdmin, requireAdminRoles(...CRM_CUSTOMER_ROLES), async (request, response) => {
+    const userId = String(request.params.id);
+    const stage = request.body.stage === undefined ? undefined : String(request.body.stage);
+    const tags = parseCrmTags(request.body.tags);
+    if (!/^[0-9a-f-]{36}$/i.test(userId) || (stage !== undefined && !CRM_STAGES.includes(stage)) || tags === null) {
+        response.status(400).json({ message: "Choose a valid stage and up to 10 tags of 30 characters or fewer." });
+        return;
+    }
+    try {
+        await updateCrmProfile(userId, { stage: stage, tags }, sessionAdminId(response) || "unknown");
+        auditAdmin(request, response, "crm.profile.update", { type: "customer", id: userId, details: { stage, tags } });
+        response.json(await getCrmTimeline(userId));
+    }
+    catch (error) {
+        console.error("CRM profile update failed", error);
+        response.status(500).json({ message: "Unable to update this customer." });
+    }
+});
+app.post("/api/admin/crm/customers/:id/activities", requireAdmin, requireAdminRoles(...CRM_CUSTOMER_ROLES), async (request, response) => {
+    const userId = String(request.params.id);
+    const kind = String(request.body.kind || "note");
+    const body = String(request.body.body || "").trim();
+    if (!/^[0-9a-f-]{36}$/i.test(userId) || !CRM_ACTIVITY_KINDS.includes(kind) || body.length < 1 || body.length > 2000) {
+        response.status(400).json({ message: "Choose a valid activity type and write 1 to 2000 characters." });
+        return;
+    }
+    try {
+        const activity = await addCrmActivity({ userId, kind: kind, body, createdBy: sessionAdminId(response) || "unknown" });
+        auditAdmin(request, response, "crm.activity.add", { type: "customer", id: userId, details: { kind } });
+        response.status(201).json(activity);
+    }
+    catch (error) {
+        console.error("CRM activity failed", error);
+        response.status(500).json({ message: "Unable to save this activity." });
+    }
+});
+app.post("/api/admin/crm/customers/:id/tasks", requireAdmin, requireAdminRoles(...CRM_CUSTOMER_ROLES), async (request, response) => {
+    const userId = String(request.params.id);
+    const title = String(request.body.title || "").trim();
+    const dueInput = String(request.body.dueAt || "").trim();
+    const dueDate = dueInput ? new Date(dueInput) : null;
+    const assignee = String(request.body.assigneeEmail || "").trim().toLowerCase();
+    if (!/^[0-9a-f-]{36}$/i.test(userId) || title.length < 1 || title.length > 200 || (dueDate && Number.isNaN(dueDate.getTime())) || assignee.length > 200) {
+        response.status(400).json({ message: "Enter a task title up to 200 characters and a valid due date." });
+        return;
+    }
+    try {
+        const task = await createCrmTask({
+            userId,
+            title,
+            dueAt: dueDate ? dueDate.toISOString() : null,
+            assigneeEmail: assignee || null,
+            createdBy: sessionAdminId(response) || "unknown",
+        });
+        auditAdmin(request, response, "crm.task.create", { type: "customer", id: userId });
+        response.status(201).json(task);
+    }
+    catch (error) {
+        console.error("CRM task create failed", error);
+        response.status(500).json({ message: "Unable to create this task." });
+    }
+});
+app.patch("/api/admin/crm/tasks/:taskId", requireAdmin, requireAdminRoles(...CRM_CUSTOMER_ROLES), async (request, response) => {
+    const taskId = Number(request.params.taskId);
+    const status = String(request.body.status || "");
+    if (!Number.isSafeInteger(taskId) || taskId < 1 || (status !== "open" && status !== "done")) {
+        response.status(400).json({ message: "Choose a valid task and status." });
+        return;
+    }
+    try {
+        const task = await setCrmTaskStatus(taskId, status);
+        if (!task) {
+            response.status(404).json({ message: "Task not found." });
+            return;
+        }
+        auditAdmin(request, response, "crm.task.update", { type: "task", id: String(taskId), details: { status } });
+        response.json(task);
+    }
+    catch (error) {
+        console.error("CRM task update failed", error);
+        response.status(500).json({ message: "Unable to update this task." });
+    }
+});
+app.get("/api/admin/crm/tasks", requireAdmin, requireAdminRoles(...CRM_CUSTOMER_ROLES), async (_request, response) => {
+    try {
+        response.json({ tasks: await listOpenCrmTasks() });
+    }
+    catch (error) {
+        console.error("CRM task list failed", error);
+        response.status(500).json({ message: "Unable to load tasks." });
+    }
+});
+app.get("/api/admin/crm/export.csv", requireAdmin, requireAdminRoles("owner", "manager"), async (request, response) => {
+    try {
+        const rows = await getCrmExportRows();
+        const header = ["Name", "Email", "Mobile", "Joined", "Stage", "Tags", "Paid payments", "Open tasks"];
+        const lines = rows.map((row) => [row.name, row.email, row.mobile, row.created_at, row.stage, row.tags, row.paid_payments, row.open_tasks].map(crmCsvCell).join(","));
+        auditAdmin(request, response, "crm.export", { type: "customers", details: { rows: rows.length } });
+        response.setHeader("Content-Type", "text/csv; charset=utf-8");
+        response.setHeader("Content-Disposition", `attachment; filename="scorenow-crm-${new Date().toISOString().slice(0, 10)}.csv"`);
+        response.send([header.join(","), ...lines].join("\r\n"));
+    }
+    catch (error) {
+        console.error("CRM export failed", error);
+        response.status(500).json({ message: "Unable to export CRM data." });
+    }
+});
+app.get("/api/admin/partners", requireAdmin, requireAdminRoles("owner"), async (_request, response) => {
+    try {
+        response.json({ accounts: await listPartnerAccounts() });
+    }
+    catch (error) {
+        console.error("Partner list failed", error);
+        response.status(500).json({ message: "Unable to load partners and agents." });
+    }
+});
+app.get("/api/admin/partners/:email/customers", requireAdmin, requireAdminRoles("owner"), async (request, response) => {
+    const email = String(request.params.email).toLowerCase();
+    const role = request.query.role;
+    if (!/^\S+@\S+\.\S+$/.test(email) || (role !== "partner" && role !== "agent")) {
+        response.status(400).json({ message: "Choose a valid partner or agent." });
+        return;
+    }
+    try {
+        response.json({ customers: await getPortalCustomers(email, role) });
+    }
+    catch (error) {
+        console.error("Partner customer list failed", error);
+        response.status(500).json({ message: "Unable to load assigned customers." });
+    }
+});
+app.put("/api/admin/customers/:id/assignment", requireAdmin, requireAdminRoles("owner"), async (request, response) => {
+    const userId = String(request.params.id);
+    const ownerEmail = String(request.body.ownerEmail || "").trim().toLowerCase();
+    if (!/^[0-9a-f-]{36}$/i.test(userId) || !/^\S+@\S+\.\S+$/.test(ownerEmail)) {
+        response.status(400).json({ message: "Choose a valid customer and partner or agent." });
+        return;
+    }
+    const assigned = await assignCustomerToOwner({ userId, ownerEmail, assignedBy: sessionAdminId(response) });
+    if (!assigned) {
+        response.status(404).json({ message: "Customer or active partner/agent not found." });
+        return;
+    }
+    auditAdmin(request, response, "customer_assigned", { type: "customer", id: userId, details: { owner: ownerEmail } });
+    response.json({ ok: true });
+});
+app.delete("/api/admin/customers/:id/assignment", requireAdmin, requireAdminRoles("owner"), async (request, response) => {
+    const userId = String(request.params.id);
+    if (!/^[0-9a-f-]{36}$/i.test(userId)) {
+        response.status(400).json({ message: "Choose a valid customer." });
+        return;
+    }
+    const removed = await unassignCustomer(userId);
+    if (!removed) {
+        response.status(404).json({ message: "This customer is not assigned to a partner or agent." });
+        return;
+    }
+    auditAdmin(request, response, "customer_unassigned", { type: "customer", id: userId });
+    response.json({ ok: true });
+});
+app.get("/api/admin/commissions", requireAdmin, requireAdminRoles("owner"), async (_request, response) => {
+    try {
+        response.json({ commissions: await listCommissions() });
+    }
+    catch (error) {
+        console.error("Commission list failed", error);
+        response.status(500).json({ message: "Unable to load commissions." });
+    }
+});
+app.post("/api/admin/commissions", requireAdmin, requireAdminRoles("owner"), async (request, response) => {
+    const payeeEmail = String(request.body.payeeEmail || "").trim().toLowerCase();
+    const amountRupees = Number(request.body.amountRupees);
+    const userId = request.body.userId ? String(request.body.userId) : null;
+    const note = String(request.body.note || "").trim().slice(0, 300) || null;
+    if (!/^\S+@\S+\.\S+$/.test(payeeEmail) || !Number.isFinite(amountRupees) || amountRupees <= 0 || amountRupees > 1000000 ||
+        (userId !== null && !/^[0-9a-f-]{36}$/i.test(userId))) {
+        response.status(400).json({ message: "Enter a valid partner or agent and an amount between ₹1 and ₹10,00,000." });
+        return;
+    }
+    const commission = await createCommission({
+        payeeEmail,
+        userId,
+        amountPaise: Math.round(amountRupees * 100),
+        note,
+        createdBy: sessionAdminId(response),
+    });
+    if (!commission) {
+        response.status(404).json({ message: "Active partner or agent not found." });
+        return;
+    }
+    auditAdmin(request, response, "commission_added", { type: "commission", id: commission.id, details: { payee: payeeEmail, amountRupees } });
+    response.status(201).json({ id: commission.id });
+});
+app.patch("/api/admin/commissions/:id/paid", requireAdmin, requireAdminRoles("owner"), async (request, response) => {
+    const id = String(request.params.id);
+    if (!/^[0-9a-f-]{36}$/i.test(id)) {
+        response.status(400).json({ message: "Choose a valid commission." });
+        return;
+    }
+    const marked = await markCommissionPaid(id);
+    if (!marked) {
+        response.status(404).json({ message: "Pending commission not found." });
+        return;
+    }
+    auditAdmin(request, response, "commission_paid", { type: "commission", id });
+    response.json({ ok: true });
+});
+// Partners and agents see only their own book of customers and their own earnings.
+app.get("/api/admin/portal", requireAdmin, requireAdminRoles("partner", "agent"), async (request, response) => {
+    const email = sessionAdminId(response).toLowerCase();
+    const role = sessionAdminRole(response);
+    try {
+        const [customers, earnings, commissions] = await Promise.all([
+            getPortalCustomers(email, role),
+            getPortalEarnings(email),
+            listCommissions(email),
+        ]);
+        response.json({ role, customers, earnings, commissions });
+    }
+    catch (error) {
+        console.error("Partner portal load failed", error);
+        response.status(500).json({ message: "Unable to load your portal." });
+    }
+});
+// Partners and agents save their payout details here. The account number is only returned masked.
+const maskAccount = (value) => (value ? `${"•".repeat(Math.max(0, value.length - 4))}${value.slice(-4)}` : null);
+const payoutProfileResponse = (profile) => ({
+    upiId: profile?.upi_id ?? null,
+    bankAccountMasked: maskAccount(profile?.bank_account_number ?? null),
+    ifsc: profile?.ifsc ?? null,
+    hasBank: Boolean(profile?.bank_account_number && profile?.ifsc),
+});
+app.get("/api/admin/portal/payout-profile", requireAdmin, requireAdminRoles("partner", "agent"), async (_request, response) => {
+    try {
+        response.json(payoutProfileResponse(await getPayoutProfile(sessionAdminId(response))));
+    }
+    catch (error) {
+        console.error("Payout profile load failed", error);
+        response.status(500).json({ message: "Unable to load your payout details." });
+    }
+});
+app.put("/api/admin/portal/payout-profile", requireAdmin, requireAdminRoles("partner", "agent"), async (request, response) => {
+    const email = sessionAdminId(response);
+    const fullName = String(request.body.fullName || "").trim().slice(0, 120);
+    const upiId = String(request.body.upiId || "").trim().toLowerCase() || null;
+    const bankAccountNumber = String(request.body.bankAccountNumber || "").replace(/\s/g, "") || null;
+    const ifsc = String(request.body.ifsc || "").trim().toUpperCase() || null;
+    if (fullName.length < 2) {
+        response.status(400).json({ message: "Enter the full name as it appears on your bank account." });
+        return;
+    }
+    if (upiId && !/^[a-z0-9.\-_]{2,256}@[a-z]{2,64}$/.test(upiId)) {
+        response.status(400).json({ message: "Enter a valid UPI ID, for example name@bank." });
+        return;
+    }
+    if (bankAccountNumber && !/^\d{6,20}$/.test(bankAccountNumber)) {
+        response.status(400).json({ message: "Enter a valid bank account number (6 to 20 digits)." });
+        return;
+    }
+    if (ifsc && !/^[A-Z]{4}0[A-Z0-9]{6}$/.test(ifsc)) {
+        response.status(400).json({ message: "Enter a valid IFSC code." });
+        return;
+    }
+    if (Boolean(bankAccountNumber) !== Boolean(ifsc)) {
+        response.status(400).json({ message: "Enter both the bank account number and IFSC code, or leave both empty." });
+        return;
+    }
+    if (!upiId && !bankAccountNumber) {
+        response.status(400).json({ message: "Add a UPI ID or a bank account to receive payouts." });
+        return;
+    }
+    try {
+        await savePayoutProfile({ email, fullName, upiId, bankAccountNumber, ifsc });
+        response.json(payoutProfileResponse(await getPayoutProfile(email)));
+    }
+    catch (error) {
+        console.error("Payout profile save failed", error);
+        response.status(500).json({ message: "Unable to save your payout details." });
+    }
+});
+app.post("/api/admin/commissions/pay-batch", requireAdmin, requireAdminRoles("owner"), async (request, response) => {
+    const payeeEmail = String(request.body.payeeEmail || "").trim().toLowerCase();
+    if (!/^\S+@\S+\.\S+$/.test(payeeEmail)) {
+        response.status(400).json({ message: "Choose a valid partner or agent." });
+        return;
+    }
+    try {
+        const result = await payPendingCommissions(payeeEmail);
+        auditAdmin(request, response, "commission_batch_paid", { type: "commission", details: { payee: payeeEmail, payoutId: result.payoutId, amountPaise: result.amountPaise, count: result.count, mode: result.mode } });
+        response.json({ ok: true, ...result });
+    }
+    catch (error) {
+        if (error instanceof PayoutError) {
+            response.status(400).json({ message: error.message });
+            return;
+        }
+        console.error("Commission batch payout failed", error);
+        response.status(502).json({ message: error instanceof Error ? error.message : "Payout failed. Please try again." });
+    }
 });
 app.post("/api/admin/logout", requireAdmin, async (request, response) => {
     await revokeAdminSession(bearerToken(request));
@@ -1445,69 +1818,13 @@ app.post("/api/cibil-report", async (request, response) => {
         response.status(502).json({ message: "Unable to reach the CIBIL report provider. Please try again." });
     }
 });
-// Equifax report endpoint
-app.post("/api/equifax-report", requireUser, async (request, response) => {
-    const user = sessionUser(response);
-    try {
-        const applicant = await getApplicant(user.id);
-        if (!applicant) {
-            response.status(400).json({ message: "Complete your profile before fetching a report." });
-            return;
-        }
-        const missing = missingApplicantFields("equifax", applicant);
-        if (missing.length) {
-            response.status(400).json({ message: `Add your ${missing.join(", ")} to your profile to get an Equifax report.` });
-            return;
-        }
-        const result = await fetchBureauReport("equifax", applicant, requestIpAddress(request));
-        if (!result.ok) {
-            response.status(400).json({ message: result.message, diagnostics: result.diagnostics });
-            return;
-        }
-        response.json({
-            ok: true,
-            message: "Equifax report fetched successfully",
-            data: result.raw,
-            reportUrl: result.reportUrl,
-            providerTxnId: result.providerTxnId,
-        });
-    }
-    catch (error) {
-        console.error("Equifax report request failed", error);
-        response.status(502).json({ message: "Unable to reach the Equifax report provider. Please try again." });
-    }
+// Bureau reports are fetched only after a verified Razorpay payment, through /api/reports/order and /api/reports/verify.
+app.post("/api/equifax-report", requireUser, (_request, response) => {
+    response.status(410).json({ message: "Please buy the report first. Bureau reports are fetched only after payment." });
 });
-// CRIF report endpoint
-app.post("/api/crif-report", requireUser, async (request, response) => {
-    const user = sessionUser(response);
-    try {
-        const applicant = await getApplicant(user.id);
-        if (!applicant) {
-            response.status(400).json({ message: "Complete your profile before fetching a report." });
-            return;
-        }
-        const missing = missingApplicantFields("crif", applicant);
-        if (missing.length) {
-            response.status(400).json({ message: `Add your ${missing.join(", ")} to your profile to get a CRIF report.` });
-            return;
-        }
-        const result = await fetchBureauReport("crif", applicant, requestIpAddress(request));
-        if (!result.ok) {
-            response.status(400).json({ message: result.message, diagnostics: result.diagnostics });
-            return;
-        }
-        response.json({
-            ok: true,
-            message: "CRIF report fetched successfully",
-            data: result.raw,
-            reportUrl: result.reportUrl,
-            providerTxnId: result.providerTxnId,
-        });
-    }
-    catch (error) {
-        console.error("CRIF report request failed", error);
-        response.status(502).json({ message: "Unable to reach the CRIF report provider. Please try again." });
-    }
+// Bureau reports are fetched only after a verified Razorpay payment, through /api/reports/order and /api/reports/verify.
+app.post("/api/crif-report", requireUser, (_request, response) => {
+    response.status(410).json({ message: "Please buy the report first. Bureau reports are fetched only after payment." });
 });
 app.post("/api/inquiries", requireUser, async (request, response) => {
     const user = sessionUser(response);

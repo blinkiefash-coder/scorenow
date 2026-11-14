@@ -132,6 +132,46 @@ export const initializeDatabase = async () => {
   await pool.query(`ALTER TABLE admin_accounts ADD COLUMN IF NOT EXISTS invitation_token_hash TEXT`);
   await pool.query(`ALTER TABLE admin_accounts ADD COLUMN IF NOT EXISTS invitation_expires_at TIMESTAMPTZ`);
   await pool.query(`ALTER TABLE admin_accounts ADD COLUMN IF NOT EXISTS invited_by TEXT NOT NULL DEFAULT 'system'`);
+  await pool.query(`ALTER TABLE admin_accounts ADD COLUMN IF NOT EXISTS parent_email TEXT`);
+  await pool.query(`ALTER TABLE admin_accounts DROP CONSTRAINT IF EXISTS admin_accounts_role_check`);
+  await pool.query(`ALTER TABLE admin_accounts ADD CONSTRAINT admin_accounts_role_check CHECK (role IN ('manager', 'support', 'analyst', 'partner', 'agent'))`);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS customer_assignments (
+      user_id UUID PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+      owner_email TEXT NOT NULL,
+      assigned_by TEXT NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+  await pool.query(`CREATE INDEX IF NOT EXISTS customer_assignments_owner_idx ON customer_assignments (owner_email)`);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS partner_commissions (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      payee_email TEXT NOT NULL,
+      user_id UUID REFERENCES users(id) ON DELETE SET NULL,
+      amount_paise INTEGER NOT NULL CHECK (amount_paise > 0),
+      status TEXT NOT NULL CHECK (status IN ('pending', 'paid')) DEFAULT 'pending',
+      note TEXT,
+      created_by TEXT NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      paid_at TIMESTAMPTZ
+    )
+  `);
+  await pool.query(`CREATE INDEX IF NOT EXISTS partner_commissions_payee_idx ON partner_commissions (payee_email)`);
+  await pool.query(`ALTER TABLE partner_commissions ADD COLUMN IF NOT EXISTS razorpay_payout_id TEXT`);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS partner_payout_profiles (
+      email TEXT PRIMARY KEY,
+      full_name TEXT NOT NULL,
+      upi_id TEXT,
+      bank_account_number TEXT,
+      ifsc TEXT,
+      razorpay_contact_id TEXT,
+      razorpay_vpa_fund_account_id TEXT,
+      razorpay_bank_fund_account_id TEXT,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
 
   await pool.query(`
     CREATE TABLE IF NOT EXISTS customer_invites (
@@ -191,6 +231,40 @@ export const initializeDatabase = async () => {
     )
   `);
   await pool.query(`CREATE INDEX IF NOT EXISTS admin_audit_log_created_idx ON admin_audit_log (created_at DESC)`);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS crm_customer_profiles (
+      user_id UUID PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+      stage TEXT NOT NULL DEFAULT 'new' CHECK (stage IN ('new', 'contacted', 'interested', 'paid', 'closed')),
+      tags TEXT[] NOT NULL DEFAULT '{}',
+      updated_by TEXT,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS crm_activities (
+      id BIGSERIAL PRIMARY KEY,
+      user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      kind TEXT NOT NULL CHECK (kind IN ('note', 'call', 'whatsapp', 'email')),
+      body TEXT NOT NULL,
+      created_by TEXT NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+  await pool.query(`CREATE INDEX IF NOT EXISTS crm_activities_user_idx ON crm_activities (user_id, created_at DESC)`);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS crm_tasks (
+      id BIGSERIAL PRIMARY KEY,
+      user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      title TEXT NOT NULL,
+      due_at TIMESTAMPTZ,
+      assignee_email TEXT,
+      status TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'done')),
+      created_by TEXT NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      completed_at TIMESTAMPTZ
+    )
+  `);
+  await pool.query(`CREATE INDEX IF NOT EXISTS crm_tasks_open_due_idx ON crm_tasks (status, due_at)`);
 };
 
 // Customers often keep the placeholder account name; prefer the name on their PAN profile when present.
@@ -229,7 +303,7 @@ export const revokeSession = async (token: string) => {
 
 const ADMIN_SESSION_TTL_MS = 12 * 60 * 60 * 1000;
 
-export type AdminRole = "owner" | "manager" | "support" | "analyst";
+export type AdminRole = "owner" | "manager" | "support" | "analyst" | "partner" | "agent";
 
 export const createAdminSession = async ({ adminId, role = "owner", ipAddress, userAgent }: {
   adminId: string;
@@ -294,26 +368,29 @@ export const createAdminInvitation = async ({
   fullName,
   role,
   invitedBy,
+  parentEmail,
 }: {
   email: string;
   fullName: string;
   role: Exclude<AdminRole, "owner">;
   invitedBy: string;
+  parentEmail?: string | null;
 }) => {
   const token = randomBytes(32).toString("hex");
   const { rows } = await pool.query<{ email: string }>(
-    `INSERT INTO admin_accounts (email, full_name, role, status, invitation_token_hash, invitation_expires_at, invited_by)
-     VALUES ($1, $2, $3, 'invited', $4, NOW() + INTERVAL '48 hours', $5)
+    `INSERT INTO admin_accounts (email, full_name, role, status, invitation_token_hash, invitation_expires_at, invited_by, parent_email)
+     VALUES ($1, $2, $3, 'invited', $4, NOW() + INTERVAL '48 hours', $5, $6)
      ON CONFLICT (email) DO UPDATE SET
        full_name = EXCLUDED.full_name,
        role = EXCLUDED.role,
        invitation_token_hash = EXCLUDED.invitation_token_hash,
        invitation_expires_at = EXCLUDED.invitation_expires_at,
        invited_by = EXCLUDED.invited_by,
+       parent_email = EXCLUDED.parent_email,
        updated_at = NOW()
      WHERE admin_accounts.status = 'invited' AND admin_accounts.invitation_expires_at <= NOW()
      RETURNING email`,
-    [email.toLowerCase(), fullName, role, hashToken(token), invitedBy],
+    [email.toLowerCase(), fullName, role, hashToken(token), invitedBy, parentEmail ?? null],
   );
   if (!rows[0]) throw new Error("An active, unexpired, or previously accepted admin invitation already exists for this email.");
   return { ...rows[0], token };
@@ -347,6 +424,175 @@ export const setAdminAccountStatus = async (email: string, status: "active" | "d
     [email.toLowerCase(), status],
   );
   if (rowCount) await pool.query(`UPDATE admin_sessions SET revoked_at = NOW() WHERE admin_id = $1 AND revoked_at IS NULL`, [email.toLowerCase()]);
+  return (rowCount ?? 0) > 0;
+};
+
+export type PartnerRole = Extract<AdminRole, "partner" | "agent">;
+
+// Owner-only overview. Partners see their direct customers plus customers of their agents.
+export const listPartnerAccounts = async () => {
+  const { rows } = await pool.query<{
+    email: string; full_name: string; role: PartnerRole; status: string; parent_email: string | null;
+    created_at: string; assigned_customers: string; completed_reports: string; agent_count: string;
+    pending_paise: string; paid_paise: string; payout_ready: boolean;
+  }>(`
+    SELECT a.email, a.full_name, a.role, a.status, a.parent_email, a.created_at,
+      (SELECT COUNT(*) FROM customer_assignments ca WHERE ca.owner_email = a.email) AS assigned_customers,
+      (SELECT COUNT(DISTINCT r.id) FROM customer_assignments ca
+         JOIN credit_report_requests r ON r.user_id = ca.user_id AND r.payment_id IS NOT NULL AND r.status = 'completed'
+       WHERE ca.owner_email = a.email) AS completed_reports,
+      (SELECT COUNT(*) FROM admin_accounts c WHERE c.parent_email = a.email AND c.role = 'agent') AS agent_count,
+      (SELECT COALESCE(SUM(pc.amount_paise), 0) FROM partner_commissions pc WHERE pc.payee_email = a.email AND pc.status = 'pending') AS pending_paise,
+      (SELECT COALESCE(SUM(pc.amount_paise), 0) FROM partner_commissions pc WHERE pc.payee_email = a.email AND pc.status = 'paid') AS paid_paise,
+      EXISTS (SELECT 1 FROM partner_payout_profiles p WHERE p.email = a.email AND (p.upi_id IS NOT NULL OR (p.bank_account_number IS NOT NULL AND p.ifsc IS NOT NULL))) AS payout_ready
+    FROM admin_accounts a
+    WHERE a.role IN ('partner', 'agent')
+    ORDER BY a.role, a.created_at DESC
+  `);
+  return rows;
+};
+
+// Role is always taken from the verified admin session or owner-selected account, never from request input.
+const portalOwnerScope = (role: PartnerRole) => role === "partner"
+  ? `(ca.owner_email = $1 OR ca.owner_email IN (SELECT email FROM admin_accounts WHERE parent_email = $1 AND role = 'agent'))`
+  : `ca.owner_email = $1`;
+
+export const getPortalCustomers = async (email: string, role: PartnerRole) => {
+  const { rows } = await pool.query<{
+    id: string; full_name: string; owner_email: string; assigned_at: string; created_at: string;
+    latest_report_status: string | null; paid: boolean;
+  }>(`
+    SELECT u.id, ${CUSTOMER_DISPLAY_NAME} AS full_name, ca.owner_email, ca.created_at AS assigned_at, u.created_at,
+      (SELECT r.status FROM credit_report_requests r WHERE r.user_id = u.id AND r.payment_id IS NOT NULL
+       ORDER BY r.requested_at DESC LIMIT 1) AS latest_report_status,
+      EXISTS (SELECT 1 FROM payments p WHERE p.user_id = u.id AND p.status = 'paid') AS paid
+    FROM customer_assignments ca
+    JOIN users u ON u.id = ca.user_id
+    LEFT JOIN kyc_profiles k ON k.user_id = u.id
+    WHERE ${portalOwnerScope(role)}
+    ORDER BY ca.created_at DESC
+    LIMIT 200
+  `, [email.toLowerCase()]);
+  return rows;
+};
+
+export const getPortalEarnings = async (email: string) => {
+  const { rows } = await pool.query<{ pending_paise: string; paid_paise: string }>(
+    `SELECT COALESCE(SUM(amount_paise) FILTER (WHERE status = 'pending'), 0) AS pending_paise,
+            COALESCE(SUM(amount_paise) FILTER (WHERE status = 'paid'), 0) AS paid_paise
+     FROM partner_commissions WHERE payee_email = $1`,
+    [email.toLowerCase()],
+  );
+  return rows[0];
+};
+
+export const listCommissions = async (payeeEmail?: string) => {
+  const { rows } = await pool.query<{
+    id: string; payee_email: string; user_id: string | null; amount_paise: number; status: string;
+    note: string | null; created_by: string; created_at: string; paid_at: string | null; razorpay_payout_id: string | null;
+  }>(
+    `SELECT id, payee_email, user_id, amount_paise, status, note, created_by, created_at, paid_at, razorpay_payout_id
+     FROM partner_commissions WHERE ($1::text IS NULL OR payee_email = $1)
+     ORDER BY created_at DESC LIMIT 200`,
+    [payeeEmail?.toLowerCase() ?? null],
+  );
+  return rows;
+};
+
+export const createCommission = async ({
+  payeeEmail, userId, amountPaise, note, createdBy,
+}: { payeeEmail: string; userId: string | null; amountPaise: number; note: string | null; createdBy: string }) => {
+  const { rows } = await pool.query<{ id: string }>(
+    `INSERT INTO partner_commissions (payee_email, user_id, amount_paise, note, created_by)
+     SELECT a.email, $2, $3, $4, $5 FROM admin_accounts a
+     WHERE a.email = $1 AND a.role IN ('partner', 'agent') AND a.status = 'active'
+       AND ($2::uuid IS NULL OR EXISTS (SELECT 1 FROM users u WHERE u.id = $2 AND u.role = 'customer'))
+     RETURNING id`,
+    [payeeEmail.toLowerCase(), userId, amountPaise, note, createdBy],
+  );
+  return rows[0] ?? null;
+};
+
+export const markCommissionPaid = async (id: string) => {
+  const { rowCount } = await pool.query(
+    `UPDATE partner_commissions SET status = 'paid', paid_at = NOW() WHERE id = $1 AND status = 'pending'`,
+    [id],
+  );
+  return (rowCount ?? 0) > 0;
+};
+
+export type PayoutProfile = {
+  email: string; full_name: string; upi_id: string | null; bank_account_number: string | null; ifsc: string | null;
+  razorpay_contact_id: string | null; razorpay_vpa_fund_account_id: string | null; razorpay_bank_fund_account_id: string | null;
+  updated_at: string;
+};
+
+export const getPayoutProfile = async (email: string) => {
+  const { rows } = await pool.query<PayoutProfile>(`SELECT * FROM partner_payout_profiles WHERE email = $1`, [email.toLowerCase()]);
+  return rows[0] ?? null;
+};
+
+// Changing UPI or bank details clears the matching RazorpayX fund account so a new one is created on the next payout.
+export const savePayoutProfile = async ({ email, fullName, upiId, bankAccountNumber, ifsc }: {
+  email: string; fullName: string; upiId: string | null; bankAccountNumber: string | null; ifsc: string | null;
+}) => {
+  await pool.query(
+    `INSERT INTO partner_payout_profiles (email, full_name, upi_id, bank_account_number, ifsc)
+     VALUES ($1, $2, $3, $4, $5)
+     ON CONFLICT (email) DO UPDATE SET
+       full_name = EXCLUDED.full_name,
+       razorpay_vpa_fund_account_id = CASE WHEN partner_payout_profiles.upi_id IS DISTINCT FROM EXCLUDED.upi_id
+         THEN NULL ELSE partner_payout_profiles.razorpay_vpa_fund_account_id END,
+       razorpay_bank_fund_account_id = CASE WHEN partner_payout_profiles.bank_account_number IS DISTINCT FROM EXCLUDED.bank_account_number
+         OR partner_payout_profiles.ifsc IS DISTINCT FROM EXCLUDED.ifsc THEN NULL ELSE partner_payout_profiles.razorpay_bank_fund_account_id END,
+       upi_id = EXCLUDED.upi_id,
+       bank_account_number = EXCLUDED.bank_account_number,
+       ifsc = EXCLUDED.ifsc,
+       updated_at = NOW()`,
+    [email.toLowerCase(), fullName, upiId, bankAccountNumber, ifsc],
+  );
+};
+
+export const setPayoutRazorpayIds = async (email: string, ids: { contactId?: string; vpaFundAccountId?: string; bankFundAccountId?: string }) => {
+  await pool.query(
+    `UPDATE partner_payout_profiles SET
+       razorpay_contact_id = COALESCE($2, razorpay_contact_id),
+       razorpay_vpa_fund_account_id = COALESCE($3, razorpay_vpa_fund_account_id),
+       razorpay_bank_fund_account_id = COALESCE($4, razorpay_bank_fund_account_id)
+     WHERE email = $1`,
+    [email.toLowerCase(), ids.contactId ?? null, ids.vpaFundAccountId ?? null, ids.bankFundAccountId ?? null],
+  );
+};
+
+export const getPendingCommissions = async (email: string) => {
+  const { rows } = await pool.query<{ id: string; amount_paise: number }>(
+    `SELECT id, amount_paise FROM partner_commissions WHERE payee_email = $1 AND status = 'pending' ORDER BY created_at`,
+    [email.toLowerCase()],
+  );
+  return rows;
+};
+
+export const markCommissionsPaidWithPayout = async (ids: string[], payoutId: string) => {
+  await pool.query(
+    `UPDATE partner_commissions SET status = 'paid', paid_at = NOW(), razorpay_payout_id = $2
+     WHERE id = ANY($1::uuid[]) AND status = 'pending'`,
+    [ids, payoutId],
+  );
+};
+
+export const assignCustomerToOwner = async ({ userId, ownerEmail, assignedBy }: { userId: string; ownerEmail: string; assignedBy: string }) => {
+  const { rowCount } = await pool.query(
+    `INSERT INTO customer_assignments (user_id, owner_email, assigned_by)
+     SELECT u.id, a.email, $3 FROM users u, admin_accounts a
+     WHERE u.id = $1 AND u.role = 'customer' AND a.email = $2 AND a.role IN ('partner', 'agent') AND a.status = 'active'
+     ON CONFLICT (user_id) DO UPDATE SET owner_email = EXCLUDED.owner_email, assigned_by = EXCLUDED.assigned_by, created_at = NOW()`,
+    [userId, ownerEmail.toLowerCase(), assignedBy],
+  );
+  return (rowCount ?? 0) > 0;
+};
+
+export const unassignCustomer = async (userId: string) => {
+  const { rowCount } = await pool.query(`DELETE FROM customer_assignments WHERE user_id = $1`, [userId]);
   return (rowCount ?? 0) > 0;
 };
 
@@ -1848,4 +2094,174 @@ export const getUserSubscriptions = async (userId: string) => {
   const active = items.find((item) => item.status === "active") ?? null;
   const lastExpiry = items.reduce((max, item) => (item.status !== "expired" && item.expiresAt > max ? item.expiresAt : max), "");
   return { current: active, validUntil: lastExpiry || null, history: items };
+};
+
+export const CRM_STAGES = ["new", "contacted", "interested", "paid", "closed"] as const;
+export type CrmStage = (typeof CRM_STAGES)[number];
+export const CRM_ACTIVITY_KINDS = ["note", "call", "whatsapp", "email"] as const;
+export type CrmActivityKind = (typeof CRM_ACTIVITY_KINDS)[number];
+
+const crmCustomerFrom = `
+  FROM users u
+  LEFT JOIN kyc_profiles k ON k.user_id = u.id
+  LEFT JOIN crm_customer_profiles p ON p.user_id = u.id`;
+
+export const listCrmCustomers = async ({
+  q, stage, tag, page, pageSize,
+}: { q: string; stage: CrmStage | null; tag: string | null; page: number; pageSize: number }) => {
+  const values: unknown[] = [];
+  const conditions = ["TRUE"];
+  if (q) {
+    values.push(`%${q}%`);
+    conditions.push(`(${CUSTOMER_DISPLAY_NAME} ILIKE $${values.length} OR u.email ILIKE $${values.length} OR u.mobile LIKE $${values.length})`);
+  }
+  if (stage) {
+    values.push(stage);
+    conditions.push(`COALESCE(p.stage, 'new') = $${values.length}`);
+  }
+  if (tag) {
+    values.push(tag);
+    conditions.push(`$${values.length} = ANY(COALESCE(p.tags, '{}'))`);
+  }
+  const where = conditions.join(" AND ");
+  const [rows, count] = await Promise.all([
+    pool.query<{
+      id: string; name: string; email: string | null; mobile: string | null; created_at: string;
+      stage: CrmStage; tags: string[]; last_activity_at: string | null; open_tasks: string;
+    }>(
+      `SELECT u.id, ${CUSTOMER_DISPLAY_NAME} AS name, u.email, u.mobile, u.created_at,
+              COALESCE(p.stage, 'new') AS stage, COALESCE(p.tags, '{}') AS tags,
+              (SELECT MAX(a.created_at) FROM crm_activities a WHERE a.user_id = u.id) AS last_activity_at,
+              (SELECT COUNT(*) FROM crm_tasks t WHERE t.user_id = u.id AND t.status = 'open') AS open_tasks
+       ${crmCustomerFrom}
+       WHERE ${where}
+       ORDER BY u.created_at DESC
+       LIMIT $${values.length + 1} OFFSET $${values.length + 2}`,
+      [...values, pageSize, (page - 1) * pageSize],
+    ),
+    pool.query<{ count: string }>(`SELECT COUNT(*) AS count ${crmCustomerFrom} WHERE ${where}`, values),
+  ]);
+  return {
+    total: Number(count.rows[0]?.count ?? 0),
+    customers: rows.rows.map((row) => ({ ...row, open_tasks: Number(row.open_tasks) })),
+  };
+};
+
+export const getCrmPipeline = async () => {
+  const { rows } = await pool.query<{ stage: CrmStage; count: string }>(
+    `SELECT COALESCE(p.stage, 'new') AS stage, COUNT(*) AS count
+     FROM users u LEFT JOIN crm_customer_profiles p ON p.user_id = u.id
+     GROUP BY 1`,
+  );
+  const counts = Object.fromEntries(CRM_STAGES.map((stage) => [stage, 0])) as Record<CrmStage, number>;
+  for (const row of rows) counts[row.stage] = Number(row.count);
+  return counts;
+};
+
+export const getCrmTimeline = async (userId: string) => {
+  const [profile, activities, payments, reports, tasks] = await Promise.all([
+    pool.query<{ stage: CrmStage; tags: string[]; updated_by: string | null; updated_at: string | null }>(
+      `SELECT stage, tags, updated_by, updated_at FROM crm_customer_profiles WHERE user_id = $1`,
+      [userId],
+    ),
+    pool.query(
+      `SELECT id, kind, body, created_by, created_at FROM crm_activities WHERE user_id = $1 ORDER BY created_at DESC LIMIT 100`,
+      [userId],
+    ),
+    pool.query(
+      `SELECT id, plan_name, amount, status, failure_reason, created_at FROM payments WHERE user_id = $1 ORDER BY created_at DESC LIMIT 20`,
+      [userId],
+    ),
+    pool.query(
+      `SELECT id, bureau, status, requested_at FROM credit_report_requests
+       WHERE user_id = $1 AND payment_id IS NOT NULL ORDER BY requested_at DESC LIMIT 20`,
+      [userId],
+    ),
+    pool.query(
+      `SELECT id, title, due_at, assignee_email, status, created_by, created_at, completed_at
+       FROM crm_tasks WHERE user_id = $1 ORDER BY status ASC, due_at ASC NULLS LAST, created_at DESC LIMIT 100`,
+      [userId],
+    ),
+  ]);
+  return {
+    profile: profile.rows[0] ?? { stage: "new" as CrmStage, tags: [], updated_by: null, updated_at: null },
+    activities: activities.rows,
+    payments: payments.rows,
+    reports: reports.rows,
+    tasks: tasks.rows,
+  };
+};
+
+export const updateCrmProfile = async (
+  userId: string,
+  changes: { stage?: CrmStage; tags?: string[] },
+  adminId: string,
+) => {
+  await pool.query(
+    `INSERT INTO crm_customer_profiles (user_id, stage, tags, updated_by, updated_at)
+     VALUES ($1, COALESCE($2::text, 'new'), COALESCE($3::text[], '{}'), $4, NOW())
+     ON CONFLICT (user_id) DO UPDATE SET
+       stage = COALESCE($2::text, crm_customer_profiles.stage),
+       tags = COALESCE($3::text[], crm_customer_profiles.tags),
+       updated_by = $4,
+       updated_at = NOW()`,
+    [userId, changes.stage ?? null, changes.tags ?? null, adminId],
+  );
+};
+
+export const addCrmActivity = async ({
+  userId, kind, body, createdBy,
+}: { userId: string; kind: CrmActivityKind; body: string; createdBy: string }) => {
+  const { rows } = await pool.query(
+    `INSERT INTO crm_activities (user_id, kind, body, created_by) VALUES ($1, $2, $3, $4)
+     RETURNING id, kind, body, created_by, created_at`,
+    [userId, kind, body, createdBy],
+  );
+  return rows[0];
+};
+
+export const createCrmTask = async ({
+  userId, title, dueAt, assigneeEmail, createdBy,
+}: { userId: string; title: string; dueAt: string | null; assigneeEmail: string | null; createdBy: string }) => {
+  const { rows } = await pool.query(
+    `INSERT INTO crm_tasks (user_id, title, due_at, assignee_email, created_by)
+     VALUES ($1, $2, $3, $4, $5)
+     RETURNING id, title, due_at, assignee_email, status, created_by, created_at, completed_at`,
+    [userId, title, dueAt, assigneeEmail, createdBy],
+  );
+  return rows[0];
+};
+
+export const setCrmTaskStatus = async (taskId: number, status: "open" | "done") => {
+  const { rows } = await pool.query<{ id: string }>(
+    `UPDATE crm_tasks SET status = $2::text, completed_at = CASE WHEN $2::text = 'done' THEN NOW() ELSE NULL END
+     WHERE id = $1 RETURNING id`,
+    [taskId, status],
+  );
+  return rows[0] ?? null;
+};
+
+export const listOpenCrmTasks = async () => {
+  const { rows } = await pool.query(
+    `SELECT t.id, t.user_id, t.title, t.due_at, t.assignee_email, t.created_by, t.created_at, ${CUSTOMER_DISPLAY_NAME} AS customer_name, u.mobile
+     FROM crm_tasks t
+     JOIN users u ON u.id = t.user_id
+     LEFT JOIN kyc_profiles k ON k.user_id = u.id
+     WHERE t.status = 'open'
+     ORDER BY t.due_at ASC NULLS LAST, t.created_at ASC
+     LIMIT 200`,
+  );
+  return rows;
+};
+
+export const getCrmExportRows = async () => {
+  const { rows } = await pool.query(
+    `SELECT ${CUSTOMER_DISPLAY_NAME} AS name, u.email, u.mobile, u.created_at,
+            COALESCE(p.stage, 'new') AS stage, array_to_string(COALESCE(p.tags, '{}'), ' | ') AS tags,
+            (SELECT COUNT(*) FROM payments pay WHERE pay.user_id = u.id AND pay.status = 'paid') AS paid_payments,
+            (SELECT COUNT(*) FROM crm_tasks t WHERE t.user_id = u.id AND t.status = 'open') AS open_tasks
+     ${crmCustomerFrom}
+     ORDER BY u.created_at DESC`,
+  );
+  return rows;
 };
