@@ -265,6 +265,39 @@ export const initializeDatabase = async () => {
     )
   `);
   await pool.query(`CREATE INDEX IF NOT EXISTS crm_tasks_open_due_idx ON crm_tasks (status, due_at)`);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS health_assessment_requests (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      full_name TEXT NOT NULL,
+      mobile TEXT NOT NULL,
+      email TEXT,
+      request_type TEXT NOT NULL DEFAULT 'personal' CHECK (request_type IN ('personal', 'business')),
+      description TEXT,
+      status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'reviewed', 'closed')),
+      submitted_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      reviewed_at TIMESTAMPTZ,
+      reviewed_by TEXT
+    )
+  `);
+  await pool.query(`CREATE INDEX IF NOT EXISTS health_assessment_requests_user_idx ON health_assessment_requests (user_id, submitted_at DESC)`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS health_assessment_requests_status_idx ON health_assessment_requests (status, submitted_at DESC)`);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS testimonials (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      customer_name TEXT NOT NULL,
+      customer_image_url TEXT,
+      rating INTEGER NOT NULL CHECK (rating >= 1 AND rating <= 5),
+      review_text TEXT NOT NULL,
+      result_description TEXT,
+      published BOOLEAN NOT NULL DEFAULT false,
+      submitted_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      published_at TIMESTAMPTZ
+    )
+  `);
+  await pool.query(`CREATE INDEX IF NOT EXISTS testimonials_published_idx ON testimonials (published, published_at DESC)`);
 };
 
 // Customers often keep the placeholder account name; prefer the name on their PAN profile when present.
@@ -2264,4 +2297,100 @@ export const getCrmExportRows = async () => {
      ORDER BY u.created_at DESC`,
   );
   return rows;
+};
+
+// Health Assessment Requests
+export const submitHealthAssessmentRequest = async ({
+  userId, fullName, mobile, email, requestType, description,
+}: { userId: string; fullName: string; mobile: string; email?: string; requestType: 'personal' | 'business'; description?: string }) => {
+  const { rows } = await pool.query(
+    `INSERT INTO health_assessment_requests (user_id, full_name, mobile, email, request_type, description)
+     VALUES ($1, $2, $3, $4, $5, $6)
+     RETURNING id, user_id, full_name, mobile, email, request_type, description, status, submitted_at, reviewed_at, reviewed_by`,
+    [userId, fullName, mobile, email ?? null, requestType, description ?? null],
+  );
+  return rows[0];
+};
+
+export const listHealthAssessmentRequests = async (filters?: { status?: string; limit?: number; offset?: number }) => {
+  const limit = filters?.limit ?? 50;
+  const offset = filters?.offset ?? 0;
+  const statusFilter = filters?.status ? `WHERE status = $1` : '';
+  const params = filters?.status ? [filters.status, limit, offset] : [limit, offset];
+  
+  const { rows } = await pool.query(
+    `SELECT h.id, h.user_id, h.full_name, h.mobile, h.email, h.request_type, h.description, h.status, 
+            h.submitted_at, h.reviewed_at, h.reviewed_by, ${CUSTOMER_DISPLAY_NAME} AS customer_name
+     FROM health_assessment_requests h
+     LEFT JOIN users u ON u.id = h.user_id
+     LEFT JOIN kyc_profiles k ON k.user_id = u.id
+     ${statusFilter}
+     ORDER BY h.submitted_at DESC
+     LIMIT $${statusFilter ? 3 : 1} OFFSET $${statusFilter ? 4 : 2}`,
+    params,
+  );
+  return rows;
+};
+
+export const getHealthAssessmentRequest = async (requestId: string) => {
+  const { rows } = await pool.query(
+    `SELECT h.id, h.user_id, h.full_name, h.mobile, h.email, h.request_type, h.description, h.status, 
+            h.submitted_at, h.reviewed_at, h.reviewed_by, ${CUSTOMER_DISPLAY_NAME} AS customer_name
+     FROM health_assessment_requests h
+     LEFT JOIN users u ON u.id = h.user_id
+     LEFT JOIN kyc_profiles k ON k.user_id = u.id
+     WHERE h.id = $1`,
+    [requestId],
+  );
+  return rows[0] ?? null;
+};
+
+export const updateHealthAssessmentStatus = async (requestId: string, status: 'pending' | 'reviewed' | 'closed', reviewedBy?: string) => {
+  const { rows } = await pool.query(
+    `UPDATE health_assessment_requests
+     SET status = $2, reviewed_at = NOW(), reviewed_by = $3
+     WHERE id = $1
+     RETURNING id, user_id, full_name, mobile, email, request_type, description, status, submitted_at, reviewed_at, reviewed_by`,
+    [requestId, status, reviewedBy ?? null],
+  );
+  return rows[0] ?? null;
+};
+
+// Testimonials
+export const submitTestimonial = async ({
+  customerName, customerImageUrl, rating, reviewText, resultDescription,
+}: { customerName: string; customerImageUrl?: string; rating: number; reviewText: string; resultDescription?: string }) => {
+  const { rows } = await pool.query(
+    `INSERT INTO testimonials (customer_name, customer_image_url, rating, review_text, result_description)
+     VALUES ($1, $2, $3, $4, $5)
+     RETURNING id, customer_name, customer_image_url, rating, review_text, result_description, published, submitted_at, published_at`,
+    [customerName, customerImageUrl ?? null, rating, reviewText, resultDescription ?? null],
+  );
+  return rows[0];
+};
+
+export const listTestimonials = async (publishedOnly = true) => {
+  const { rows } = await pool.query(
+    `SELECT id, customer_name, customer_image_url, rating, review_text, result_description, published, submitted_at, published_at
+     FROM testimonials
+     ${publishedOnly ? 'WHERE published = true' : ''}
+     ORDER BY published_at DESC NULLS LAST, submitted_at DESC
+     LIMIT 100`,
+  );
+  return rows;
+};
+
+export const publishTestimonial = async (testimonialId: string) => {
+  const { rows } = await pool.query(
+    `UPDATE testimonials
+     SET published = true, published_at = NOW()
+     WHERE id = $1
+     RETURNING id, customer_name, customer_image_url, rating, review_text, result_description, published, submitted_at, published_at`,
+    [testimonialId],
+  );
+  return rows[0] ?? null;
+};
+
+export const deleteTestimonial = async (testimonialId: string) => {
+  await pool.query(`DELETE FROM testimonials WHERE id = $1`, [testimonialId]);
 };

@@ -114,6 +114,14 @@ import {
   updateCrmProfile,
   type CrmActivityKind,
   type CrmStage,
+  submitHealthAssessmentRequest,
+  listHealthAssessmentRequests,
+  getHealthAssessmentRequest,
+  updateHealthAssessmentStatus,
+  submitTestimonial,
+  listTestimonials,
+  publishTestimonial,
+  deleteTestimonial,
 } from "./database.js";
 import { SUBSCRIPTION_PLANS, findSubscriptionPlan, gstIncluded } from "./subscriptions.js";
 import { generateReportPdf } from "./reportPdf.js";
@@ -2135,6 +2143,161 @@ app.use((error: Error, _request: express.Request, response: express.Response, _n
     return;
   }
   response.status(400).json({ message: error.message || "Invalid assessment submission." });
+});
+
+// Health Assessment Requests
+app.post("/api/health-assessment-requests", requireUser, async (request, response) => {
+  try {
+    const { fullName, mobile, email, requestType, description } = request.body;
+    if (!fullName || !mobile) {
+      response.status(400).json({ message: "Full name and mobile are required." });
+      return;
+    }
+    
+    const user = sessionUser(response);
+    const result = await submitHealthAssessmentRequest({
+      userId: user.id,
+      fullName: String(fullName).trim(),
+      mobile: String(mobile).replace(/\D/g, ""),
+      email: email ? String(email).trim() : undefined,
+      requestType: (requestType === "business" ? "business" : "personal") as "personal" | "business",
+      description: description ? String(description).trim() : undefined,
+    });
+    
+    response.status(201).json(result);
+  } catch (error) {
+    console.error("Health assessment request save failed", error);
+    response.status(500).json({ message: "Failed to submit health assessment request." });
+  }
+});
+
+app.get("/api/health-assessment-requests", requireUser, async (_request, response) => {
+  try {
+    const requests = await listHealthAssessmentRequests({ limit: 50 });
+    response.json(requests);
+  } catch (error) {
+    console.error("Failed to fetch health assessment requests", error);
+    response.status(500).json({ message: "Failed to fetch health assessment requests." });
+  }
+});
+
+app.get("/api/admin/health-assessment-requests", requireAdmin, requireAdminRoles("owner", "manager", "support"), async (request, response) => {
+  try {
+    const status = String(request.query.status || "");
+    const limit = Math.min(parseInt(String(request.query.limit || 50)), 200);
+    const offset = parseInt(String(request.query.offset || 0));
+    
+    const requests = await listHealthAssessmentRequests({
+      status: status || undefined,
+      limit,
+      offset,
+    });
+    response.json(requests);
+  } catch (error) {
+    console.error("Failed to fetch health assessment requests", error);
+    response.status(500).json({ message: "Failed to fetch health assessment requests." });
+  }
+});
+
+app.put("/api/admin/health-assessment-requests/:id/status", requireAdmin, requireAdminRoles("owner", "manager", "support"), async (request, response) => {
+  try {
+    const { status } = request.body;
+    if (!status || !["pending", "reviewed", "closed"].includes(status)) {
+      response.status(400).json({ message: "Valid status is required." });
+      return;
+    }
+    
+    const adminId = sessionAdminId(response);
+    const result = await updateHealthAssessmentStatus(
+      String(request.params.id),
+      status as "pending" | "reviewed" | "closed",
+      adminId,
+    );
+    
+    if (!result) {
+      response.status(404).json({ message: "Health assessment request not found." });
+      return;
+    }
+    
+    response.json(result);
+  } catch (error) {
+    console.error("Failed to update health assessment status", error);
+    response.status(500).json({ message: "Failed to update health assessment status." });
+  }
+});
+
+// Testimonials
+app.post("/api/testimonials", async (request, response) => {
+  try {
+    const { customerName, customerImageUrl, rating, reviewText, resultDescription } = request.body;
+    if (!customerName || !rating || !reviewText) {
+      response.status(400).json({ message: "Customer name, rating, and review text are required." });
+      return;
+    }
+    
+    if (rating < 1 || rating > 5) {
+      response.status(400).json({ message: "Rating must be between 1 and 5." });
+      return;
+    }
+    
+    const result = await submitTestimonial({
+      customerName: String(customerName).trim(),
+      customerImageUrl: customerImageUrl ? String(customerImageUrl).trim() : undefined,
+      rating: parseInt(String(rating)),
+      reviewText: String(reviewText).trim(),
+      resultDescription: resultDescription ? String(resultDescription).trim() : undefined,
+    });
+    
+    response.status(201).json(result);
+  } catch (error) {
+    console.error("Testimonial save failed", error);
+    response.status(500).json({ message: "Failed to submit testimonial." });
+  }
+});
+
+app.get("/api/testimonials", async (_request, response) => {
+  try {
+    const testimonials = await listTestimonials(true);
+    response.json(testimonials);
+  } catch (error) {
+    console.error("Failed to fetch testimonials", error);
+    response.status(500).json({ message: "Failed to fetch testimonials." });
+  }
+});
+
+app.get("/api/admin/testimonials", requireAdmin, requireAdminRoles("owner", "manager"), async (request, response) => {
+  try {
+    const publishedOnly = String(request.query.published || "false") === "true";
+    const testimonials = await listTestimonials(publishedOnly);
+    response.json(testimonials);
+  } catch (error) {
+    console.error("Failed to fetch testimonials", error);
+    response.status(500).json({ message: "Failed to fetch testimonials." });
+  }
+});
+
+app.put("/api/admin/testimonials/:id/publish", requireAdmin, requireAdminRoles("owner", "manager"), async (request, response) => {
+  try {
+    const result = await publishTestimonial(String(request.params.id));
+    if (!result) {
+      response.status(404).json({ message: "Testimonial not found." });
+      return;
+    }
+    response.json(result);
+  } catch (error) {
+    console.error("Failed to publish testimonial", error);
+    response.status(500).json({ message: "Failed to publish testimonial." });
+  }
+});
+
+app.delete("/api/admin/testimonials/:id", requireAdmin, requireAdminRoles("owner", "manager"), async (request, response) => {
+  try {
+    await deleteTestimonial(String(request.params.id));
+    response.json({ success: true });
+  } catch (error) {
+    console.error("Failed to delete testimonial", error);
+    response.status(500).json({ message: "Failed to delete testimonial." });
+  }
 });
 
 const startServer = async () => {
