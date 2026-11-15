@@ -85,6 +85,7 @@ flutter:
   assets:
     - assets/brand/
     - assets/banks/
+    - assets/icons-3d/
 
   fonts:
     - family: Manrope

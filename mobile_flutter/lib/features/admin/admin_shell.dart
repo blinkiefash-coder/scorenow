@@ -29,6 +29,20 @@ const _tabs = [
     roles: {'owner', 'manager'},
   ),
   _AdminTab(
+    path: '/admin/crm',
+    label: 'CRM',
+    icon: Icons.contact_mail_outlined,
+    activeIcon: Icons.contact_mail,
+    roles: {'owner', 'manager'},
+  ),
+  _AdminTab(
+    path: '/admin/partners',
+    label: 'Partners',
+    icon: Icons.handshake_outlined,
+    activeIcon: Icons.handshake,
+    roles: {'owner', 'manager'},
+  ),
+  _AdminTab(
     path: '/admin/customers',
     label: 'Customers',
     icon: Icons.people_outline,

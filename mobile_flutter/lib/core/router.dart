@@ -2,9 +2,11 @@ import 'package:go_router/go_router.dart';
 import 'package:scorenow_mobile/core/app_services.dart';
 import 'package:scorenow_mobile/features/admin/admin_account_screen.dart';
 import 'package:scorenow_mobile/features/admin/admin_analytics_screen.dart';
+import 'package:scorenow_mobile/features/admin/admin_crm_screen.dart';
 import 'package:scorenow_mobile/features/admin/admin_customers_screen.dart';
 import 'package:scorenow_mobile/features/admin/admin_login_screen.dart';
 import 'package:scorenow_mobile/features/admin/admin_overview_screen.dart';
+import 'package:scorenow_mobile/features/admin/admin_partner_screen.dart';
 import 'package:scorenow_mobile/features/admin/admin_shell.dart';
 import 'package:scorenow_mobile/features/admin/admin_ticket_screen.dart';
 import 'package:scorenow_mobile/features/admin/admin_tickets_screen.dart';
@@ -172,6 +174,14 @@ GoRouter createRouter(AppServices services) {
           GoRoute(
             path: '/admin',
             builder: (context, state) => const AdminOverviewScreen(),
+          ),
+          GoRoute(
+            path: '/admin/crm',
+            builder: (context, state) => const AdminCrmScreen(),
+          ),
+          GoRoute(
+            path: '/admin/partners',
+            builder: (context, state) => const AdminPartnerScreen(),
           ),
           GoRoute(
             path: '/admin/customers',
