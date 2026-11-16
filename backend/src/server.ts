@@ -2752,6 +2752,35 @@ app.get("/api/neha/agents", async (_request, response) => {
   }
 });
 
+app.get("/api/neha/stream/:conversationId", requireUser, (request, response) => {
+  const user = sessionUser(response);
+  const conversationId = String(request.params.conversationId);
+
+  // Set SSE headers
+  response.setHeader("Content-Type", "text/event-stream");
+  response.setHeader("Cache-Control", "no-cache");
+  response.setHeader("Connection", "keep-alive");
+  response.setHeader("Access-Control-Allow-Origin", "*");
+
+  const onNewMessage = (event: { conversationId: string; message?: any }) => {
+    if (event.conversationId === conversationId) {
+      response.write(`data: ${JSON.stringify(event.message)}\n\n`);
+    }
+  };
+
+  const onAgentStatus = (event: { agentId: string; status: string }) => {
+    response.write(`data: ${JSON.stringify({ type: "agent-status", agentId: event.agentId, status: event.status })}\n\n`);
+  };
+
+  partnerEvents.on(NEHA_MESSAGE_CHANNEL, onNewMessage);
+  partnerEvents.on(AGENT_STATUS_CHANNEL, onAgentStatus);
+
+  request.on("close", () => {
+    partnerEvents.off(NEHA_MESSAGE_CHANNEL, onNewMessage);
+    partnerEvents.off(AGENT_STATUS_CHANNEL, onAgentStatus);
+  });
+});
+
 app.post("/api/assessments", requireUser, upload.single("report"), async (request, response) => {
   const assessmentType = request.body.assessmentType === "business" ? "business" : "individual";
   const user = sessionUser(response);

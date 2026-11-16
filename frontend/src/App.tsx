@@ -1610,6 +1610,40 @@ function ChatAssistant({ requireLogin, isDashboard = false }: { requireLogin: Re
     return () => window.clearTimeout(timeoutId)
   }, [isOpen, step, messages])
 
+  // Subscribe to real-time messages when conversation is active
+  useEffect(() => {
+    if (!conversationId || step !== 4) return
+
+    const eventSource = new EventSource(`${apiUrl}/api/neha/stream/${conversationId}`)
+
+    eventSource.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data)
+        if (data.type === 'agent-status') {
+          // Handle agent status update (online/away/offline)
+        } else if (data.id && !messages.some(m => m.id === data.id)) {
+          // New message from agent/partner
+          setMessages(prev => [...prev, {
+            id: data.id,
+            sender: data.sender_name,
+            senderType: data.sender_type,
+            message: data.message,
+            createdAt: data.created_at,
+          }])
+        }
+      } catch (e) {
+        console.error('Failed to parse message', e)
+      }
+    }
+
+    eventSource.onerror = () => {
+      console.error('Stream connection failed')
+      eventSource.close()
+    }
+
+    return () => eventSource.close()
+  }, [conversationId, step, messages])
+
   return (
     <aside className={`chat-assistant${isOpen ? ' open' : ''}${isDashboard ? ' dashboard-assistant' : ''}`} aria-label="Scorenow chat assistant">
       {isOpen && (
