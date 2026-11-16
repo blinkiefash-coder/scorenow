@@ -12,7 +12,7 @@ import { CrmManagement } from './AdminCrm'
 import { AdminSiteContent } from './AdminSiteContent'
 import { AdminTestimonials } from './AdminTestimonials'
 import { AdminOpsPanel, AdminSessionExpiryBanner, CannedReplyPicker, CustomerPaymentsPanel, CustomerPrivacyPanel } from './AccountOps'
-import { AdminHealthAssessmentManagement, HealthAssessmentForm, LoginWelcomePopup, TestimonialsSection } from './WebFeatures'
+import { AdminHealthAssessmentManagement, HealthAssessmentForm, TestimonialsSection } from './WebFeatures'
 import {
   DEFAULT_REPORT_PRICE, effectiveBusinessPrices, effectiveFdPlans, effectiveServicePlans, effectiveSubscriptionPlans,
   formatRupees, formatSubscriptionDuration, useSiteContent,
@@ -405,8 +405,6 @@ function useLoginGate({ redirectAfterLogin, promptOnScroll = true }: { redirectA
   const [authOpen, setAuthOpen] = useScrollAuthPrompt(promptOnScroll)
   const { user, login, logout } = useAuthUser()
   const [authNotice, setAuthNotice] = useState('')
-  // Survives the redirect after login so the welcome shows once on the next page, then clears.
-  const [welcomeName, setWelcomeName] = useState<string | null>(() => sessionStorage.getItem('scorenow-welcome'))
   const pendingActionRef = useRef<((user: AuthUser) => void) | null>(null)
 
   const requireLogin: RequireLogin = (notice, action) => {
@@ -433,23 +431,14 @@ function useLoginGate({ redirectAfterLogin, promptOnScroll = true }: { redirectA
 
   const handleLogin = (nextUser: AuthUser) => {
     login(nextUser)
-    const firstName = nextUser.full_name.trim().split(' ')[0] || 'there'
-    sessionStorage.setItem('scorenow-welcome', firstName)
-    setWelcomeName(firstName)
     const action = pendingActionRef.current
     pendingActionRef.current = null
     if (action) action(nextUser)
     else if (redirectAfterLogin) window.location.href = redirectAfterLogin
   }
 
-  const closeWelcome = () => {
-    sessionStorage.removeItem('scorenow-welcome')
-    setWelcomeName(null)
-  }
-
   const authModal = <>
     <AuthModal open={authOpen} notice={authNotice} onClose={closeAuth} onSuccess={handleLogin} />
-    {welcomeName && <LoginWelcomePopup userName={welcomeName} token={user?.token} onClose={closeWelcome} />}
   </>
 
   return { user, logout, requireLogin, openAuth, authModal }
