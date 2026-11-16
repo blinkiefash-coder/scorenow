@@ -448,7 +448,7 @@ function useLoginGate({ redirectAfterLogin, promptOnScroll = true }: { redirectA
 
   const authModal = <>
     <AuthModal open={authOpen} notice={authNotice} onClose={closeAuth} onSuccess={handleLogin} />
-    {welcomeName && <LoginWelcomePopup userName={welcomeName} onClose={closeWelcome} />}
+    {welcomeName && <LoginWelcomePopup userName={welcomeName} token={user?.token} onClose={closeWelcome} />}
   </>
 
   return { user, logout, requireLogin, openAuth, authModal }

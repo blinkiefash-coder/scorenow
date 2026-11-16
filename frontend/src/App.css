@@ -3800,22 +3800,6 @@ button.admin-attention-item:hover { transform: translateY(-1px); box-shadow: 0 6
   text-align: center;
 }
 
-.welcome-icon {
-  width: 60px;
-  height: 60px;
-  background: #e6f3ff;
-  border-radius: 50%;
-  display: grid;
-  place-items: center;
-  margin: 0 auto 16px;
-  color: var(--blue);
-}
-
-.welcome-icon svg {
-  width: 32px;
-  height: 32px;
-}
-
 .modal-dialog h2 {
   margin: 0 0 8px;
   font-size: 24px;
@@ -3829,40 +3813,138 @@ button.admin-attention-item:hover { transform: translateY(-1px); box-shadow: 0 6
   line-height: 1.6;
 }
 
-.welcome-features {
-  display: grid;
-  grid-template-columns: 1fr;
-  gap: 16px;
-  margin: 28px 0 28px;
-  text-align: left;
-}
-
-.welcome-feature {
-  padding: 16px;
-  background: #f6f9fd;
-  border-radius: 12px;
-  display: grid;
-  grid-template-columns: 40px 1fr;
-  gap: 12px;
-  align-items: start;
-}
-
 .feature-icon {
   font-size: 24px;
   line-height: 1;
 }
 
-.welcome-feature h3 {
-  margin: 0 0 4px;
-  font-size: 13px;
-  color: var(--navy);
+.welcome-popup .modal-content {
+  padding: 36px 32px 32px;
 }
 
-.welcome-feature p {
-  margin: 0;
-  font-size: 11px;
-  color: var(--muted);
-  line-height: 1.5;
+.welcome-stage {
+  position: relative;
+  width: 170px;
+  height: 170px;
+  margin: 0 auto 4px;
+}
+
+.welcome-character {
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+
+.welcome-bob {
+  animation: welcome-bob 2.6s ease-in-out infinite;
+}
+
+.welcome-antenna {
+  animation: welcome-twinkle 1.6s ease-in-out infinite;
+}
+
+.welcome-eye {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: welcome-blink 4s infinite;
+}
+
+.welcome-wave {
+  transform-box: view-box;
+  transform-origin: 124px 100px;
+  animation: welcome-wave 1.1s ease-in-out 0.5s 3;
+}
+
+.welcome-sparkle {
+  position: absolute;
+  color: #ffb84d;
+  font-size: 18px;
+  line-height: 1;
+  animation: welcome-twinkle 1.8s ease-in-out infinite;
+}
+
+.sparkle-1 { top: 6px; left: 8px; }
+.sparkle-2 { top: 30px; right: 4px; font-size: 13px; animation-delay: 0.6s; }
+.sparkle-3 { bottom: 24px; left: 2px; font-size: 14px; animation-delay: 1.2s; }
+
+.welcome-bubble {
+  position: relative;
+  display: inline-block;
+  margin: 6px 0 14px;
+  padding: 10px 18px;
+  background: #2f6fdb;
+  color: white;
+  border-radius: 18px;
+  font-family: 'Sora Variable', sans-serif;
+  font-size: 18px;
+  font-weight: 700;
+  animation: welcome-pop 0.5s cubic-bezier(0.2, 1.4, 0.4, 1) 0.3s both;
+}
+
+.welcome-bubble::after {
+  content: '';
+  position: absolute;
+  bottom: -6px;
+  left: 50%;
+  width: 14px;
+  height: 14px;
+  background: #2f6fdb;
+  transform: translateX(-50%) rotate(45deg);
+  border-radius: 2px;
+}
+
+.welcome-pan-name {
+  margin: -2px 0 14px !important;
+  font-size: 12px !important;
+  color: var(--navy) !important;
+}
+
+.welcome-hello h2 {
+  animation: welcome-rise 0.5s ease-out 0.45s both;
+}
+
+.welcome-hello > p,
+.welcome-hello > .button {
+  animation: welcome-rise 0.5s ease-out 0.6s both;
+}
+
+@keyframes welcome-bob {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-6px); }
+}
+
+@keyframes welcome-wave {
+  0%, 100% { transform: rotate(0deg); }
+  25% { transform: rotate(14deg); }
+  50% { transform: rotate(-6deg); }
+  75% { transform: rotate(14deg); }
+}
+
+@keyframes welcome-blink {
+  0%, 46%, 50%, 100% { transform: scaleY(1); }
+  48% { transform: scaleY(0.1); }
+}
+
+@keyframes welcome-twinkle {
+  0%, 100% { opacity: 0.25; transform: scale(0.8); }
+  50% { opacity: 1; transform: scale(1.15); }
+}
+
+@keyframes welcome-pop {
+  from { opacity: 0; transform: scale(0.6); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+@keyframes welcome-rise {
+  from { opacity: 0; transform: translateY(12px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .welcome-popup,
+  .welcome-popup * {
+    animation: none !important;
+  }
 }
 
 .modal-dialog .button {

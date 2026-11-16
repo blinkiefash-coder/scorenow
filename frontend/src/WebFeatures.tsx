@@ -8,37 +8,64 @@ const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:3000'
 // ============================================================================
 export interface LoginWelcomePopupProps {
   userName?: string
+  token?: string
   onClose: () => void
 }
 
-export function LoginWelcomePopup({ userName = 'Customer', onClose }: LoginWelcomePopupProps) {
+export function LoginWelcomePopup({ userName = 'Customer', token, onClose }: LoginWelcomePopupProps) {
+  const [panName, setPanName] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (!token) return
+    let ignore = false
+    fetch(`${apiUrl}/api/dashboard`, { headers: { Authorization: `Bearer ${token}` } })
+      .then((response) => (response.ok ? response.json() : null))
+      .then((data) => {
+        const name = data?.profile?.name_as_per_pan?.trim()
+        if (!ignore && name) setPanName(name)
+      })
+      .catch(() => undefined)
+    return () => { ignore = true }
+  }, [token])
+
+  const displayName = panName ?? userName
+  const firstName = displayName.split(' ')[0] || 'there'
+
   return (
     <div className="modal-overlay" onClick={onClose}>
-      <div className="modal-dialog welcome-popup" onClick={(e) => e.stopPropagation()}>
+      <div className="modal-dialog welcome-popup" role="dialog" aria-modal="true" aria-label="Welcome" onClick={(e) => e.stopPropagation()}>
         <button className="modal-close" type="button" onClick={onClose} aria-label="Close"><X /></button>
-        <div className="modal-content">
-          <div className="welcome-icon"><Check /></div>
-          <h2>Welcome back, {userName}!</h2>
-          <p>Your account is ready and secure. You can now access your credit profile, reports, and personalized recommendations.</p>
-          <div className="welcome-features">
-            <div className="welcome-feature">
-              <span className="feature-icon">📊</span>
-              <h3>View Your Credit Profile</h3>
-              <p>Track your credit score and see what's helping or holding you back</p>
-            </div>
-            <div className="welcome-feature">
-              <span className="feature-icon">📄</span>
-              <h3>Access Your Reports</h3>
-              <p>Download your detailed credit reports from all major bureaus</p>
-            </div>
-            <div className="welcome-feature">
-              <span className="feature-icon">💡</span>
-              <h3>Get Personalized Guidance</h3>
-              <p>Follow expert tips tailored to improve your credit health</p>
-            </div>
+        <div className="modal-content welcome-hello">
+          <div className="welcome-stage" aria-hidden="true">
+            <span className="welcome-sparkle sparkle-1">✦</span>
+            <span className="welcome-sparkle sparkle-2">✦</span>
+            <span className="welcome-sparkle sparkle-3">✦</span>
+            <svg className="welcome-character" viewBox="0 0 160 160">
+              <g className="welcome-bob">
+                <line x1="80" y1="30" x2="80" y2="40" stroke="#1d4fa8" strokeWidth="4" strokeLinecap="round" />
+                <circle className="welcome-antenna" cx="80" cy="26" r="7" fill="#ffb84d" />
+                <rect x="36" y="40" width="88" height="80" rx="30" fill="#2f6fdb" />
+                <rect x="50" y="60" width="60" height="40" rx="18" fill="#e8f1ff" />
+                <circle className="welcome-eye" cx="67" cy="79" r="6" fill="#10234e" />
+                <circle className="welcome-eye" cx="93" cy="79" r="6" fill="#10234e" />
+                <path d="M72 89 Q80 96 88 89" stroke="#10234e" strokeWidth="3" fill="none" strokeLinecap="round" />
+                <circle cx="58" cy="91" r="4" fill="#ff8fab" opacity=".6" />
+                <circle cx="102" cy="91" r="4" fill="#ff8fab" opacity=".6" />
+                <rect x="54" y="116" width="52" height="24" rx="12" fill="#1d4fa8" />
+                <circle cx="40" cy="104" r="9" fill="#2f6fdb" />
+              </g>
+              <g className="welcome-wave">
+                <path d="M124 100 Q146 86 138 58" stroke="#2f6fdb" strokeWidth="13" strokeLinecap="round" fill="none" />
+                <circle cx="138" cy="50" r="10" fill="#ffd9b3" />
+              </g>
+            </svg>
           </div>
+          <div className="welcome-bubble">Hi, {firstName}! 👋</div>
+          <h2>Welcome to Scorenow</h2>
+          {panName && <p className="welcome-pan-name">Name as per PAN: <strong>{panName}</strong></p>}
+          <p>We're glad you're here. Let's take a look at your credit health together.</p>
           <button className="button button-primary" type="button" onClick={onClose}>
-            Get started <ArrowRight />
+            Let's go <ArrowRight />
           </button>
         </div>
       </div>
