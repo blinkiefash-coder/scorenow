@@ -1484,6 +1484,10 @@ function ChatAssistant({ requireLogin, isDashboard = false }: { requireLogin: Re
   const [phone, setPhone] = useState('')
   const [phoneError, setPhoneError] = useState('')
   const [isSavingInquiry, setIsSavingInquiry] = useState(false)
+  const [conversationId, setConversationId] = useState<string | null>(null)
+  const [messages, setMessages] = useState<Array<{ id: string; sender: string; senderType: string; message: string; createdAt: string }>>([])
+  const [messageInput, setMessageInput] = useState('')
+  const [isSendingMessage, setIsSendingMessage] = useState(false)
   const chatBodyRef = useRef<HTMLDivElement>(null)
 
   const suggestion = getChatSuggestion(concern, scoreRange)
@@ -1513,13 +1517,28 @@ function ChatAssistant({ requireLogin, isDashboard = false }: { requireLogin: Re
   const saveInquiry = async (currentUser: AuthUser) => {
     setIsSavingInquiry(true)
     try {
-      const response = await fetch(`${apiUrl}/api/inquiries`, {
+      // Save inquiry
+      const inquiryResponse = await fetch(`${apiUrl}/api/inquiries`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...authHeaders(currentUser) },
         body: JSON.stringify({ fullName: name, mobile: phoneDigits, concern, scoreRange }),
       })
-      const result = await response.json() as { message?: string }
-      if (!response.ok) throw new Error(result.message || 'Unable to save your callback request.')
+      const inquiryResult = await inquiryResponse.json() as { message?: string }
+      if (!inquiryResponse.ok) throw new Error(inquiryResult.message || 'Unable to save your callback request.')
+
+      // Start Neha conversation
+      const conversationResponse = await fetch(`${apiUrl}/api/neha/start-conversation`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...authHeaders(currentUser) },
+      })
+      const conversationResult = await conversationResponse.json() as { conversation?: { id: string } }
+      if (!conversationResponse.ok) throw new Error(conversationResult.conversation?.id ? 'Conversation started' : 'Could not start conversation')
+      
+      if (conversationResult.conversation?.id) {
+        setConversationId(conversationResult.conversation.id)
+        setMessages([])
+      }
+      
       setStep(4)
     } catch (error) {
       setPhoneError(error instanceof Error ? error.message : 'Unable to save your callback request. Please try again.')
@@ -1528,6 +1547,38 @@ function ChatAssistant({ requireLogin, isDashboard = false }: { requireLogin: Re
     }
   }
 
+  const sendMessage = async (currentUser: AuthUser) => {
+    if (!messageInput.trim() || !conversationId) return
+    
+    setIsSendingMessage(true)
+    try {
+      const response = await fetch(`${apiUrl}/api/neha/send-message`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...authHeaders(currentUser) },
+        body: JSON.stringify({ conversationId, message: messageInput.trim() }),
+      })
+      const result = await response.json() as { message?: { id: string; message: string; sender_name: string; sender_type: string; created_at: string } }
+      if (!response.ok) throw new Error(result.message?.message || 'Could not send message')
+      
+      // Add sent message to list
+      if (result.message) {
+        setMessages(prev => [...prev, {
+          id: result.message!.id,
+          sender: result.message!.sender_name,
+          senderType: result.message!.sender_type,
+          message: result.message!.message,
+          createdAt: result.message!.created_at,
+        }])
+      }
+      setMessageInput('')
+    } catch (error) {
+      setPhoneError(error instanceof Error ? error.message : 'Could not send message. Please try again.')
+    } finally {
+      setIsSendingMessage(false)
+    }
+  }
+
+
   const resetChat = () => {
     setStep(0)
     setName('')
@@ -1535,6 +1586,9 @@ function ChatAssistant({ requireLogin, isDashboard = false }: { requireLogin: Re
     setScoreRange('')
     setPhone('')
     setPhoneError('')
+    setConversationId(null)
+    setMessages([])
+    setMessageInput('')
   }
 
   const goBack = () => {
@@ -1554,7 +1608,7 @@ function ChatAssistant({ requireLogin, isDashboard = false }: { requireLogin: Re
       chatBodyRef.current?.scrollTo({ top: chatBodyRef.current.scrollHeight, behavior: 'smooth' })
     }, 80)
     return () => window.clearTimeout(timeoutId)
-  }, [isOpen, step])
+  }, [isOpen, step, messages])
 
   return (
     <aside className={`chat-assistant${isOpen ? ' open' : ''}${isDashboard ? ' dashboard-assistant' : ''}`} aria-label="Scorenow chat assistant">
@@ -1601,10 +1655,33 @@ function ChatAssistant({ requireLogin, isDashboard = false }: { requireLogin: Re
 
             {step === 4 && (
               <div className="chat-complete">
-                <div className="chat-bubble bot-message"><strong>Thank you, {name}.</strong>Your details are ready. Send the summary on WhatsApp to share it with our expert, or call us directly.</div>
-                <a className="chat-whatsapp primary" href={`https://wa.me/919114141011?text=${whatsappMessage}`} target="_blank" rel="noreferrer"><MessageCircle /> WhatsApp our expert</a>
-                <a className="chat-call" href="tel:+919114141011"><Phone /> Call +91 91141 41011</a>
-                <button className="chat-restart" type="button" onClick={resetChat}>Start again</button>
+                <div className="chat-bubble bot-message"><strong>Thank you, {name}.</strong>Your details are saved. An expert will follow up shortly. You can continue chatting here.</div>
+                {messages.length > 0 && (
+                  <div className="chat-messages">
+                    {messages.map((msg) => (
+                      <div key={msg.id} className={`chat-bubble ${msg.senderType === 'customer' ? 'user-message' : 'bot-message'}`}>
+                        <small>{msg.sender}</small>
+                        <div>{msg.message}</div>
+                        <small className="chat-time">{new Date(msg.createdAt).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}</small>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                <form className="chat-form" onSubmit={(e) => { e.preventDefault(); if (conversationId) requireLogin('', (user) => { void sendMessage(user) }) }}>
+                  <label className="message-input">
+                    <input 
+                      value={messageInput} 
+                      onChange={(event) => setMessageInput(event.target.value)} 
+                      placeholder="Type your message..." 
+                      disabled={isSendingMessage}
+                    />
+                    <button type="submit" disabled={!messageInput.trim() || isSendingMessage}>{isSendingMessage ? '...' : 'Send'}</button>
+                  </label>
+                </form>
+                <div className="chat-actions">
+                  <a className="chat-whatsapp" href={`https://wa.me/919114141011?text=${whatsappMessage}`} target="_blank" rel="noreferrer"><MessageCircle /> WhatsApp our expert</a>
+                  <button className="chat-restart" type="button" onClick={resetChat}>Start over</button>
+                </div>
               </div>
             )}
           </div>
