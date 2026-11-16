@@ -320,7 +320,9 @@ export function TestimonialsSection({ displayLimit = 6 }: TestimonialsSectionPro
     fetchTestimonials()
   }, [displayLimit])
 
-  const displayedTestimonials = testimonials.length > 0 ? testimonials : DEFAULT_TESTIMONIALS.slice(0, displayLimit)
+  const displayedTestimonials = testimonials
+  // Sample reviews only appear when the API is unreachable; an empty published list hides the section.
+  if (!loading && displayedTestimonials.length === 0) return null
 
   return (
     <section className="testimonials-section">

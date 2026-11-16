@@ -10,6 +10,7 @@ import {
 import { PartnerManagement, PartnerMonitor, PartnerPortal } from './AdminPartners'
 import { CrmManagement } from './AdminCrm'
 import { AdminSiteContent } from './AdminSiteContent'
+import { AdminTestimonials } from './AdminTestimonials'
 import { AdminOpsPanel, AdminSessionExpiryBanner, CannedReplyPicker, CustomerPaymentsPanel, CustomerPrivacyPanel } from './AccountOps'
 import { AdminHealthAssessmentManagement, HealthAssessmentForm, LoginWelcomePopup, TestimonialsSection } from './WebFeatures'
 import {
@@ -3730,7 +3731,7 @@ type AdminAnalytics = {
   bureaus: { bureau: string; paid_orders: number; revenue: number; completed: number; failed: number }[]
 }
 
-type AdminSectionId = 'overview' | 'customers' | 'reports' | 'analytics' | 'tickets' | 'journey' | 'team' | 'failed' | 'health' | 'audit' | 'partners' | 'portal' | 'monitor' | 'crm' | 'content' | 'assessments' | 'ops'
+type AdminSectionId = 'overview' | 'customers' | 'reports' | 'analytics' | 'tickets' | 'journey' | 'team' | 'failed' | 'health' | 'audit' | 'partners' | 'portal' | 'monitor' | 'crm' | 'content' | 'testimonials' | 'assessments' | 'ops'
 const defaultAdminSection = (role?: AdminRole): AdminSectionId => role === 'support' ? 'customers' : role === 'analyst' ? 'analytics' : role === 'partner' || role === 'agent' ? 'portal' : 'overview'
 type PartnerAccountOption = { email: string; full_name: string; role: AdminRole; status: string }
 
@@ -4538,6 +4539,7 @@ function AdminPage() {
     { id: 'team', label: 'Manage admins', icon: LockKeyhole, roles: ['owner'] },
     { id: 'crm', label: 'CRM', icon: Users, roles: ['owner', 'manager', 'support'] },
     { id: 'content', label: 'Site content', icon: Settings, roles: ['owner', 'manager'] },
+    { id: 'testimonials', label: 'Testimonials', icon: Star, roles: ['owner'] },
     { id: 'partners', label: 'Partners & agents', icon: Handshake, roles: ['owner'] },
     { id: 'monitor', label: 'Partner monitor', icon: ShieldCheck, roles: ['owner', 'manager'] },
     { id: 'assessments', label: 'Health assessments', icon: ShieldCheck, roles: ['owner', 'manager', 'support'] },
@@ -4563,7 +4565,7 @@ function AdminPage() {
   const sectionHasData: Record<AdminSectionId, boolean> = {
     overview: Boolean(activity), reports: Boolean(report), customers: customers.length > 0, analytics: Boolean(analytics),
     journey: Boolean(analytics) && journeyCustomers.length > 0, tickets: tickets.length > 0, team: team.length > 0 || Boolean(primaryAdmin),
-    failed: Boolean(failedOps), health: Boolean(health), audit: Boolean(auditLog), partners: true, portal: true, monitor: true, crm: true, content: true, assessments: true, ops: true,
+    failed: Boolean(failedOps), health: Boolean(health), audit: Boolean(auditLog), partners: true, portal: true, monitor: true, crm: true, content: true, testimonials: true, assessments: true, ops: true,
   }
   const sectionIsLoading = activeSection === 'overview' ? activityLoading : activeSection === 'reports' ? loading : sectionLoading
   const canManageCustomers = adminRole === 'owner' || adminRole === 'manager'
@@ -4902,7 +4904,7 @@ function AdminPage() {
           {auditLog && auditTotalPages > 1 && <nav className="admin-activity-pagination" aria-label="Audit pages"><button className="button button-outline" type="button" disabled={auditPage <= 1 || sectionLoading} onClick={() => { setSectionLoading(true); setAuditPage((page) => page - 1) }}><ArrowLeft /> Previous</button><span>Page {auditPage} of {auditTotalPages}</span><button className="button button-outline" type="button" disabled={auditPage >= auditTotalPages || sectionLoading} onClick={() => { setSectionLoading(true); setAuditPage((page) => page + 1) }}>Next <ArrowRight /></button></nav>}
         </> : activeSection === 'assessments' ? <AdminHealthAssessmentManagement token={token} adminId={adminId} />
         : activeSection === 'ops' ? <AdminOpsPanel token={token} role={adminRole} />
-        : activeSection === 'crm' ? <CrmManagement token={token} role={adminRole} refreshKey={sectionRefresh} />        : activeSection === 'content' ? <AdminSiteContent token={token} refreshKey={sectionRefresh} />        : activeSection === 'partners' ? <PartnerManagement token={token} refreshKey={sectionRefresh} />
+        : activeSection === 'crm' ? <CrmManagement token={token} role={adminRole} refreshKey={sectionRefresh} />        : activeSection === 'content' ? <AdminSiteContent token={token} refreshKey={sectionRefresh} />        : activeSection === 'testimonials' ? <AdminTestimonials token={token} refreshKey={sectionRefresh} />        : activeSection === 'partners' ? <PartnerManagement token={token} refreshKey={sectionRefresh} />
         : activeSection === 'monitor' ? <PartnerMonitor token={token} enabled={adminRole === 'owner' || adminRole === 'manager' || partnerPages.includes('monitor')} />
         : activeSection === 'portal' ? <PartnerPortal token={token} role={adminRole === 'agent' ? 'agent' : 'partner'} refreshKey={sectionRefresh} />
         : <>

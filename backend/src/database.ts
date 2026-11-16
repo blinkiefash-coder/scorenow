@@ -2890,6 +2890,29 @@ export const listTestimonials = async (publishedOnly = true) => {
   return rows;
 };
 
+export const createTestimonial = async ({
+  customerName, customerImageUrl, rating, reviewText, resultDescription, published,
+}: { customerName: string; customerImageUrl?: string; rating: number; reviewText: string; resultDescription?: string; published: boolean }) => {
+  const { rows } = await pool.query(
+    `INSERT INTO testimonials (customer_name, customer_image_url, rating, review_text, result_description, published, published_at)
+     VALUES ($1, $2, $3, $4, $5, $6, CASE WHEN $6 THEN NOW() ELSE NULL END)
+     RETURNING id, customer_name, customer_image_url, rating, review_text, result_description, published, submitted_at, published_at`,
+    [customerName, customerImageUrl ?? null, rating, reviewText, resultDescription ?? null, published],
+  );
+  return rows[0];
+};
+
+export const setTestimonialPublished = async (testimonialId: string, published: boolean) => {
+  const { rows } = await pool.query(
+    `UPDATE testimonials
+     SET published = $2, published_at = CASE WHEN $2 THEN NOW() ELSE NULL END
+     WHERE id = $1
+     RETURNING id, customer_name, customer_image_url, rating, review_text, result_description, published, submitted_at, published_at`,
+    [testimonialId, published],
+  );
+  return rows[0] ?? null;
+};
+
 export const publishTestimonial = async (testimonialId: string) => {
   const { rows } = await pool.query(
     `UPDATE testimonials

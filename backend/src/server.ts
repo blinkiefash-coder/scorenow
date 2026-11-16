@@ -128,6 +128,8 @@ import {
   submitTestimonial,
   listTestimonials,
   publishTestimonial,
+  setTestimonialPublished,
+  createTestimonial,
   deleteTestimonial,
   listSiteContent,
   saveSiteContent,
@@ -2848,6 +2850,67 @@ app.put("/api/admin/testimonials/:id/publish", requireAdmin, requireAdminRoles("
   } catch (error) {
     console.error("Failed to publish testimonial", error);
     response.status(500).json({ message: "Failed to publish testimonial." });
+  }
+});
+
+const isSafeImageUrl = (value: string) => {
+  try {
+    const url = new URL(value);
+    return url.protocol === "https:" || url.protocol === "http:";
+  } catch {
+    return false;
+  }
+};
+
+app.post("/api/admin/testimonials", requireAdmin, requireAdminRoles("owner"), async (request, response) => {
+  const { customerName, customerImageUrl, rating, reviewText, resultDescription, published } = request.body ?? {};
+  const name = String(customerName ?? "").trim();
+  const review = String(reviewText ?? "").trim();
+  const imageUrl = String(customerImageUrl ?? "").trim();
+  const ratingValue = Number(rating);
+  if (name.length < 2 || name.length > 120) {
+    response.status(400).json({ message: "Customer name must be 2–120 characters." });
+    return;
+  }
+  if (!Number.isInteger(ratingValue) || ratingValue < 1 || ratingValue > 5) {
+    response.status(400).json({ message: "Rating must be between 1 and 5." });
+    return;
+  }
+  if (review.length < 10 || review.length > 1000) {
+    response.status(400).json({ message: "Review must be 10–1000 characters." });
+    return;
+  }
+  if (imageUrl && !isSafeImageUrl(imageUrl)) {
+    response.status(400).json({ message: "Photo link must be a valid http or https URL." });
+    return;
+  }
+  try {
+    const result = await createTestimonial({
+      customerName: name,
+      customerImageUrl: imageUrl || undefined,
+      rating: ratingValue,
+      reviewText: review,
+      resultDescription: String(resultDescription ?? "").trim() || undefined,
+      published: published !== false,
+    });
+    response.status(201).json(result);
+  } catch (error) {
+    console.error("Failed to create testimonial", error);
+    response.status(500).json({ message: "Failed to create testimonial." });
+  }
+});
+
+app.put("/api/admin/testimonials/:id/unpublish", requireAdmin, requireAdminRoles("owner", "manager"), async (request, response) => {
+  try {
+    const result = await setTestimonialPublished(String(request.params.id), false);
+    if (!result) {
+      response.status(404).json({ message: "Testimonial not found." });
+      return;
+    }
+    response.json(result);
+  } catch (error) {
+    console.error("Failed to unpublish testimonial", error);
+    response.status(500).json({ message: "Failed to unpublish testimonial." });
   }
 });
 
