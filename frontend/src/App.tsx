@@ -300,6 +300,38 @@ const socialLinks = [
   { label: 'Website', href: '', icon: '/icons-3d/social-web.png' },
 ]
 
+function SiteFooter() {
+  return (
+    <footer className="site-footer">
+      <div className="site-footer-cols">
+        <section><h4>About</h4><ul><li><a href="#contact">Contact us</a></li><li><a href="#about">About us</a></li><li><a href="#partner-opportunity">Partner with us</a></li></ul></section>
+        <section><h4>Services</h4><ul><li><a href="#insights">Check credit score</a></li><li><a href="#insights">Credit report</a></li><li><a href="#services">Score improvement</a></li><li><a href="#services">Dispute fixing</a></li></ul></section>
+        <section><h4>Help</h4><ul><li><a href="#contact">Payments</a></li><li><a href="#contact">Cancellation &amp; refunds</a></li><li><a href="#contact">FAQ</a></li><li><a href="#contact">Report an issue</a></li></ul></section>
+        <section><h4>Policies</h4><ul><li><a href="#">Terms of use</a></li><li><a href="#">Privacy</a></li><li><a href="#">Security</a></li><li><a href="#">Grievance redressal</a></li><li><a href="#">Sitemap</a></li></ul></section>
+        <section className="site-footer-mail"><h4>Mail us</h4>
+          <address>Tgs Consumer Services Private Limited,<br />Bapuji Nagar, Pani Tanki Lane<br />Bhubaneswar, Odisha – 751009<br />India</address>
+          <h4 className="site-footer-reach">Social</h4>
+          <SocialLinks />
+        </section>
+        <section><h4>Registered office</h4>
+          <address>Tgs Consumer Services Private Limited,<br />Plot No-711, Near Somnath Temple,<br />Ghodaghat Chowk, Sonepur,<br />Odisha – 767017<br />India<br />CIN: U74999OR2021PTC036918</address>
+          <p className="site-footer-reach">Customer care: <a href="tel:+919114141011">+91 91141 41011</a><br />Email: <a href="mailto:info@scorenow.in">info@scorenow.in</a></p>
+        </section>
+        <AppDownload />
+      </div>
+      <div className="site-footer-bottom">
+        <div>
+          <a href="#partner-opportunity">Become a partner</a>
+          <a href="#">Advertise</a>
+          <a href="#">Gift cards</a>
+          <a href="#contact">Help center</a>
+          <span>© 2026 Scorenow, a brand of Tgs Consumer Services Private Limited. All rights reserved.</span>
+        </div>
+      </div>
+    </footer>
+  )
+}
+
 function SocialLinks() {
   const visible = socialLinks.filter((link) => link.href)
   if (visible.length === 0) return null
@@ -3350,10 +3382,7 @@ function HomePage() {
         </section>
       </main>
 
-      <footer>
-        <div className="container footer-grid"><div><Brand /><p>Clear guidance for a stronger financial future.</p><SocialLinks /></div><div><strong>Company</strong><a href="#about">About Us</a><a href="#partner-opportunity">Partner with us</a><a href="#contact">Contact</a></div><div><strong>Services</strong><a href="#insights">Credit Report</a><a href="#services">Score Improvement</a></div><div><strong>Reach Us</strong><a href="tel:+919114141011">+91 91141 41011</a><a href="mailto:info@scorenow.in">info@scorenow.in</a></div><AppDownload /></div>
-        <div className="container footer-bottom"><span>© 2026 Scorenow. All rights reserved.</span><span>Privacy Policy · Terms of Use</span></div>
-      </footer>
+      <SiteFooter />
       <ChatAssistant requireLogin={requireLogin} />
       {authModal}
     </div>
@@ -3403,7 +3432,7 @@ function BusinessPage() {
           <div className="container"><p className="section-kicker">Why Scorenow</p><h2>Practical Support for <span>Commercial Credit</span></h2><div className="confidence-grid"><div><ShieldCheck /><strong>Privacy first</strong><span>Business and report details are handled carefully.</span></div><div><FileSearch /><strong>Thorough review</strong><span>We examine payment behaviour, exposure, and trade lines.</span></div><div><Users /><strong>Human guidance</strong><span>Understand each issue with clear expert support.</span></div><div><TrendingUp /><strong>Actionable roadmap</strong><span>Prioritised next steps aligned to funding readiness.</span></div></div></div>
         </section>
       </main>
-      <footer><div className="container footer-grid"><div><Brand href="/" /><p>Clear guidance for a stronger financial future.</p><SocialLinks /></div><div><strong>Explore</strong><a href="/">Individuals</a><a href="/business">Businesses</a></div><div><strong>Business</strong><a href="#business-assessment">Assessment</a><a href="#business-plans">Plans</a></div><div><strong>Reach Us</strong><a href="tel:+919114141011">+91 91141 41011</a><a href="mailto:info@scorenow.in">info@scorenow.in</a></div><AppDownload /></div><div className="container footer-bottom"><span>© 2026 Scorenow. All rights reserved.</span><span>Privacy Policy · Terms of Use</span></div></footer>
+      <SiteFooter />
       <ChatAssistant requireLogin={requireLogin} />
       {authModal}
     </div>

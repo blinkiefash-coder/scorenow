@@ -483,6 +483,22 @@ h1 span, h2 span { color: var(--blue); }
 .contact-option small { color: var(--muted); font-size: 11px; }
 .contact-option strong { font-size: 15px; overflow-wrap: anywhere; }
 .contact-option.whatsapp > svg { color: #16a769; }
+footer.site-footer { background: #0a1f5c; color: #c9d3f0; padding: 0; border-top: 4px solid #f2b418; }
+.site-footer-cols { max-width: 1240px; margin: 0 auto; padding: 48px 24px 32px; display: grid; grid-template-columns: repeat(4, 1fr) 1.3fr 1.3fr; gap: 28px; }
+.site-footer h4 { margin: 0 0 14px; font-size: 14px; font-weight: 500; color: #8fa0d6; letter-spacing: .02em; }
+.site-footer ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
+.site-footer a { text-decoration: none; }
+.site-footer li a, .site-footer-bottom a { color: #fff; font-weight: 500; font-size: 14px; }
+.site-footer li a:hover, .site-footer-bottom a:hover, .site-footer-reach a { color: #f2b418; }
+.site-footer address { font-style: normal; line-height: 1.6; font-size: 14px; }
+.site-footer-mail { border-left: 1px solid #26397a; padding-left: 28px; }
+.site-footer-reach { margin-top: 16px; font-size: 14px; }
+.site-footer-reach a { font-weight: 500; }
+.site-footer .app-download { grid-column: 1 / -1; }
+.site-footer-bottom > div { max-width: 1240px; margin: 0 auto; padding: 20px 24px; display: flex; flex-wrap: wrap; gap: 20px 36px; align-items: center; font-size: 14px; border-top: 1px solid #233058; }
+.site-footer-bottom span { margin-left: auto; color: #8fa0d6; }
+@media (max-width: 1000px) { .site-footer-cols { grid-template-columns: repeat(2, 1fr); } .site-footer-mail { border-left: 0; padding-left: 0; } }
+@media (max-width: 520px) { .site-footer-cols { grid-template-columns: 1fr; } .site-footer-bottom span { margin-left: 0; } }
 footer { background: #071238; color: #bac5dc; padding: 65px 0 22px; }.footer-grid { display: grid; grid-template-columns: 2fr repeat(3,1fr); gap: 60px; opacity: 1; transform: none; transition: none; }.footer-grid > div { display: flex; flex-direction: column; gap: 12px; }.footer-grid > div:first-child p { max-width: 280px; font-size: 13px; line-height: 1.6; margin-top: 10px; }.footer-grid strong { color: #fff; }.footer-grid a { text-decoration: none; font-size: 13px; }.footer-grid a:hover { color: #fff; }.footer-grid .brand { width: fit-content; padding: 5px 8px; border-radius: 5px; background: #fff; }.footer-grid .brand img { width: 150px; height: 60px; }.footer-social { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 6px; }.footer-social a { width: 38px; height: 38px; display: grid; place-items: center; transition: transform .2s ease; }.footer-social a:hover, .footer-social a:focus-visible { transform: translateY(-3px) scale(1.06); }.footer-social img { width: 100%; height: 100%; object-fit: contain; filter: drop-shadow(0 3px 4px rgba(0,0,0,.35)); }.footer-bottom { border-top: 1px solid #233058; margin-top: 50px; padding-top: 20px; display: flex; justify-content: space-between; font-size: 10px; opacity: 1; transform: none; transition: none; }
 .app-download { grid-column: 1 / -1; display: flex; flex-direction: column; gap: 5px; padding-top: 25px; border-top: 1px solid #233058; }.app-download > strong { font-size: 13px; }.app-download > small { color: #8d9bbc; font-size: 11px; }.store-badges { display: flex; gap: 10px; margin-top: 7px; }.store-badge { min-width: 164px; min-height: 52px; display: inline-flex; align-items: center; gap: 9px; padding: 7px 12px; border: 1px solid #3b4a70; border-radius: 7px; color: #fff; background: #111e42; }.store-badge svg { width: 22px; height: 22px; color: #a9d6ff; flex: none; }.store-badge span { display: flex; flex-direction: column; gap: 2px; }.store-badge small { color: #aebbd4; font-size: 8px; line-height: 1; }.store-badge b { font-size: 14px; line-height: 1.1; }
 
