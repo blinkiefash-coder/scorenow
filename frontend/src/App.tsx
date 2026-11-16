@@ -4009,7 +4009,7 @@ type AdminAnalytics = {
   bureaus: { bureau: string; paid_orders: number; revenue: number; completed: number; failed: number }[]
 }
 
-type AdminSectionId = 'overview' | 'customers' | 'reports' | 'analytics' | 'tickets' | 'journey' | 'team' | 'failed' | 'health' | 'audit' | 'partners' | 'portal' | 'monitor' | 'crm' | 'content' | 'testimonials' | 'assessments' | 'ops'
+type AdminSectionId = 'overview' | 'customers' | 'reports' | 'analytics' | 'tickets' | 'journey' | 'team' | 'failed' | 'health' | 'audit' | 'partners' | 'portal' | 'monitor' | 'crm' | 'content' | 'testimonials' | 'assessments' | 'ops' | 'neha'
 const defaultAdminSection = (role?: AdminRole): AdminSectionId => role === 'support' ? 'customers' : role === 'analyst' ? 'analytics' : role === 'partner' || role === 'agent' ? 'portal' : 'overview'
 type PartnerAccountOption = { email: string; full_name: string; role: AdminRole; status: string }
 
@@ -4163,6 +4163,14 @@ function AdminPage() {
   const [customerDetailId, setCustomerDetailId] = useState('')
   const [customerDetail, setCustomerDetail] = useState<AdminCustomerDetail | null>(null)
   const [customerDetailError, setCustomerDetailError] = useState('')
+  
+  // Neha conversations state
+  const [nehaConversations, setNehaConversations] = useState<Array<{ id: string; customer_id: string; assigned_to_id: string | null; assigned_to_role: string | null; status: string; created_at: string }>>([])
+  const [nehaSelectedConversation, setNehaSelectedConversation] = useState<string | null>(null)
+  const [nehaMessages, setNehaMessages] = useState<Array<{ id: string; sender_name: string; sender_type: string; message: string; created_at: string }>>([])
+  const [nehaMessageInput, setNehaMessageInput] = useState('')
+  const [nehaSendingMessage, setNehaSendingMessage] = useState(false)
+  const [nehaLoading, setNehaLoading] = useState(false)
   const [customerDetailRefresh, setCustomerDetailRefresh] = useState(0)
   const [statusDialog, setStatusDialog] = useState<{ id: string; name: string; status: string } | null>(null)
   const [followUpTarget, setFollowUpTarget] = useState<{ id: string; name: string; stage: string } | null>(null)
@@ -4797,6 +4805,40 @@ function AdminPage() {
     `${item.full_name ?? ''} ${item.mobile_last4} ${item.bureau} ${item.status} ${item.admin_id}`
       .toLowerCase().includes(searchTerm))
 
+  useEffect(() => {
+    if (activeSection !== 'neha' || authState !== 'signed-in' || !token) return
+    setNehaLoading(true)
+    fetch(`${apiUrl}/api/neha/conversations?role=${adminRole}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    })
+      .then(async (response) => {
+        if (!response.ok) throw new Error('Could not load conversations')
+        const result = await response.json() as { conversations?: Array<{ id: string; customer_id: string; assigned_to_id: string | null; assigned_to_role: string | null; status: string; created_at: string }> }
+        setNehaConversations(result.conversations || [])
+      })
+      .catch((error) => {
+        console.error('Failed to load Neha conversations', error)
+        setActionNotice({ tone: 'error', text: 'Could not load conversations' })
+      })
+      .finally(() => setNehaLoading(false))
+  }, [activeSection, authState, token, adminRole])
+
+  useEffect(() => {
+    if (!nehaSelectedConversation || authState !== 'signed-in' || !token) return
+    fetch(`${apiUrl}/api/neha/messages/${nehaSelectedConversation}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    })
+      .then(async (response) => {
+        if (!response.ok) throw new Error('Could not load messages')
+        const result = await response.json() as { messages?: Array<{ id: string; sender_name: string; sender_type: string; message: string; created_at: string }> }
+        setNehaMessages(result.messages || [])
+      })
+      .catch((error) => {
+        console.error('Failed to load messages', error)
+        setActionNotice({ tone: 'error', text: 'Could not load messages' })
+      })
+  }, [nehaSelectedConversation, authState, token])
+
   const failedOpsCount = attention ? attention.failed_reports + attention.stuck_reports + attention.stuck_payments : 0
   const adminSections: {
     id: AdminSectionId
@@ -4810,6 +4852,7 @@ function AdminPage() {
     { id: 'reports', label: 'Credit score checker', icon: FileSearch, roles: ['owner', 'manager'] },
     { id: 'analytics', label: 'Analytics', icon: BarChart3, roles: ['owner', 'manager', 'analyst'] },
     { id: 'tickets', label: 'Helpline tickets', icon: MessageCircle, roles: ['owner', 'manager', 'support'], badge: attention?.open_tickets },
+    { id: 'neha', label: 'Neha Assistant', icon: MessageCircle, roles: ['owner', 'manager', 'support', 'partner', 'agent'] },
     { id: 'journey', label: 'Signup journey', icon: TrendingUp, roles: ['owner', 'manager', 'analyst'] },
     { id: 'failed', label: 'Failed operations', icon: AlertTriangle, roles: ['owner', 'manager'], badge: failedOpsCount },
     { id: 'health', label: 'System health', icon: Gauge, roles: ['owner', 'manager'] },
@@ -4842,7 +4885,7 @@ function AdminPage() {
   }
   const sectionHasData: Record<AdminSectionId, boolean> = {
     overview: Boolean(activity), reports: Boolean(report), customers: customers.length > 0, analytics: Boolean(analytics),
-    journey: Boolean(analytics) && journeyCustomers.length > 0, tickets: tickets.length > 0, team: team.length > 0 || Boolean(primaryAdmin),
+    journey: Boolean(analytics) && journeyCustomers.length > 0, tickets: tickets.length > 0, team: team.length > 0 || Boolean(primaryAdmin), neha: nehaConversations.length > 0,
     failed: Boolean(failedOps), health: Boolean(health), audit: Boolean(auditLog), partners: true, portal: true, monitor: true, crm: true, content: true, testimonials: true, assessments: true, ops: true,
   }
   const sectionIsLoading = activeSection === 'overview' ? activityLoading : activeSection === 'reports' ? loading : sectionLoading
@@ -4863,6 +4906,36 @@ function AdminPage() {
   const funnelPaid = analytics?.funnel[3]?.count || 0
   const auditTotalPages = auditLog ? Math.max(1, Math.ceil(auditLog.pagination.total / auditLog.pagination.pageSize)) : 1
   const customerTotalPages = Math.max(1, Math.ceil(customerTotal / 50))
+
+  const sendNehaMessage = async () => {
+    if (!nehaSelectedConversation || !nehaMessageInput.trim()) return
+    setNehaSendingMessage(true)
+    try {
+      const response = await fetch(`${apiUrl}/api/neha/send-message`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ conversationId: nehaSelectedConversation, message: nehaMessageInput.trim() }),
+      })
+      const result = await response.json() as { message?: { id: string; message: string; sender_name: string; sender_type: string; created_at: string } }
+      if (!response.ok) throw new Error(result.message?.message || 'Could not send message')
+      
+      if (result.message) {
+        setNehaMessages(prev => [...prev, {
+          id: result.message!.id,
+          sender_name: result.message!.sender_name,
+          sender_type: result.message!.sender_type,
+          message: result.message!.message,
+          created_at: result.message!.created_at,
+        }])
+      }
+      setNehaMessageInput('')
+      setActionNotice({ tone: 'info', text: 'Message sent successfully.' })
+    } catch (error) {
+      setActionNotice({ tone: 'error', text: error instanceof Error ? error.message : 'Could not send message. Please try again.' })
+    } finally {
+      setNehaSendingMessage(false)
+    }
+  }
 
   if (authState === 'checking') return <div className="admin-loading"><Spinner size={20} /> Verifying admin session…</div>
 
@@ -4896,7 +4969,7 @@ function AdminPage() {
           <p>Private operations workspace</p>
         </aside>
         <div className="admin-content">
-        {sectionIsLoading && !sectionHasData[activeSection] && <div className="admin-data-loading" role="status"><Spinner size={18} /> Loading {({ overview: 'activity', reports: 'the credit report', tickets: 'support tickets', customers: 'customer records', team: 'admin team', analytics: 'analytics', journey: 'the signup journey', failed: 'failed operations', health: 'system health', audit: 'the audit log' } as Record<AdminSectionId, string>)[activeSection]}…</div>}
+        {sectionIsLoading && !sectionHasData[activeSection] && <div className="admin-data-loading" role="status"><Spinner size={18} /> Loading {({ overview: 'activity', reports: 'the credit report', tickets: 'support tickets', customers: 'customer records', team: 'admin team', analytics: 'analytics', journey: 'the signup journey', failed: 'failed operations', health: 'system health', audit: 'the audit log', neha: 'conversations' } as Record<AdminSectionId, string>)[activeSection]}…</div>}
         {actionNotice && <p className={`dashboard-notice ${actionNotice.tone} admin-action-notice`} role="status">{actionNotice.text}<button type="button" aria-label="Dismiss" onClick={() => setActionNotice(null)}><X /></button></p>}
         {sectionError && activeSection !== 'overview' && <p className="dashboard-notice error" role="alert">{sectionError}</p>}
         {activeSection !== 'overview' && <div className="admin-section-actions"><button className="button button-outline" type="button" onClick={() => { setSectionLoading(true); setSectionRefresh((refresh) => refresh + 1) }} disabled={sectionLoading}><Spinner size={16} active={sectionLoading} /> {sectionLoading ? 'Refreshing…' : 'Refresh section'}</button></div>}
@@ -5182,6 +5255,62 @@ function AdminPage() {
           {auditLog && auditTotalPages > 1 && <nav className="admin-activity-pagination" aria-label="Audit pages"><button className="button button-outline" type="button" disabled={auditPage <= 1 || sectionLoading} onClick={() => { setSectionLoading(true); setAuditPage((page) => page - 1) }}><ArrowLeft /> Previous</button><span>Page {auditPage} of {auditTotalPages}</span><button className="button button-outline" type="button" disabled={auditPage >= auditTotalPages || sectionLoading} onClick={() => { setSectionLoading(true); setAuditPage((page) => page + 1) }}>Next <ArrowRight /></button></nav>}
         </> : activeSection === 'assessments' ? <AdminHealthAssessmentManagement token={token} adminId={adminId} />
         : activeSection === 'ops' ? <AdminOpsPanel token={token} role={adminRole} />
+        : activeSection === 'neha' ? <>
+          <div className="admin-heading"><span>CUSTOMER SUPPORT</span><h1>Neha Assistant Conversations</h1><p>Manage customer conversations and respond in real-time.</p></div>
+          <article className="dashboard-card">
+            <div className="dashboard-card-heading"><strong>Active Conversations</strong><small>{nehaConversations.length} total</small></div>
+            {nehaLoading ? <p className="admin-activity-empty"><Spinner size={16} /> Loading…</p> : nehaConversations.length === 0 ? <p className="admin-activity-empty">No conversations yet.</p> : (
+              <div className="neha-conversations-list">
+                {nehaConversations.map((conv) => (
+                  <div
+                    key={conv.id}
+                    className={`neha-conversation-item ${nehaSelectedConversation === conv.id ? 'active' : ''}`}
+                    onClick={() => setNehaSelectedConversation(conv.id)}
+                    role="button"
+                    tabIndex={0}
+                  >
+                    <div className="neha-conv-info">
+                      <strong>ID: {conv.id.slice(0, 8)}</strong>
+                      <small>{conv.status}</small>
+                    </div>
+                    <div className="neha-conv-meta">
+                      {conv.assigned_to_id ? <span className="assigned">Assigned to you</span> : <span className="unassigned">Unassigned</span>}
+                      <span className="time">{formatAdminTimestamp(conv.created_at)}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </article>
+          {nehaSelectedConversation && (
+            <article className="dashboard-card neha-messages-card">
+              <div className="dashboard-card-heading"><strong>Conversation {nehaSelectedConversation.slice(0, 8)}</strong></div>
+              <div className="neha-messages-list">
+                {nehaMessages.map((msg) => (
+                  <div key={msg.id} className={`neha-message ${msg.sender_type}`}>
+                    <div className="message-header">
+                      <strong>{msg.sender_name}</strong>
+                      <small>{new Date(msg.created_at).toLocaleString('en-IN', { year: 'numeric', month: 'short', day: '2-digit', hour: '2-digit', minute: '2-digit' })}</small>
+                    </div>
+                    <div className="message-body">{msg.message}</div>
+                  </div>
+                ))}
+              </div>
+              <form className="neha-reply-form" onSubmit={(event) => { event.preventDefault(); if (nehaMessageInput.trim()) void sendNehaMessage() }}>
+                <textarea
+                  value={nehaMessageInput}
+                  onChange={(event) => setNehaMessageInput(event.target.value)}
+                  placeholder="Type your reply..."
+                  rows={3}
+                  disabled={nehaSendingMessage}
+                />
+                <button className="button button-primary" type="submit" disabled={!nehaMessageInput.trim() || nehaSendingMessage}>
+                  {nehaSendingMessage ? 'Sending…' : 'Send Reply'}
+                </button>
+              </form>
+            </article>
+          )}
+        </>
         : activeSection === 'crm' ? <CrmManagement token={token} role={adminRole} refreshKey={sectionRefresh} />        : activeSection === 'content' ? <AdminSiteContent token={token} refreshKey={sectionRefresh} />        : activeSection === 'testimonials' ? <AdminTestimonials token={token} refreshKey={sectionRefresh} />        : activeSection === 'partners' ? <PartnerManagement token={token} refreshKey={sectionRefresh} />
         : activeSection === 'monitor' ? <PartnerMonitor token={token} enabled={adminRole === 'owner' || adminRole === 'manager' || partnerPages.includes('monitor')} />
         : activeSection === 'portal' ? <PartnerPortal token={token} role={adminRole === 'agent' ? 'agent' : 'partner'} refreshKey={sectionRefresh} />
