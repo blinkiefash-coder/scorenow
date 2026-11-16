@@ -1,5 +1,5 @@
 import { useEffect, useState, type FormEvent } from 'react'
-import { Bell, Download, RefreshCw, ShieldAlert } from 'lucide-react'
+import { ArrowRight, Bell, Download, RefreshCw, ShieldAlert, WalletCards } from 'lucide-react'
 
 const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:3000'
 
@@ -315,7 +315,7 @@ type CustomerPayment = {
 
 const formatRupees = (value: number) => `₹${value.toLocaleString('en-IN', { maximumFractionDigits: 2 })}`
 
-export function CustomerPaymentsPanel({ token }: { token: string }) {
+export function CustomerPaymentsPanel({ token, onBrowsePlans }: { token: string; onBrowsePlans: () => void }) {
   const [payments, setPayments] = useState<CustomerPayment[]>([])
   const [error, setError] = useState<string | null>(null)
 
@@ -346,10 +346,27 @@ export function CustomerPaymentsPanel({ token }: { token: string }) {
     }
   }
 
+  const paidPayments = payments.filter((payment) => payment.status === 'paid')
+  const totalPaid = paidPayments.reduce((sum, payment) => sum + Number(payment.amount) + Number(payment.gst_amount), 0)
+
   return (
     <div className="customer-payments">
       {error && <p className="form-error">{error}</p>}
-      {payments.length === 0 && !error && <p>No payments yet.</p>}
+      {payments.length > 0 && (
+        <div className="customer-payments-summary">
+          <div><small>Total paid</small><strong>{formatRupees(totalPaid)}</strong></div>
+          <div><small>Paid transactions</small><strong>{paidPayments.length}</strong></div>
+          <div><small>All transactions</small><strong>{payments.length}</strong></div>
+        </div>
+      )}
+      {payments.length === 0 && !error && (
+        <div className="customer-payments-empty">
+          <span><WalletCards /></span>
+          <strong>No payments yet</strong>
+          <small>Plans and credit report purchases will appear here, with downloadable invoices.</small>
+          <button type="button" className="button button-primary" onClick={onBrowsePlans}>Browse plans <ArrowRight /></button>
+        </div>
+      )}
       {payments.map((payment) => {
         const total = Number(payment.amount) + Number(payment.gst_amount)
         const label = payment.plan_id ? 'Subscription plan' : `Credit report${payment.report_bureau ? ` · ${payment.report_bureau}` : ''}`

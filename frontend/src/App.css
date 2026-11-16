@@ -4673,5 +4673,34 @@ button.admin-attention-item:hover { transform: translateY(-1px); box-shadow: 0 6
 /* Customer payments and canned reply picker */
 .customer-payments { display: grid; gap: 10px; }
 .customer-payment-row { display: grid; gap: 8px; padding: 12px 0; border-bottom: 1px solid rgba(7, 23, 63, 0.08); }
+.customer-payments-summary { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 14px; }
+.customer-payments-summary > div { padding: 14px 16px; border-radius: 12px; background: #f4f8ff; border: 1px solid #dde8f7; display: grid; gap: 4px; }
+.customer-payments-summary small { color: #6b7790; font-size: 12px; }
+.customer-payments-summary strong { color: #07173f; font-size: 20px; }
+.customer-payments-empty { display: grid; justify-items: center; gap: 8px; padding: 28px 16px; text-align: center; border: 1px dashed #c9d9ee; border-radius: 14px; background: #fbfdff; }
+.customer-payments-empty > span { width: 48px; height: 48px; border-radius: 14px; display: grid; place-items: center; background: #eaf2ff; color: #2563eb; }
+.customer-payments-empty strong { color: #07173f; font-size: 16px; }
+.customer-payments-empty small { color: #6b7790; font-size: 13px; max-width: 360px; }
+.customer-payments-empty .button { margin-top: 6px; }
+.dash-plans-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 14px; }
+.dash-plan { position: relative; display: flex; flex-direction: column; gap: 6px; padding: 22px 18px; border-radius: 14px; background: #fff; border: 1px solid #dde8f7; }
+.dash-plan.featured { border: 2px solid #2563eb; background: #f5f9ff; }
+.dash-plan-badge { position: absolute; top: -11px; left: 18px; padding: 4px 10px; border-radius: 999px; background: #2563eb; color: #fff; font-size: 11px; font-weight: 800; }
+.dash-plan h3 { margin: 0; color: #07173f; font-size: 18px; }
+.dash-plan > small { color: #6b7790; font-size: 12px; }
+.dash-plan > strong { color: #07173f; font-size: 22px; }
+.dash-plan > strong span { color: #6b7790; font-size: 13px; font-weight: 600; }
+.dash-plan del { color: #8793a8; font-size: 13px; }
+.dash-plan-audience { margin: 0; color: #4a5670; font-size: 13px; line-height: 1.5; }
+.dash-plan ul { margin: 10px 0 0; padding: 12px 0 0; border-top: 1px solid #e6eef9; list-style: none; display: grid; gap: 8px; }
+.dash-plan li { display: flex; gap: 7px; align-items: flex-start; color: #3f4b63; font-size: 13px; line-height: 1.45; }
+.dash-plan li svg { width: 15px; height: 15px; color: #16a34a; flex: none; margin-top: 2px; }
+.dash-plan-single { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 14px; padding: 18px; border-radius: 14px; background: #f4f8ff; border: 1px solid #dde8f7; }
+.dash-plan-single > span { width: 44px; height: 44px; border-radius: 12px; display: grid; place-items: center; background: #fff; color: #2563eb; }
+.dash-plan-single strong { display: block; color: #07173f; }
+.dash-plan-single small { color: #6b7790; font-size: 13px; }
+.dash-plan-single b { color: #07173f; font-size: 22px; }
+.dash-plan-single b small { font-size: 13px; font-weight: 600; }
+@media (max-width: 640px) { .customer-payments-summary { grid-template-columns: 1fr; } .dash-plan-single { grid-template-columns: auto 1fr; } .dash-plan-single b { grid-column: 1 / -1; } }
 .customer-payment-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .canned-reply-picker { display: grid; gap: 4px; font-size: 13px; }

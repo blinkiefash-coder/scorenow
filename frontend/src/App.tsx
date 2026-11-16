@@ -3,7 +3,7 @@ import {
   AlertTriangle, ArrowLeft, ArrowRight, BadgeIndianRupee, BarChart3,
   Building2, CalendarDays, Check, ChevronDown, CircleHelp, Clock3, CreditCard, Download, ExternalLink,
   Copy, Eye, EyeOff, FileCheck2, FileSearch, Gift, Handshake, Headphones,
-  Gauge, House, Landmark, Lightbulb, LockKeyhole, Mail, MapPin, Menu, MessageCircle, Pause,
+  Gauge, House, Landmark, Layers, Lightbulb, LockKeyhole, Mail, MapPin, Menu, MessageCircle, Pause,
   PiggyBank, Percent, Phone, Play, RotateCcw, Search, Settings, ShieldCheck, Smartphone, Sparkles, Star,
   ArrowUpDown, ArrowUpRight, ArrowDownLeft, Bell, Info, Target, TrendingUp, Users, Volume2, VolumeX, UserRound, WalletCards, X, Zap,
 } from 'lucide-react'
@@ -1642,6 +1642,77 @@ const fdTenures = [
   { label: '3 Years', months: 36 }, { label: '5 Years', months: 60 }, { label: '10 Years', months: 120 },
 ]
 
+function PlansServicesPage() {
+  const content = useSiteContent()
+  const subscriptionPlans = effectiveSubscriptionPlans(content)
+  const servicePlans = effectiveServicePlans(content)
+  const businessPrices = effectiveBusinessPrices(content)
+  const reportPrice = content?.report_price.amount ?? DEFAULT_REPORT_PRICE
+
+  return (
+    <section className="loan-payment plans-services-page" id="plans-services">
+      <div className="loan-hero">
+        <div className="loan-hero-title"><span><Layers /></span><div><h2>Plans &amp; services</h2><p>Every plan and service we offer, in one place.</p></div></div>
+      </div>
+
+      <article className="dashboard-card">
+        <div className="dashboard-card-heading"><strong>Subscription plans</strong><small>Ongoing score tracking and guidance</small></div>
+        <div className="dash-plans-grid">{subscriptionPlans.map((plan) => (
+          <article className={`dash-plan${plan.featured ? ' featured' : ''}`} key={plan.id}>
+            {plan.featured && <span className="dash-plan-badge">Most popular</span>}
+            <h3>{plan.name}</h3>
+            <small>{plan.note}</small>
+            <strong>{formatRupees(plan.price)} <span>/ {formatSubscriptionDuration(plan.months)}</span></strong>
+            <ul>{plan.features.map((feature) => <li key={feature}><Check />{feature}</li>)}</ul>
+          </article>
+        ))}</div>
+      </article>
+
+      <article className="dashboard-card">
+        <div className="dashboard-card-heading"><strong>Credit report</strong><small>Pay per report when you need it</small></div>
+        <div className="dash-plan-single">
+          <span><FileCheck2 /></span>
+          <div><strong>Single credit report</strong><small>Full bureau report with score and account details</small></div>
+          <b>{formatRupees(reportPrice)} <small>per report</small></b>
+        </div>
+      </article>
+
+      <article className="dashboard-card">
+        <div className="dashboard-card-heading"><strong>Credit improvement services</strong><small>Expert-led plans to rebuild your score</small></div>
+        <div className="dash-plans-grid">{servicePlans.map((plan) => (
+          <article className={`dash-plan${plan.featured ? ' featured' : ''}`} key={plan.name}>
+            {plan.featured && <span className="dash-plan-badge">Most popular</span>}
+            <h3>{plan.name}</h3>
+            <small>{plan.duration}</small>
+            <p className="dash-plan-audience">{plan.audience}</p>
+            <del>{plan.originalPrice}</del>
+            <strong>{plan.offerPrice}</strong>
+            <ul>{plan.features.map((feature) => <li key={feature}><Check />{feature}</li>)}</ul>
+          </article>
+        ))}</div>
+      </article>
+
+      <article className="dashboard-card">
+        <div className="dashboard-card-heading"><strong>Business programmes</strong><small>For companies and promoters</small></div>
+        <div className="dash-plans-grid">
+          <article className="dash-plan">
+            <h3>Business CMR Improvement</h3>
+            <small>Six-month programme</small>
+            <del>{businessPrices.cmr.original} {businessPrices.cmr.suffix}</del>
+            <strong>{businessPrices.cmr.offer} <span>{businessPrices.cmr.suffix}</span></strong>
+          </article>
+          <article className="dash-plan">
+            <h3>Credit Shield 360°</h3>
+            <small>12-month membership</small>
+            <del>{businessPrices.shield.original} {businessPrices.shield.suffix}</del>
+            <strong>{businessPrices.shield.offer} <span>{businessPrices.shield.suffix}</span></strong>
+          </article>
+        </div>
+      </article>
+    </section>
+  )
+}
+
 function FixedDepositsPage() {
   const fdPlans = effectiveFdPlans(useSiteContent())
   const [tenure, setTenure] = useState(12)
@@ -2467,8 +2538,8 @@ function DashboardPage({ user, onLogout }: { user: AuthUser; onLogout: () => voi
   const [downloadingReport, setDownloadingReport] = useState(false)
   const [downloadReportError, setDownloadReportError] = useState('')
   const [selectedBureau, setSelectedBureau] = useState<BureauId | null>(null)
-  type DashboardPage = 'overview' | 'loans' | 'fd' | 'cards' | 'payments' | 'health' | 'settings'
-  const standalonePages: Record<string, DashboardPage> = { '#loan-payment': 'loans', '#fixed-deposits': 'fd', '#credit-cards': 'cards', '#payments-invoices': 'payments', '#health-assessment': 'health', '#settings': 'settings' }
+  type DashboardPage = 'overview' | 'loans' | 'fd' | 'cards' | 'payments' | 'plans' | 'health' | 'settings'
+  const standalonePages: Record<string, DashboardPage> = { '#loan-payment': 'loans', '#fixed-deposits': 'fd', '#credit-cards': 'cards', '#payments-invoices': 'payments', '#plans-services': 'plans', '#health-assessment': 'health', '#settings': 'settings' }
   const initialHash = standalonePages[window.location.hash] ? window.location.hash : '#dashboard-overview'
   const [activeNav, setActiveNav] = useState(initialHash)
   const [page, setPage] = useState<DashboardPage>(standalonePages[initialHash] ?? 'overview')
@@ -2632,6 +2703,7 @@ function DashboardPage({ user, onLogout }: { user: AuthUser; onLogout: () => voi
     { icon: PiggyBank, image: '/icons-3d/image-1c2db40da8b9f3b7.png', label: 'Fixed deposits', href: '#fixed-deposits' },
     { icon: CreditCard, image: '/icons-3d/image-1d4a9bf1ec71ab79.png', label: 'Credit cards', href: '#credit-cards' },
     { icon: WalletCards, label: 'Payments & invoices', href: '#payments-invoices' },
+    { icon: Layers, label: 'Plans & services', href: '#plans-services' },
     { icon: Gauge, label: 'Health assessment', href: '#health-assessment' },
     { icon: Settings, image: '/icons-3d/image-5a88f5e812fceb30.png', label: 'Settings', href: '#settings' },
     { icon: CircleHelp, image: '/icons-3d/image-7e7a446b84557e61.png', label: 'Help & support', href: '#help-support' },
@@ -2826,7 +2898,7 @@ function DashboardPage({ user, onLogout }: { user: AuthUser; onLogout: () => voi
       <main className="dashboard-main" id="dashboard-main">
         <header className="dashboard-topbar">
           <button className="dashboard-menu-button" type="button" aria-label="Open menu" aria-expanded={mobileNavOpen} aria-controls="dashboard-sidebar" onClick={() => setMobileNavOpen(true)}><Menu /></button>
-          <div className="dashboard-page-heading"><span>Scorenow <b>/</b> {page === 'fd' ? 'Investment products' : page === 'cards' ? 'Credit cards' : 'Credit workspace'}</span><strong>{{ loans: 'Loan payment', fd: 'Fixed deposits', cards: 'Credit Cards', payments: 'Payments & invoices', health: 'Health assessment', settings: 'Settings', overview: 'Your dashboard' }[page]}</strong></div>
+          <div className="dashboard-page-heading"><span>Scorenow <b>/</b> {page === 'fd' ? 'Investment products' : page === 'cards' ? 'Credit cards' : page === 'plans' ? 'Plans & services' : 'Credit workspace'}</span><strong>{{ loans: 'Loan payment', fd: 'Fixed deposits', cards: 'Credit Cards', payments: 'Payments & invoices', plans: 'Plans & services', health: 'Health assessment', settings: 'Settings', overview: 'Your dashboard' }[page]}</strong></div>
           <div className="dashboard-top-actions">
             <span className="dashboard-updated">{activeReport ? <>Last updated <strong>{formatDate(activeReport.report_date)}</strong></> : 'Your credit workspace'}</span>
             <button className="dashboard-refresh-button" type="button" onClick={() => void loadStatus(true)} disabled={refreshing}>
@@ -2840,8 +2912,8 @@ function DashboardPage({ user, onLogout }: { user: AuthUser; onLogout: () => voi
         <div className="dashboard-content">
           {page === 'loans' ? <LoanPaymentPage user={user} report={activeReport} onGetReport={() => setPage('overview')} /> : page === 'fd' ? <FixedDepositsPage /> : page === 'cards' ? <CreditCardsPage /> : page === 'payments' ? <section className="dashboard-card" id="payments-invoices">
             <div className="dashboard-card-heading"><strong>Payments and invoices</strong><small>Your past orders and receipts</small></div>
-            <CustomerPaymentsPanel token={user.token} />
-          </section> : page === 'health' ? <section className="dashboard-card" id="health-assessment">
+            <CustomerPaymentsPanel token={user.token} onBrowsePlans={() => { setActiveNav('#plans-services'); window.history.replaceState(null, '', '#plans-services'); setPage('plans'); window.scrollTo({ top: 0 }) }} />
+          </section> : page === 'plans' ? <PlansServicesPage /> : page === 'health' ? <section className="dashboard-card" id="health-assessment">
             <div className="dashboard-card-heading"><strong>Request a health assessment</strong><small>Our team reviews every request</small></div>
             <HealthAssessmentForm user={{ id: user.id, fullName: user.full_name, mobile: user.mobile, email: user.email ?? undefined }} token={user.token} />
           </section> : page === 'settings' ? <article className="dashboard-card account-card" id="settings">
