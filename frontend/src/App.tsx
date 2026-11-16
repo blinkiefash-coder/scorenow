@@ -1,4 +1,4 @@
-import { Fragment, useCallback, useEffect, useRef, useState, type FormEvent, type MouseEvent as ReactMouseEvent } from 'react'
+import { Fragment, useCallback, useEffect, useRef, useState, type FormEvent, type JSX, type MouseEvent as ReactMouseEvent } from 'react'
 import {
   AlertTriangle, ArrowLeft, ArrowRight, BadgeIndianRupee, BarChart3,
   Building2, CalendarDays, Check, ChevronDown, CircleHelp, Clock3, CreditCard, Download, ExternalLink,
@@ -293,12 +293,10 @@ function Brand({ href = '#home' }: { href?: string }) {
 
 // Entries with an empty href are hidden until their URL is provided.
 const socialLinks = [
-  { label: 'Facebook', href: 'https://www.facebook.com/share/1MXCNZL49L/', icon: '/icons-3d/social-facebook.png' },
-  { label: 'X (Twitter)', href: '', icon: '/icons-3d/social-x.png' },
-  { label: 'YouTube', href: '', icon: '/icons-3d/social-youtube.png' },
-  { label: 'LinkedIn', href: '', icon: '/icons-3d/social-linkedin.png' },
-  { label: 'Instagram', href: 'https://www.instagram.com/scorenow_official?obrf=MTM3a2xmaWNtcTlqZg==', icon: '/icons-3d/social-instagram.png' },
-  { label: 'Website', href: '', icon: '/icons-3d/social-web.png' },
+  { label: 'Facebook', href: 'https://www.facebook.com/share/1MXCNZL49L/', icon: 'facebook' },
+  { label: 'X (Twitter)', href: '', icon: 'x' },
+  { label: 'YouTube', href: '', icon: 'youtube' },
+  { label: 'Instagram', href: 'https://www.instagram.com/scorenow_official?obrf=MTM3a2xmaWNtcTlqZg==', icon: 'instagram' },
 ]
 
 function SiteFooter() {
@@ -314,10 +312,10 @@ function SiteFooter() {
         .site-footer-cols {
           max-width: 1240px;
           margin: 0 auto;
-          padding: 48px 24px 32px;
+          padding: 40px 24px 24px;
           display: grid;
           grid-template-columns: repeat(4, 1fr) 1.3fr 1.3fr;
-          gap: 28px;
+          gap: 24px;
         }
 
         footer.site-footer h4 {
@@ -389,9 +387,11 @@ function SiteFooter() {
           color: #f2b418;
         }
 
-        .footer-social img {
+        .footer-social svg {
           width: 18px;
           height: 18px;
+          fill: currentColor;
+          stroke: currentColor;
         }
 
         .site-footer-apps {
@@ -527,11 +527,22 @@ function SiteFooter() {
 function SocialLinks() {
   const visible = socialLinks.filter((link) => link.href)
   if (visible.length === 0) return null
+  
+  const renderIcon = (iconType: string) => {
+    const iconMap: Record<string, JSX.Element> = {
+      facebook: <svg viewBox="0 0 24 24"><path d="M13.5 22v-8h2.7l.4-3.2h-3.1V8.8c0-.9.3-1.5 1.6-1.5h1.7V4.4c-.3 0-1.3-.1-2.4-.1-2.4 0-4 1.5-4 4.1v2.4H7.6V14h2.8v8z"/></svg>,
+      x: <svg viewBox="0 0 24 24"><path d="M17.8 3h3l-6.6 7.5L22 21h-6l-4.7-6.1L5.9 21h-3l7-8L2 3h6.1l4.2 5.6zm-1 16.2h1.7L7.3 4.7H5.5z"/></svg>,
+      youtube: <svg viewBox="0 0 24 24"><path d="M21.6 7.2a2.5 2.5 0 0 0-1.8-1.8C18.2 5 12 5 12 5s-6.200 0-7.800.4A2.500 2.500 0 0 0 2.400 7.2C2 8.800 2 12 2 12s0 3.200.4 4.800a2.500 2.500 0 0 0 1.800 1.800C5.800 19 12 19 12 19s6.200 0 7.800-.4a2.500 2.500 0 0 0 1.800-1.800c.4-1.600.4-4.800.4-4.800s0-3.200-.4-4.800zM10 15V9l5.2 3z"/></svg>,
+      instagram: <svg viewBox="0 0 24 24"><path d="M12 7.400A4.600 4.600 0 1 0 12 16.600 4.600 4.600 0 0 0 12 7.400zm0 7.600a3 3 0 1 1 0-6 3 3 0 0 1 0 6zM17.200 5.800a1.100 1.100 0 1 0 0 2.200 1.100 1.100 0 0 0 0-2.200zM16 2H8a6 6 0 0 0-6 6v8a6 6 0 0 0 6 6h8a6 6 0 0 0 6-6V8a6 6 0 0 0-6-6zm4.400 14a4.400 4.400 0 0 1-4.400 4.400H8A4.400 4.400 0 0 1 3.600 16V8A4.400 4.400 0 0 1 8 3.600h8A4.400 4.400 0 0 1 20.400 8z"/></svg>,
+    }
+    return iconMap[iconType] || null
+  }
+  
   return (
     <div className="footer-social" aria-label="Follow Scorenow">
       {visible.map((link) => (
         <a key={link.label} href={link.href} target="_blank" rel="noreferrer" aria-label={`Scorenow on ${link.label}`} title={link.label}>
-          <img src={link.icon} alt="" />
+          {renderIcon(link.icon)}
         </a>
       ))}
     </div>
