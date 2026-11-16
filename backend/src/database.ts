@@ -2823,9 +2823,11 @@ export const submitHealthAssessmentRequest = async ({
 export const listHealthAssessmentRequests = async (filters?: { status?: string; limit?: number; offset?: number }) => {
   const limit = filters?.limit ?? 50;
   const offset = filters?.offset ?? 0;
-  const statusFilter = filters?.status ? `WHERE status = $1` : '';
-  const params = filters?.status ? [filters.status, limit, offset] : [limit, offset];
-  
+  const params: unknown[] = [];
+  const statusFilter = filters?.status ? `WHERE h.status = $${params.push(filters.status)}` : '';
+  const limitParam = params.push(limit);
+  const offsetParam = params.push(offset);
+
   const { rows } = await pool.query(
     `SELECT h.id, h.user_id, h.full_name, h.mobile, h.email, h.request_type, h.description, h.status, 
             h.submitted_at, h.reviewed_at, h.reviewed_by, ${CUSTOMER_DISPLAY_NAME} AS customer_name
@@ -2834,7 +2836,7 @@ export const listHealthAssessmentRequests = async (filters?: { status?: string; 
      LEFT JOIN kyc_profiles k ON k.user_id = u.id
      ${statusFilter}
      ORDER BY h.submitted_at DESC
-     LIMIT $${statusFilter ? 3 : 1} OFFSET $${statusFilter ? 4 : 2}`,
+     LIMIT $${limitParam} OFFSET $${offsetParam}`,
     params,
   );
   return rows;
