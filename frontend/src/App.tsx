@@ -304,10 +304,206 @@ const socialLinks = [
 function SiteFooter() {
   return (
     <footer className="site-footer">
+      <style>{`
+        footer.site-footer {
+          background: #0a1f5c;
+          color: #c9d3f0;
+          border-top: 4px solid #f2b418;
+        }
+
+        .site-footer-cols {
+          max-width: 1240px;
+          margin: 0 auto;
+          padding: 48px 24px 32px;
+          display: grid;
+          grid-template-columns: repeat(4, 1fr) 1.3fr 1.3fr;
+          gap: 28px;
+        }
+
+        footer.site-footer h4 {
+          margin: 0 0 14px;
+          font-size: 14px;
+          font-weight: 500;
+          color: #8fa0d6;
+          letter-spacing: 0.02em;
+        }
+
+        footer.site-footer ul {
+          list-style: none;
+          margin: 0;
+          padding: 0;
+          display: grid;
+          gap: 10px;
+        }
+
+        footer.site-footer li a {
+          color: #fff;
+          font-weight: 500;
+          transition: color 0.2s;
+        }
+
+        footer.site-footer li a:hover {
+          color: #f2b418;
+        }
+
+        footer.site-footer address {
+          font-style: normal;
+          line-height: 1.6;
+          font-size: 15px;
+        }
+
+        .site-footer-mail {
+          border-left: 1px solid #26397a;
+          padding-left: 28px;
+        }
+
+        .site-footer-reach {
+          margin-top: 16px;
+        }
+
+        .site-footer-reach a {
+          color: #f2b418;
+          font-weight: 500;
+          transition: color 0.2s;
+        }
+
+        .footer-social {
+          display: flex;
+          gap: 14px;
+          margin-top: 10px;
+        }
+
+        .footer-social a {
+          width: 38px;
+          height: 38px;
+          border: 1px solid #2c428a;
+          border-radius: 50%;
+          display: grid;
+          place-items: center;
+          color: #fff;
+          transition: all 0.2s;
+        }
+
+        .footer-social a:hover {
+          border-color: #f2b418;
+          color: #f2b418;
+        }
+
+        .footer-social img {
+          width: 18px;
+          height: 18px;
+        }
+
+        .site-footer-apps {
+          max-width: 1240px;
+          margin: 0 auto;
+          padding: 0 24px 28px;
+          display: flex;
+          flex-wrap: wrap;
+          align-items: center;
+          gap: 14px 16px;
+        }
+
+        .site-footer-apps h4 {
+          margin: 0 8px 0 0;
+        }
+
+        .site-app {
+          display: flex;
+          align-items: center;
+          gap: 12px;
+          border: 1px solid #2c428a;
+          border-radius: 10px;
+          padding: 8px 18px 8px 14px;
+          color: #fff;
+          background: #0d2670;
+          cursor: default;
+          transition: all 0.2s;
+        }
+
+        .site-app:hover {
+          border-color: #f2b418;
+        }
+
+        .site-app svg {
+          width: 30px;
+          height: 30px;
+          fill: #fff;
+          flex: none;
+        }
+
+        .site-app small {
+          display: block;
+          font-size: 12px;
+          color: #f2b418;
+          font-weight: 600;
+          line-height: 1.2;
+        }
+
+        .site-app b {
+          display: block;
+          font-size: 17px;
+          font-weight: 600;
+          line-height: 1.2;
+        }
+
+        .site-footer-bottom {
+          border-top: 1px solid #26397a;
+        }
+
+        .site-footer-bottom div {
+          max-width: 1240px;
+          margin: 0 auto;
+          padding: 20px 24px;
+          display: flex;
+          flex-wrap: wrap;
+          gap: 20px 36px;
+          align-items: center;
+          font-size: 15px;
+        }
+
+        .site-footer-bottom a {
+          display: flex;
+          gap: 8px;
+          align-items: center;
+          color: #fff;
+          transition: color 0.2s;
+        }
+
+        .site-footer-bottom a:hover {
+          color: #f2b418;
+        }
+
+        .site-footer-bottom span {
+          margin-left: auto;
+          color: #8fa0d6;
+        }
+
+        @media (max-width: 1000px) {
+          .site-footer-cols {
+            grid-template-columns: repeat(2, 1fr);
+          }
+          .site-footer-mail {
+            border-left: 0;
+            padding-left: 0;
+          }
+        }
+
+        @media (max-width: 520px) {
+          .site-footer-cols {
+            grid-template-columns: 1fr;
+          }
+          .site-footer-bottom span {
+            margin-left: 0;
+            width: 100%;
+          }
+        }
+      `}</style>
+
       <div className="site-footer-cols">
         <section><h4>About</h4><ul><li><a href="#contact">Contact us</a></li><li><a href="#about">About us</a></li><li><a href="#partner-opportunity">Partner with us</a></li></ul></section>
         <section><h4>Services</h4><ul><li><a href="#insights">Check credit score</a></li><li><a href="#insights">Credit report</a></li><li><a href="#services">Score improvement</a></li><li><a href="#services">Dispute fixing</a></li></ul></section>
-        <section><h4>Help</h4><ul><li><a href="#contact">Payments</a></li><li><a href="#contact">Cancellation &amp; refunds</a></li><li><a href="#contact">FAQ</a></li><li><a href="#contact">Report an issue</a></li></ul></section>
+        <section><h4>Help</h4><ul><li><a href="#contact">Payments</a></li><li><a href="#contact">Cancellation & refunds</a></li><li><a href="#contact">FAQ</a></li><li><a href="#contact">Report an issue</a></li></ul></section>
         <section><h4>Policies</h4><ul><li><a href="#">Terms of use</a></li><li><a href="#">Privacy</a></li><li><a href="#">Security</a></li><li><a href="#">Grievance redressal</a></li><li><a href="#">Sitemap</a></li></ul></section>
         <section className="site-footer-mail"><h4>Mail us</h4>
           <address>Tgs Consumer Services Private Limited,<br />Bapuji Nagar, Pani Tanki Lane<br />Bhubaneswar, Odisha – 751009<br />India</address>
@@ -318,17 +514,12 @@ function SiteFooter() {
           <address>Tgs Consumer Services Private Limited,<br />Plot No-711, Near Somnath Temple,<br />Ghodaghat Chowk, Sonepur,<br />Odisha – 767017<br />India<br />CIN: U74999OR2021PTC036918</address>
           <p className="site-footer-reach">Customer care: <a href="tel:+919114141011">+91 91141 41011</a><br />Email: <a href="mailto:info@scorenow.in">info@scorenow.in</a></p>
         </section>
-        <AppDownload />
       </div>
-      <div className="site-footer-bottom">
-        <div>
-          <a href="#partner-opportunity">Become a partner</a>
-          <a href="#">Advertise</a>
-          <a href="#">Gift cards</a>
-          <a href="#contact">Help center</a>
-          <span>© 2026 Scorenow, a brand of Tgs Consumer Services Private Limited. All rights reserved.</span>
-        </div>
+      <div className="site-footer-apps"><h4>Get the app</h4>
+        <div className="site-app" role="img" aria-label="Android app coming soon"><svg viewBox="0 0 24 24"><path d="M6 18c0 .55.45 1 1 1h1v3.5a1.5 1.5 0 0 0 3 0V19h2v3.5a1.5 1.5 0 0 0 3 0V19h1c.55 0 1-.45 1-1V8H6zM3.5 8A1.5 1.5 0 0 0 2 9.5v7a1.5 1.5 0 0 0 3 0v-7A1.5 1.5 0 0 0 3.5 8zm17 0A1.5 1.5 0 0 0 19 9.5v7a1.5 1.5 0 0 0 3 0v-7A1.5 1.5 0 0 0 20.5 8zm-4.97-5.84l1.3-1.3a.3.3 0 0 0-.42-.42l-1.48 1.48A5.5 5.5 0 0 0 12 1.5c-.96 0-1.86.25-2.65.72L7.87.74a.3.3 0 0 0-.42.42l1.3 1.3A5.48 5.48 0 0 0 6.5 7h11a5.48 5.48 0 0 0-1.97-4.84zM10 5H9V4h1zm5 0h-1V4h1z" fill="currentColor" /></svg><span><small>Coming soon</small><b>Android app</b></span></div>
+        <div className="site-app" role="img" aria-label="iOS app coming soon"><svg viewBox="0 0 24 24"><path d="M12.152 6.896c-.948 0-2.415-1.078-3.96-1.04-2.04.027-3.91 1.183-4.961 3.014-2.117 3.675-.546 9.103 1.519 12.09 1.013 1.454 2.208 3.09 3.792 3.039 1.52-.065 2.09-.987 3.935-.987 1.831 0 2.35.987 3.96.948 1.637-.026 2.676-1.48 3.676-2.948 1.156-1.688 1.636-3.325 1.662-3.415-.039-.013-3.182-1.221-3.22-4.857-.026-3.04 2.48-4.494 2.597-4.559-1.429-2.09-3.623-2.324-4.39-2.376-2-.156-3.675 1.09-4.61 1.09zM15.53 3.83c.843-1.012 1.4-2.427 1.245-3.83-1.207.052-2.662.805-3.532 1.818-.78.896-1.454 2.338-1.273 3.714 1.338.104 2.715-.688 3.559-1.701" fill="currentColor" /></svg><span><small>Coming soon</small><b>iOS app</b></span></div>
       </div>
+      <div className="site-footer-bottom"><div><a href="#partner-opportunity">Become a partner</a><a href="#">Advertise</a><a href="#">Gift cards</a><a href="#contact">Help center</a><span>© 2026 Scorenow, a brand of Tgs Consumer Services Private Limited. All rights reserved.</span></div></div>
     </footer>
   )
 }
@@ -764,19 +955,6 @@ function AuthModal({ open, notice, onClose, onSuccess }: { open: boolean; notice
             </p>
           </>
         )}
-      </div>
-    </div>
-  )
-}
-
-function AppDownload() {
-  return (
-    <div className="app-download">
-      <strong>Scorenow on mobile</strong>
-      <small>Apps coming soon</small>
-      <div className="store-badges" aria-label="Scorenow mobile apps coming soon">
-        <span className="store-badge"><Smartphone /><span><small>Coming soon on the</small><b>App Store</b></span></span>
-        <span className="store-badge"><Play /><span><small>Coming soon on</small><b>Google Play</b></span></span>
       </div>
     </div>
   )
