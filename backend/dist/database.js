@@ -2,6 +2,7 @@ import { createCipheriv, createDecipheriv, createHash, randomBytes, randomInt, s
 import { Pool } from "pg";
 import { scoreBand } from "./bureaus.js";
 import { normalizeReport, PARSER_VERSION } from "./reportParser.js";
+import { PARTNER_ACTIVITY_CHANNEL, partnerEvents } from "./realtime.js";
 const pool = new Pool({
     connectionString: process.env.DATABASE_URL,
 });
@@ -123,6 +124,7 @@ export const initializeDatabase = async () => {
     await pool.query(`ALTER TABLE admin_accounts ADD COLUMN IF NOT EXISTS invitation_expires_at TIMESTAMPTZ`);
     await pool.query(`ALTER TABLE admin_accounts ADD COLUMN IF NOT EXISTS invited_by TEXT NOT NULL DEFAULT 'system'`);
     await pool.query(`ALTER TABLE admin_accounts ADD COLUMN IF NOT EXISTS parent_email TEXT`);
+    await pool.query(`ALTER TABLE admin_accounts ADD COLUMN IF NOT EXISTS is_primary BOOLEAN NOT NULL DEFAULT FALSE`);
     await pool.query(`ALTER TABLE admin_accounts DROP CONSTRAINT IF EXISTS admin_accounts_role_check`);
     await pool.query(`ALTER TABLE admin_accounts ADD CONSTRAINT admin_accounts_role_check CHECK (role IN ('manager', 'support', 'analyst', 'partner', 'agent'))`);
     await pool.query(`
@@ -162,6 +164,19 @@ export const initializeDatabase = async () => {
       updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )
   `);
+    await pool.query(`
+    CREATE TABLE IF NOT EXISTS partner_activity (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      actor_email TEXT NOT NULL,
+      actor_role TEXT NOT NULL,
+      event TEXT NOT NULL,
+      target_email TEXT,
+      details JSONB NOT NULL DEFAULT '{}'::jsonb,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+    await pool.query(`CREATE INDEX IF NOT EXISTS partner_activity_actor_idx ON partner_activity (actor_email, created_at DESC)`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS partner_activity_created_idx ON partner_activity (created_at DESC)`);
     await pool.query(`
     CREATE TABLE IF NOT EXISTS customer_invites (
       id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -269,6 +284,70 @@ export const initializeDatabase = async () => {
     await pool.query(`CREATE INDEX IF NOT EXISTS health_assessment_requests_user_idx ON health_assessment_requests (user_id, submitted_at DESC)`);
     await pool.query(`CREATE INDEX IF NOT EXISTS health_assessment_requests_status_idx ON health_assessment_requests (status, submitted_at DESC)`);
     await pool.query(`
+    CREATE TABLE IF NOT EXISTS consent_events (
+      id BIGSERIAL PRIMARY KEY,
+      user_id UUID NOT NULL REFERENCES users(id),
+      consent_type TEXT NOT NULL CHECK (consent_type IN ('marketing', 'data_sharing', 'sms_notifications', 'push_notifications')),
+      granted BOOLEAN NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+    await pool.query(`CREATE INDEX IF NOT EXISTS consent_events_user_idx ON consent_events (user_id, created_at DESC)`);
+    await pool.query(`
+    CREATE TABLE IF NOT EXISTS refund_requests (
+      id BIGSERIAL PRIMARY KEY,
+      payment_id UUID NOT NULL UNIQUE REFERENCES payments(id),
+      user_id UUID NOT NULL REFERENCES users(id),
+      reason TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'approved', 'rejected', 'processed')),
+      decided_by TEXT,
+      decision_note TEXT,
+      decided_at TIMESTAMPTZ,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+    await pool.query(`
+    CREATE TABLE IF NOT EXISTS customer_notifications (
+      id BIGSERIAL PRIMARY KEY,
+      user_id UUID NOT NULL REFERENCES users(id),
+      title TEXT NOT NULL,
+      body TEXT NOT NULL,
+      read_at TIMESTAMPTZ,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+    await pool.query(`CREATE INDEX IF NOT EXISTS customer_notifications_user_idx ON customer_notifications (user_id, created_at DESC)`);
+    await pool.query(`
+    CREATE TABLE IF NOT EXISTS notification_deliveries (
+      id BIGSERIAL PRIMARY KEY,
+      user_id UUID NOT NULL REFERENCES users(id),
+      channel TEXT NOT NULL CHECK (channel IN ('sms', 'push')),
+      status TEXT NOT NULL CHECK (status IN ('sent', 'skipped', 'failed')),
+      detail TEXT,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+    await pool.query(`
+    CREATE TABLE IF NOT EXISTS push_tokens (
+      token TEXT PRIMARY KEY,
+      user_id UUID NOT NULL REFERENCES users(id),
+      platform TEXT NOT NULL CHECK (platform IN ('android', 'ios', 'web')),
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+    await pool.query(`
+    CREATE TABLE IF NOT EXISTS canned_replies (
+      id BIGSERIAL PRIMARY KEY,
+      title TEXT NOT NULL,
+      body TEXT NOT NULL,
+      created_by TEXT NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+    await pool.query(`ALTER TABLE admin_accounts ADD COLUMN IF NOT EXISTS reset_token_hash TEXT`);
+    await pool.query(`ALTER TABLE admin_accounts ADD COLUMN IF NOT EXISTS reset_expires_at TIMESTAMPTZ`);
+    await pool.query(`
     CREATE TABLE IF NOT EXISTS testimonials (
       id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
       customer_name TEXT NOT NULL,
@@ -282,10 +361,28 @@ export const initializeDatabase = async () => {
     )
   `);
     await pool.query(`CREATE INDEX IF NOT EXISTS testimonials_published_idx ON testimonials (published, published_at DESC)`);
+    await pool.query(`
+    CREATE TABLE IF NOT EXISTS site_content (
+      key TEXT PRIMARY KEY,
+      value JSONB NOT NULL,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_by TEXT
+    )
+  `);
 };
-// Customers often keep the placeholder account name; prefer the name on their PAN profile when present.
-const CUSTOMER_DISPLAY_NAME = `CASE WHEN (u.full_name IS NULL OR TRIM(u.full_name) = '' OR u.full_name ILIKE 'score now user')
-  THEN COALESCE(NULLIF(TRIM(k.name_as_per_pan), ''), NULLIF(u.email, ''), 'Customer') ELSE u.full_name END`;
+export const listSiteContent = async () => {
+    const { rows } = await pool.query(`SELECT key, value FROM site_content`);
+    return Object.fromEntries(rows.map((row) => [row.key, row.value]));
+};
+export const saveSiteContent = async (key, value, adminId) => {
+    await pool.query(`INSERT INTO site_content (key, value, updated_at, updated_by) VALUES ($1, $2, NOW(), $3)
+     ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW(), updated_by = EXCLUDED.updated_by`, [key, JSON.stringify(value), adminId]);
+};
+export const deleteSiteContent = async (key) => {
+    await pool.query(`DELETE FROM site_content WHERE key = $1`, [key]);
+};
+// Admins see the name on the customer's PAN profile first, falling back to the registered account name.
+const CUSTOMER_DISPLAY_NAME = `COALESCE(NULLIF(TRIM(k.name_as_per_pan), ''), NULLIF(TRIM(u.full_name), ''), NULLIF(u.email, ''), 'Customer')`;
 const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 const hashToken = (token) => createHash("sha256").update(token).digest("hex");
 export const createSession = async ({ userId, ipAddress, userAgent }) => {
@@ -306,7 +403,7 @@ export const findSessionUser = async (token) => {
 export const revokeSession = async (token) => {
     await pool.query(`UPDATE user_sessions SET revoked_at = NOW() WHERE token_hash = $1 AND revoked_at IS NULL`, [hashToken(token)]);
 };
-const ADMIN_SESSION_TTL_MS = 12 * 60 * 60 * 1000;
+export const ADMIN_SESSION_TTL_MS = 12 * 60 * 60 * 1000;
 export const createAdminSession = async ({ adminId, role = "owner", ipAddress, userAgent }) => {
     const token = randomBytes(32).toString("hex");
     await pool.query(`INSERT INTO admin_sessions (token_hash, admin_id, role, ip_address, user_agent, expires_at)
@@ -316,12 +413,18 @@ export const createAdminSession = async ({ adminId, role = "owner", ipAddress, u
 export const findAdminSession = async (token) => {
     if (!/^[0-9a-f]{64}$/.test(token))
         return null;
-    const { rows } = await pool.query(`SELECT s.admin_id, COALESCE(a.role, s.role) AS role
+    const { rows } = await pool.query(`SELECT s.admin_id, COALESCE(a.role, s.role) AS role, s.expires_at
      FROM admin_sessions s
      LEFT JOIN admin_accounts a ON a.email = s.admin_id AND a.status = 'active'
      WHERE s.token_hash = $1 AND s.revoked_at IS NULL AND s.expires_at > NOW()
        AND (a.id IS NOT NULL OR s.admin_id = $2)`, [hashToken(token), process.env.ADMIN_LOGIN_ID || ""]);
     return rows[0] ?? null;
+};
+export const extendAdminSession = async (token) => {
+    const expiresAt = new Date(Date.now() + ADMIN_SESSION_TTL_MS);
+    const { rowCount } = await pool.query(`UPDATE admin_sessions SET expires_at = $2
+     WHERE token_hash = $1 AND revoked_at IS NULL AND expires_at > NOW()`, [hashToken(token), expiresAt]);
+    return rowCount ? expiresAt : null;
 };
 export const revokeAdminSession = async (token) => {
     await pool.query(`UPDATE admin_sessions SET revoked_at = NOW() WHERE token_hash = $1 AND revoked_at IS NULL`, [hashToken(token)]);
@@ -370,14 +473,86 @@ export const acceptAdminInvitation = async ({ token, password, pin }) => {
     return rows[0] ?? null;
 };
 export const listAdminAccounts = async () => {
-    const { rows } = await pool.query(`SELECT email, full_name, role, status, created_at FROM admin_accounts ORDER BY created_at DESC LIMIT 200`);
+    const { rows } = await pool.query(`SELECT email, full_name, role, status, created_at FROM admin_accounts WHERE is_primary = FALSE ORDER BY created_at DESC LIMIT 200`);
     return rows;
+};
+// The primary owner lives in ADMIN_* environment variables until it is first edited from the admin team page.
+export const getPrimaryAdminRow = async () => {
+    const { rows } = await pool.query(`SELECT email FROM admin_accounts WHERE is_primary = TRUE LIMIT 1`);
+    return rows[0] ?? null;
+};
+export const getPrimaryAdminEmail = async () => (await getPrimaryAdminRow())?.email ?? (process.env.ADMIN_LOGIN_ID || "").toLowerCase();
+export const createPrimaryAdmin = async ({ previousEmail, email, password, pin }) => {
+    const passwordSalt = randomBytes(16).toString("hex");
+    const pinSalt = randomBytes(16).toString("hex");
+    await pool.query(`INSERT INTO admin_accounts (email, full_name, role, status, is_primary, password_salt, password_hash, pin_salt, pin_hash, invited_by)
+     VALUES ($1, 'Primary admin', 'owner', 'active', TRUE, $2, $3, $4, $5, 'system')`, [email.toLowerCase(), passwordSalt, deriveAdminSecret(password, passwordSalt), pinSalt, deriveAdminSecret(pin, pinSalt)]);
+    await pool.query(`UPDATE admin_sessions SET revoked_at = NOW() WHERE admin_id = $1 AND revoked_at IS NULL`, [previousEmail.toLowerCase()]);
+};
+// Updates only the fields provided. Setting both a password and a PIN activates an invited account.
+export const updateAdminCredentials = async ({ email, newEmail, password, pin }) => {
+    const passwordSalt = password ? randomBytes(16).toString("hex") : null;
+    const pinSalt = pin ? randomBytes(16).toString("hex") : null;
+    const { rows } = await pool.query(`UPDATE admin_accounts SET
+       email = COALESCE($2, email),
+       password_salt = COALESCE($3, password_salt),
+       password_hash = COALESCE($4, password_hash),
+       pin_salt = COALESCE($5, pin_salt),
+       pin_hash = COALESCE($6, pin_hash),
+       status = CASE WHEN status = 'invited' AND COALESCE($4, password_hash) IS NOT NULL AND COALESCE($6, pin_hash) IS NOT NULL
+                     THEN 'active' ELSE status END,
+       invitation_token_hash = CASE WHEN status = 'invited' AND COALESCE($4, password_hash) IS NOT NULL AND COALESCE($6, pin_hash) IS NOT NULL
+                     THEN NULL ELSE invitation_token_hash END,
+       invitation_expires_at = CASE WHEN status = 'invited' AND COALESCE($4, password_hash) IS NOT NULL AND COALESCE($6, pin_hash) IS NOT NULL
+                     THEN NULL ELSE invitation_expires_at END,
+       updated_at = NOW()
+     WHERE email = $1 AND status IN ('invited', 'active', 'disabled')
+     RETURNING email`, [
+        email.toLowerCase(), newEmail?.toLowerCase() ?? null,
+        passwordSalt, passwordSalt && password ? deriveAdminSecret(password, passwordSalt) : null,
+        pinSalt, pinSalt && pin ? deriveAdminSecret(pin, pinSalt) : null,
+    ]);
+    if (!rows[0])
+        return null;
+    await pool.query(`UPDATE admin_sessions SET revoked_at = NOW() WHERE admin_id = $1 AND revoked_at IS NULL`, [email.toLowerCase()]);
+    return rows[0];
 };
 export const setAdminAccountStatus = async (email, status) => {
     const { rowCount } = await pool.query(`UPDATE admin_accounts SET status = $2, updated_at = NOW() WHERE email = $1 AND status IN ('active', 'disabled')`, [email.toLowerCase(), status]);
     if (rowCount)
         await pool.query(`UPDATE admin_sessions SET revoked_at = NOW() WHERE admin_id = $1 AND revoked_at IS NULL`, [email.toLowerCase()]);
     return (rowCount ?? 0) > 0;
+};
+// Activity is best-effort: a failed audit write must never fail the business action that triggered it.
+export const recordPartnerActivity = async ({ actorEmail, actorRole, event, targetEmail = null, details = {} }) => {
+    try {
+        const { rows } = await pool.query(`INSERT INTO partner_activity (actor_email, actor_role, event, target_email, details)
+       VALUES ($1, $2, $3, $4, $5)
+       RETURNING id, actor_email, actor_role, event, target_email, details, created_at`, [actorEmail.toLowerCase(), actorRole, event, targetEmail?.toLowerCase() ?? null, JSON.stringify(details)]);
+        partnerEvents.emit(PARTNER_ACTIVITY_CHANNEL, rows[0]);
+    }
+    catch (error) {
+        console.error("Partner activity write failed", error);
+    }
+};
+// Partners see events they performed or that concern them. Owner and manager pass no email to see everything.
+export const listPartnerActivity = async (email, limit = 100) => {
+    const { rows } = await pool.query(`SELECT id, actor_email, actor_role, event, target_email, details, created_at
+     FROM partner_activity
+     WHERE $1::text IS NULL OR actor_email = $1 OR target_email = $1
+     ORDER BY created_at DESC
+     LIMIT $2`, [email ? email.toLowerCase() : null, Math.min(Math.max(limit, 1), 200)]);
+    return rows;
+};
+// Used only for owner/manager monitoring. Partner-facing views must not call this.
+export const listCustomerNames = async (userIds) => {
+    const ids = [...new Set(userIds.filter(Boolean))];
+    if (!ids.length)
+        return new Map();
+    const { rows } = await pool.query(`SELECT u.id, ${CUSTOMER_DISPLAY_NAME} AS full_name
+     FROM users u LEFT JOIN kyc_profiles k ON k.user_id = u.id
+     WHERE u.id = ANY($1::uuid[])`, [ids]);
+    return new Map(rows.map((row) => [row.id, row.full_name]));
 };
 // Owner-only overview. Partners see their direct customers plus customers of their agents.
 export const listPartnerAccounts = async () => {
@@ -390,7 +565,10 @@ export const listPartnerAccounts = async () => {
       (SELECT COUNT(*) FROM admin_accounts c WHERE c.parent_email = a.email AND c.role = 'agent') AS agent_count,
       (SELECT COALESCE(SUM(pc.amount_paise), 0) FROM partner_commissions pc WHERE pc.payee_email = a.email AND pc.status = 'pending') AS pending_paise,
       (SELECT COALESCE(SUM(pc.amount_paise), 0) FROM partner_commissions pc WHERE pc.payee_email = a.email AND pc.status = 'paid') AS paid_paise,
-      EXISTS (SELECT 1 FROM partner_payout_profiles p WHERE p.email = a.email AND (p.upi_id IS NOT NULL OR (p.bank_account_number IS NOT NULL AND p.ifsc IS NOT NULL))) AS payout_ready
+      EXISTS (SELECT 1 FROM partner_payout_profiles p WHERE p.email = a.email AND (p.upi_id IS NOT NULL OR (p.bank_account_number IS NOT NULL AND p.ifsc IS NOT NULL))) AS payout_ready,
+      (SELECT MAX(s.created_at) FROM admin_sessions s WHERE s.admin_id = a.email) AS last_login,
+      EXISTS (SELECT 1 FROM admin_sessions s WHERE s.admin_id = a.email AND s.revoked_at IS NULL AND s.expires_at > NOW()) AS signed_in,
+      (SELECT MAX(pa.created_at) FROM partner_activity pa WHERE pa.actor_email = a.email) AS last_activity
     FROM admin_accounts a
     WHERE a.role IN ('partner', 'agent')
     ORDER BY a.role, a.created_at DESC
@@ -751,6 +929,35 @@ export const getAdminAnalytics = async (requestedDays = 14) => {
         ],
     };
 };
+export const getRevenueReport = async (fromDate, toDate) => {
+    const [daily, commissions] = await Promise.all([
+        pool.query(`SELECT to_char(created_at::date, 'YYYY-MM-DD') AS day, COUNT(*) AS paid_count,
+              COALESCE(SUM(amount + gst_amount), 0) AS revenue
+       FROM payments
+       WHERE status = 'paid' AND created_at >= $1::date AND created_at < ($2::date + INTERVAL '1 day')
+       GROUP BY created_at::date ORDER BY created_at::date`, [fromDate, toDate]),
+        pool.query(`SELECT status, COUNT(*) AS count, COALESCE(SUM(amount_paise), 0) AS amount_paise
+       FROM partner_commissions
+       WHERE created_at >= $1::date AND created_at < ($2::date + INTERVAL '1 day')
+       GROUP BY status`, [fromDate, toDate]),
+    ]);
+    const totalRevenue = daily.rows.reduce((sum, row) => sum + Number(row.revenue), 0);
+    const commissionByStatus = Object.fromEntries(commissions.rows.map((row) => [row.status, {
+            count: Number(row.count),
+            amountPaise: Number(row.amount_paise),
+        }]));
+    return {
+        from: fromDate,
+        to: toDate,
+        totalRevenue,
+        paidPayments: daily.rows.reduce((sum, row) => sum + Number(row.paid_count), 0),
+        daily: daily.rows.map((row) => ({ day: row.day, paidCount: Number(row.paid_count), revenue: Number(row.revenue) })),
+        commissions: {
+            pending: commissionByStatus.pending ?? { count: 0, amountPaise: 0 },
+            paid: commissionByStatus.paid ?? { count: 0, amountPaise: 0 },
+        },
+    };
+};
 export const listSupportTickets = async (status, userId = null) => {
     const allowedStatuses = ["open", "in_progress", "resolved", "closed"];
     const filterStatus = allowedStatuses.includes(status) ? status : null;
@@ -790,11 +997,164 @@ export const addSupportTicketComment = async ({ ticketId, authorType, authorId, 
      WHERE id = $1`, [ticketId, authorType]);
     return true;
 };
+export const getSupportTicketAssignee = async (id) => {
+    const { rows } = await pool.query(`SELECT assigned_to FROM support_tickets WHERE id = $1`, [id]);
+    return rows[0] ? { exists: true, assignedTo: rows[0].assigned_to } : { exists: false, assignedTo: null };
+};
 export const updateSupportTicket = async (id, status, assignedTo) => {
     if (!["open", "in_progress", "resolved", "closed"].includes(status))
         return false;
     const { rowCount } = await pool.query(`UPDATE support_tickets SET status = $2, assigned_to = $3, updated_at = NOW() WHERE id = $1`, [id, status, assignedTo]);
     return (rowCount ?? 0) > 0;
+};
+export const deleteCustomerAccount = async (userId) => {
+    const client = await pool.connect();
+    try {
+        await client.query("BEGIN");
+        const { rowCount } = await client.query(`UPDATE users SET status = 'blocked', full_name = NULL, mobile = 'deleted-' || id::text, email = NULL,
+         password_salt = NULL, password_hash = NULL, email_verified = FALSE, updated_at = NOW()
+       WHERE id = $1 AND role = 'customer'`, [userId]);
+        if (!rowCount) {
+            await client.query("ROLLBACK");
+            return false;
+        }
+        await client.query(`UPDATE health_assessment_requests SET full_name = 'Deleted user', mobile = 'deleted', email = NULL, description = NULL
+       WHERE user_id = $1`, [userId]);
+        await client.query(`UPDATE support_tickets SET requester_name = 'Deleted user', requester_mobile = 'deleted', subject = '[removed]', message = '[removed on account deletion]'
+       WHERE user_id = $1`, [userId]);
+        await client.query(`DELETE FROM crm_customer_profiles WHERE user_id = $1`, [userId]);
+        await client.query(`DELETE FROM push_tokens WHERE user_id = $1`, [userId]);
+        await client.query(`DELETE FROM customer_notifications WHERE user_id = $1`, [userId]);
+        await client.query(`UPDATE user_sessions SET revoked_at = NOW() WHERE user_id = $1 AND revoked_at IS NULL`, [userId]);
+        await client.query("COMMIT");
+        return true;
+    }
+    catch (error) {
+        await client.query("ROLLBACK");
+        throw error;
+    }
+    finally {
+        client.release();
+    }
+};
+export const recordConsent = async (userId, consentType, granted) => {
+    await pool.query(`INSERT INTO consent_events (user_id, consent_type, granted) VALUES ($1, $2, $3)`, [userId, consentType, granted]);
+};
+export const getCurrentConsents = async (userId) => {
+    const { rows } = await pool.query(`SELECT DISTINCT ON (consent_type) consent_type, granted, created_at
+     FROM consent_events WHERE user_id = $1 ORDER BY consent_type, created_at DESC`, [userId]);
+    return rows;
+};
+export const listConsentHistory = async (userId) => {
+    const { rows } = await pool.query(`SELECT consent_type, granted, created_at FROM consent_events WHERE user_id = $1 ORDER BY created_at DESC LIMIT 100`, [userId]);
+    return rows;
+};
+export const listCustomerPayments = async (userId) => {
+    const { rows } = await pool.query(`SELECT p.id, p.report_bureau, p.plan_id, p.amount, p.gst_amount, p.status, p.created_at,
+       (SELECT r.status FROM refund_requests r WHERE r.payment_id = p.id ORDER BY r.created_at DESC LIMIT 1) AS refund_status
+     FROM payments p WHERE p.user_id = $1 ORDER BY p.created_at DESC LIMIT 50`, [userId]);
+    return rows;
+};
+export const getPaymentForUser = async (userId, paymentId) => {
+    const { rows } = await pool.query(`SELECT id, gateway, gateway_order_id, amount, gst_amount, status, report_bureau, plan_id, created_at
+     FROM payments WHERE id = $1 AND user_id = $2`, [paymentId, userId]);
+    return rows[0] ?? null;
+};
+export const createRefundRequest = async (userId, paymentId, reason) => {
+    const { rows } = await pool.query(`INSERT INTO refund_requests (payment_id, user_id, reason)
+     SELECT p.id, p.user_id, $3 FROM payments p WHERE p.id = $2 AND p.user_id = $1 AND p.status = 'paid'
+     ON CONFLICT (payment_id) DO NOTHING
+     RETURNING id, status, created_at`, [userId, paymentId, reason]);
+    return rows[0] ?? null;
+};
+export const listRefundRequests = async (status) => {
+    const { rows } = await pool.query(`SELECT r.id, r.payment_id, r.reason, r.status, r.decided_by, r.decision_note, r.decided_at, r.created_at,
+       p.amount, p.gst_amount, p.report_bureau, p.plan_id, u.full_name AS customer_name, u.mobile AS customer_mobile
+     FROM refund_requests r
+     JOIN payments p ON p.id = r.payment_id
+     JOIN users u ON u.id = r.user_id
+     WHERE ($1::text IS NULL OR r.status = $1)
+     ORDER BY r.created_at DESC LIMIT 200`, [status]);
+    return rows;
+};
+export const decideRefundRequest = async (id, decision, decidedBy, note) => {
+    const { rows } = await pool.query(`UPDATE refund_requests SET status = $2, decided_by = $3, decision_note = $4, decided_at = NOW()
+     WHERE id = $1 AND (
+       (status = 'pending' AND $2 IN ('approved', 'rejected')) OR
+       (status = 'approved' AND $2 = 'processed'))
+     RETURNING user_id`, [id, decision, decidedBy, note]);
+    return rows[0] ?? null;
+};
+export const addCustomerNotification = async (userId, title, body) => {
+    const { rows } = await pool.query(`INSERT INTO customer_notifications (user_id, title, body) VALUES ($1, $2, $3) RETURNING id`, [userId, title, body]);
+    return rows[0];
+};
+export const listCustomerNotifications = async (userId) => {
+    const { rows } = await pool.query(`SELECT id, title, body, read_at, created_at FROM customer_notifications WHERE user_id = $1 ORDER BY created_at DESC LIMIT 100`, [userId]);
+    return rows;
+};
+export const markCustomerNotificationsRead = async (userId, id) => {
+    const { rowCount } = await pool.query(`UPDATE customer_notifications SET read_at = NOW()
+     WHERE user_id = $1 AND read_at IS NULL AND ($2::bigint IS NULL OR id = $2::bigint)`, [userId, id]);
+    return rowCount ?? 0;
+};
+export const recordNotificationDelivery = async (userId, channel, status, detail) => {
+    await pool.query(`INSERT INTO notification_deliveries (user_id, channel, status, detail) VALUES ($1, $2, $3, $4)`, [userId, channel, status, detail]);
+};
+export const savePushToken = async (userId, token, platform) => {
+    await pool.query(`INSERT INTO push_tokens (token, user_id, platform) VALUES ($1, $2, $3)
+     ON CONFLICT (token) DO UPDATE SET user_id = EXCLUDED.user_id, platform = EXCLUDED.platform`, [token, userId, platform]);
+};
+export const listPushTokens = async (userId) => {
+    const { rows } = await pool.query(`SELECT token FROM push_tokens WHERE user_id = $1`, [userId]);
+    return rows.map((row) => row.token);
+};
+export const listCannedReplies = async () => {
+    const { rows } = await pool.query(`SELECT id, title, body, created_by, updated_at FROM canned_replies ORDER BY title LIMIT 200`);
+    return rows;
+};
+export const saveCannedReply = async (id, title, body, adminId) => {
+    if (id) {
+        const { rows } = await pool.query(`UPDATE canned_replies SET title = $2, body = $3, updated_at = NOW() WHERE id = $1 RETURNING id`, [id, title, body]);
+        return rows[0] ?? null;
+    }
+    const { rows } = await pool.query(`INSERT INTO canned_replies (title, body, created_by) VALUES ($1, $2, $3) RETURNING id`, [title, body, adminId]);
+    return rows[0];
+};
+export const deleteCannedReply = async (id) => {
+    const { rowCount } = await pool.query(`DELETE FROM canned_replies WHERE id = $1`, [id]);
+    return (rowCount ?? 0) > 0;
+};
+export const createAdminPasswordReset = async (email) => {
+    const token = randomBytes(32).toString("hex");
+    const { rows } = await pool.query(`UPDATE admin_accounts SET reset_token_hash = $2, reset_expires_at = NOW() + INTERVAL '2 hours', updated_at = NOW()
+     WHERE email = $1 AND status = 'active' RETURNING email`, [email.toLowerCase(), hashToken(token)]);
+    if (!rows[0])
+        return null;
+    return { email: rows[0].email, token };
+};
+export const acceptAdminPasswordReset = async (token, password) => {
+    const passwordSalt = randomBytes(16).toString("hex");
+    const { rows } = await pool.query(`UPDATE admin_accounts SET password_salt = $2, password_hash = $3, reset_token_hash = NULL, reset_expires_at = NULL, updated_at = NOW()
+     WHERE reset_token_hash = $1 AND status = 'active' AND reset_expires_at > NOW()
+     RETURNING email`, [hashToken(token), passwordSalt, deriveAdminSecret(password, passwordSalt)]);
+    if (!rows[0])
+        return null;
+    await pool.query(`UPDATE admin_sessions SET revoked_at = NOW() WHERE admin_id = $1 AND revoked_at IS NULL`, [rows[0].email]);
+    return rows[0];
+};
+export const exportRows = async (kind) => {
+    if (kind === "customers") {
+        const { rows } = await pool.query(`SELECT u.id, u.full_name, u.mobile, u.email, u.status, u.created_at FROM users u WHERE u.role = 'customer' ORDER BY u.created_at DESC LIMIT 50000`);
+        return rows;
+    }
+    if (kind === "payments") {
+        const { rows } = await pool.query(`SELECT p.id, p.gateway_order_id, p.amount, p.gst_amount, p.status, p.report_bureau, p.plan_id, p.created_at
+       FROM payments p ORDER BY p.created_at DESC LIMIT 50000`);
+        return rows;
+    }
+    const { rows } = await pool.query(`SELECT r.id, r.payment_id, r.status, r.reason, r.decided_by, r.decided_at, r.created_at FROM refund_requests r ORDER BY r.created_at DESC LIMIT 50000`);
+    return rows;
 };
 export const createCustomerInvitation = async ({ fullName, mobile, email, invitedBy, }) => {
     const { rows: existingUsers } = await pool.query(`SELECT id FROM users WHERE mobile = $1 AND role = 'customer' LIMIT 1`, [mobile]);
@@ -1122,6 +1482,22 @@ export const completeReportRequest = async ({ userId, requestId, bureau, provide
     finally {
         client.release();
     }
+    try {
+        const { rows: owners } = await pool.query(`SELECT ca.owner_email, a.role FROM customer_assignments ca
+       JOIN admin_accounts a ON a.email = ca.owner_email
+       WHERE ca.user_id = $1`, [userId]);
+        if (owners[0]) {
+            await recordPartnerActivity({
+                actorEmail: owners[0].owner_email,
+                actorRole: owners[0].role,
+                event: "report_completed",
+                details: { customerId: userId, bureau },
+            });
+        }
+    }
+    catch (error) {
+        console.error("Report completion activity lookup failed", error);
+    }
 };
 export const failReportRequest = async (requestId, reason, raw = null) => {
     await pool.query(`UPDATE credit_report_requests SET status = 'failed', failure_reason = $2, provider_response = $3 WHERE id = $1`, [requestId, reason.slice(0, 500), raw === null ? null : JSON.stringify(raw)]);
@@ -1375,7 +1751,7 @@ export const createSubscriptionPayment = async ({ userId, planId, orderId, amoun
      VALUES ($1, $2, $3, $4, $5, 'created', $6)`, [userId, gateway, orderId, amount - gstAmount, gstAmount, planId]);
 };
 export const findSubscriptionPayment = async (userId, orderId) => {
-    const { rows } = await pool.query(`SELECT id, gateway, plan_id FROM payments WHERE user_id = $1 AND gateway_order_id = $2 AND plan_id IS NOT NULL`, [userId, orderId]);
+    const { rows } = await pool.query(`SELECT id, gateway, plan_id, amount, gst_amount FROM payments WHERE user_id = $1 AND gateway_order_id = $2 AND plan_id IS NOT NULL`, [userId, orderId]);
     return rows[0] ?? null;
 };
 // Marks the payment paid and starts the subscription exactly once; a plan bought while one is active starts when it ends.
@@ -1542,8 +1918,10 @@ export const submitHealthAssessmentRequest = async ({ userId, fullName, mobile, 
 export const listHealthAssessmentRequests = async (filters) => {
     const limit = filters?.limit ?? 50;
     const offset = filters?.offset ?? 0;
-    const statusFilter = filters?.status ? `WHERE status = $1` : '';
-    const params = filters?.status ? [filters.status, limit, offset] : [limit, offset];
+    const params = [];
+    const statusFilter = filters?.status ? `WHERE h.status = $${params.push(filters.status)}` : '';
+    const limitParam = params.push(limit);
+    const offsetParam = params.push(offset);
     const { rows } = await pool.query(`SELECT h.id, h.user_id, h.full_name, h.mobile, h.email, h.request_type, h.description, h.status, 
             h.submitted_at, h.reviewed_at, h.reviewed_by, ${CUSTOMER_DISPLAY_NAME} AS customer_name
      FROM health_assessment_requests h
@@ -1551,7 +1929,7 @@ export const listHealthAssessmentRequests = async (filters) => {
      LEFT JOIN kyc_profiles k ON k.user_id = u.id
      ${statusFilter}
      ORDER BY h.submitted_at DESC
-     LIMIT $${statusFilter ? 3 : 1} OFFSET $${statusFilter ? 4 : 2}`, params);
+     LIMIT $${limitParam} OFFSET $${offsetParam}`, params);
     return rows;
 };
 export const getHealthAssessmentRequest = async (requestId) => {
@@ -1584,6 +1962,19 @@ export const listTestimonials = async (publishedOnly = true) => {
      ORDER BY published_at DESC NULLS LAST, submitted_at DESC
      LIMIT 100`);
     return rows;
+};
+export const createTestimonial = async ({ customerName, customerImageUrl, rating, reviewText, resultDescription, published, }) => {
+    const { rows } = await pool.query(`INSERT INTO testimonials (customer_name, customer_image_url, rating, review_text, result_description, published, published_at)
+     VALUES ($1, $2, $3, $4, $5, $6, CASE WHEN $6 THEN NOW() ELSE NULL END)
+     RETURNING id, customer_name, customer_image_url, rating, review_text, result_description, published, submitted_at, published_at`, [customerName, customerImageUrl ?? null, rating, reviewText, resultDescription ?? null, published]);
+    return rows[0];
+};
+export const setTestimonialPublished = async (testimonialId, published) => {
+    const { rows } = await pool.query(`UPDATE testimonials
+     SET published = $2, published_at = CASE WHEN $2 THEN NOW() ELSE NULL END
+     WHERE id = $1
+     RETURNING id, customer_name, customer_image_url, rating, review_text, result_description, published, submitted_at, published_at`, [testimonialId, published]);
+    return rows[0] ?? null;
 };
 export const publishTestimonial = async (testimonialId) => {
     const { rows } = await pool.query(`UPDATE testimonials
