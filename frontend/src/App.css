@@ -4704,3 +4704,37 @@ button.admin-attention-item:hover { transform: translateY(-1px); box-shadow: 0 6
 @media (max-width: 640px) { .customer-payments-summary { grid-template-columns: 1fr; } .dash-plan-single { grid-template-columns: auto 1fr; } .dash-plan-single b { grid-column: 1 / -1; } }
 .customer-payment-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .canned-reply-picker { display: grid; gap: 4px; font-size: 13px; }
+
+/* Neha Assistant Admin Panel */
+.neha-conversations-list { display: grid; gap: 10px; }
+.neha-conversation-item { padding: 14px 16px; border-radius: 10px; background: #f4f8ff; border: 1px solid #dde8f7; cursor: pointer; display: grid; grid-template-columns: 1fr auto; gap: 12px; align-items: start; }
+.neha-conversation-item:hover { background: #eaf2ff; border-color: #2563eb; }
+.neha-conversation-item.active { background: #2563eb; border-color: #2563eb; color: #fff; }
+.neha-conversation-item.active .neha-conv-info strong, .neha-conversation-item.active .neha-conv-info small { color: #fff; }
+.neha-conv-info { display: grid; gap: 4px; }
+.neha-conv-info strong { color: #07173f; font-size: 14px; }
+.neha-conv-info small { color: #6b7790; font-size: 12px; }
+.neha-conversation-item.active .neha-conv-info small { opacity: 0.8; }
+.neha-conv-meta { display: grid; gap: 6px; align-items: end; text-align: right; }
+.neha-conv-meta span { font-size: 12px; }
+.neha-conv-meta .assigned { color: #2563eb; padding: 4px 8px; background: #dbeafe; border-radius: 6px; }
+.neha-conversation-item.active .neha-conv-meta .assigned { background: rgba(255,255,255,0.2); color: #fff; }
+.neha-conv-meta .unassigned { color: #dc2626; padding: 4px 8px; background: #fee2e2; border-radius: 6px; }
+.neha-conversation-item.active .neha-conv-meta .unassigned { background: rgba(255,255,255,0.2); color: #fff; }
+.neha-conv-meta .time { color: #6b7790; }
+.neha-conversation-item.active .neha-conv-meta .time { color: rgba(255,255,255,0.8); }
+
+.neha-messages-card { }
+.neha-messages-list { display: grid; gap: 12px; min-height: 200px; max-height: 400px; overflow-y: auto; padding: 16px; background: #f9fafc; border-radius: 10px; border: 1px solid #e6eef9; margin-bottom: 16px; }
+.neha-message { display: grid; gap: 6px; padding: 12px; border-radius: 8px; background: #fff; border: 1px solid #e6eef9; }
+.neha-message.customer { border-left: 4px solid #2563eb; }
+.neha-message.admin, .neha-message.partner { border-left: 4px solid #16a34a; }
+.message-header { display: flex; gap: 8px; align-items: baseline; }
+.message-header strong { color: #07173f; font-size: 14px; }
+.message-header small { color: #6b7790; font-size: 12px; }
+.message-body { color: #3f4b63; font-size: 14px; line-height: 1.5; }
+
+.neha-reply-form { display: grid; gap: 10px; }
+.neha-reply-form textarea { padding: 10px 12px; border-radius: 8px; border: 1px solid #dde8f7; font-family: inherit; font-size: 14px; color: #071 73f; }
+.neha-reply-form textarea:focus { outline: none; border-color: #2563eb; background: #f5f9ff; }
+.neha-reply-form .button { width: 100%; }
