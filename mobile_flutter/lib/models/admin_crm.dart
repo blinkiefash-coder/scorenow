@@ -507,6 +507,47 @@ class PayoutProfileForm {
   };
 }
 
+class PartnerActivityRow {
+  const PartnerActivityRow({
+    required this.id,
+    required this.actorEmail,
+    required this.actorRole,
+    required this.event,
+    required this.targetEmail,
+    required this.customerName,
+    required this.createdAt,
+  });
+
+  factory PartnerActivityRow.fromJson(Map<String, dynamic> json) {
+    final details = json['details'];
+    final name = details is Map ? details['customerName'] : null;
+    return PartnerActivityRow(
+      id: '${json['id']}',
+      actorEmail: json['actor_email'] as String? ?? '',
+      actorRole: json['actor_role'] as String? ?? '',
+      event: json['event'] as String? ?? '',
+      targetEmail: json['target_email'] as String?,
+      customerName: name is String ? name : null,
+      createdAt: json['created_at'] as String? ?? '',
+    );
+  }
+
+  final String id;
+  final String actorEmail;
+  final String actorRole;
+  final String event;
+  final String? targetEmail;
+  final String? customerName;
+  final String createdAt;
+}
+
+class PartnerMonitorData {
+  const PartnerMonitorData({required this.partners, required this.activity});
+
+  final List<PartnerAccount> partners;
+  final List<PartnerActivityRow> activity;
+}
+
 // Helper functions
 num _numOrString(Object? value) {
   if (value is num) return value;

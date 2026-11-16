@@ -3,6 +3,7 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import 'package:scorenow_mobile/core/app_services.dart';
 import 'package:scorenow_mobile/core/theme.dart';
 import 'package:scorenow_mobile/features/landing/landing_style.dart';
 import 'package:scorenow_mobile/features/landing/plans_data.dart';
@@ -1969,10 +1970,64 @@ const _subscriptionSteps = [
   ),
 ];
 
-class LandingPlans extends StatelessWidget {
+// Shows admin-saved plans from /api/site-content and falls back to the built-in defaults.
+class LandingPlans extends StatefulWidget {
   const LandingPlans({super.key, required this.subscriptionKey});
 
   final GlobalKey subscriptionKey;
+
+  @override
+  State<LandingPlans> createState() => _LandingPlansState();
+}
+
+class _LandingPlansState extends State<LandingPlans> {
+  List<ServicePlan> _services = servicePlans;
+  List<SubscriptionPlan> _subscriptions = subscriptionPlans;
+  bool _started = false;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (_started) return;
+    _started = true;
+    _load();
+  }
+
+  Future<void> _load() async {
+    final services = AppScope.of(context);
+    try {
+      final json = await services.api.request('GET', '/api/site-content');
+      final plans = plansFromSiteContent(json);
+      if (!mounted || plans == null) return;
+      setState(() {
+        _services = plans.services;
+        _subscriptions = plans.subscriptions;
+      });
+    } catch (_) {
+      // Keep the built-in defaults when the API is unreachable.
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return _LandingPlansBody(
+      subscriptionKey: widget.subscriptionKey,
+      servicePlans: _services,
+      subscriptionPlans: _subscriptions,
+    );
+  }
+}
+
+class _LandingPlansBody extends StatelessWidget {
+  const _LandingPlansBody({
+    required this.subscriptionKey,
+    required this.servicePlans,
+    required this.subscriptionPlans,
+  });
+
+  final GlobalKey subscriptionKey;
+  final List<ServicePlan> servicePlans;
+  final List<SubscriptionPlan> subscriptionPlans;
 
   @override
   Widget build(BuildContext context) {

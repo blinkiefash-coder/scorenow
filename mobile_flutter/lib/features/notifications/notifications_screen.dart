@@ -4,6 +4,7 @@ import 'package:scorenow_mobile/core/format.dart';
 import 'package:scorenow_mobile/core/theme.dart';
 import 'package:scorenow_mobile/features/dashboard/completed_reports.dart';
 import 'package:scorenow_mobile/features/dashboard/dashboard_scope.dart';
+import 'package:scorenow_mobile/features/notifications/inbox_section.dart';
 import 'package:scorenow_mobile/models/report.dart';
 
 enum NoticeTone { alert, warning, info, success }
@@ -224,6 +225,7 @@ class NotificationsScreen extends StatelessWidget {
               style: const TextStyle(color: AppColors.muted, fontSize: 13.5),
             ),
             const SizedBox(height: 12),
+            const InboxSection(),
             for (final item in items) _NotificationTile(item: item),
           ],
         ),

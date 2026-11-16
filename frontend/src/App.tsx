@@ -7,8 +7,15 @@ import {
   PiggyBank, Percent, Phone, Play, RotateCcw, Search, Settings, ShieldCheck, Smartphone, Sparkles, Star,
   ArrowUpDown, ArrowUpRight, ArrowDownLeft, Bell, Info, Target, TrendingUp, Users, Volume2, VolumeX, UserRound, WalletCards, X, Zap,
 } from 'lucide-react'
-import { PartnerManagement, PartnerPortal } from './AdminPartners'
+import { PartnerManagement, PartnerMonitor, PartnerPortal } from './AdminPartners'
 import { CrmManagement } from './AdminCrm'
+import { AdminSiteContent } from './AdminSiteContent'
+import { AdminOpsPanel, AdminSessionExpiryBanner, CannedReplyPicker, CustomerPaymentsPanel, CustomerPrivacyPanel } from './AccountOps'
+import { AdminHealthAssessmentManagement, HealthAssessmentForm, LoginWelcomePopup, TestimonialsSection } from './WebFeatures'
+import {
+  DEFAULT_REPORT_PRICE, effectiveBusinessPrices, effectiveFdPlans, effectiveServicePlans, effectiveSubscriptionPlans,
+  formatRupees, formatSubscriptionDuration, useSiteContent,
+} from './siteContent'
 import './App.css'
 
 const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:3000'
@@ -73,13 +80,6 @@ const creditSituations = [
   },
 ]
 
-const servicePlans = [
-  { name: 'Basic', audience: 'For report clarity and basic issue identification', duration: '3 months', originalPrice: '₹10,999', offerPrice: '₹7,149.35', features: ['Detailed credit report review', 'Issue and negative remark summary', 'Starter improvement checklist', 'Email guidance'] },
-  { name: 'Standard', audience: 'For structured improvement with expert support', duration: '6 months', originalPrice: '₹14,999', offerPrice: '₹9,749.35', features: ['Everything in Basic', 'Correction and dispute guidance', 'One-to-one expert consultation', 'WhatsApp and email support', 'Progress review checkpoints'] },
-  { name: 'Premium', audience: 'For deeper credit rebuilding and loan readiness', duration: '9 months', originalPrice: '₹19,999', offerPrice: '₹12,999.35', featured: true, features: ['Everything in Standard', 'Dedicated credit advisor', 'Personalised improvement roadmap', 'Continuous monitoring guidance', 'Loan readiness assessment', 'Priority case support'] },
-  { name: 'Exquisite', audience: 'For complex personal or commercial profiles', duration: '12 months', originalPrice: '₹25,000', offerPrice: '₹16,250', features: ['Senior credit strategist', 'Personal and business report review', 'Advanced issue-resolution support', 'Priority consultation', 'Custom financial health roadmap', 'High-value loan preparation'] },
-]
-
 const planCapabilities = [
   { icon: FileSearch, title: 'Credit Report Analysis', text: 'A structured review to identify report issues and improvement opportunities.' },
   { icon: CircleHelp, title: 'Issue Resolution Guidance', text: 'Clear assistance for disputes, incorrect remarks, and documentation steps.' },
@@ -140,12 +140,6 @@ const helpFaqs = [
     answer: 'We accept major credit cards, debit cards, net banking, and digital wallets like Google Pay and Apple Pay. Razorpay handles all secure transactions.',
     relatedLinks: ['View Pricing', 'Payment Help'],
   },
-]
-
-const subscriptionPlans = [
-  { name: 'Monthly', duration: '1 month', price: '₹99', note: 'Flexible monthly access' },
-  { name: '6 Months', duration: '6 months', price: '₹499', note: 'Best for steady progress', featured: true },
-  { name: '12 Months', duration: '12 months', price: '₹999', note: 'Best long-term value' },
 ]
 
 const explainerScenes = [
@@ -378,6 +372,8 @@ function useLoginGate({ redirectAfterLogin, promptOnScroll = true }: { redirectA
   const [authOpen, setAuthOpen] = useScrollAuthPrompt(promptOnScroll)
   const { user, login, logout } = useAuthUser()
   const [authNotice, setAuthNotice] = useState('')
+  // Survives the redirect after login so the welcome shows once on the next page, then clears.
+  const [welcomeName, setWelcomeName] = useState<string | null>(() => sessionStorage.getItem('scorenow-welcome'))
   const pendingActionRef = useRef<((user: AuthUser) => void) | null>(null)
 
   const requireLogin: RequireLogin = (notice, action) => {
@@ -404,13 +400,24 @@ function useLoginGate({ redirectAfterLogin, promptOnScroll = true }: { redirectA
 
   const handleLogin = (nextUser: AuthUser) => {
     login(nextUser)
+    const firstName = nextUser.full_name.trim().split(' ')[0] || 'there'
+    sessionStorage.setItem('scorenow-welcome', firstName)
+    setWelcomeName(firstName)
     const action = pendingActionRef.current
     pendingActionRef.current = null
     if (action) action(nextUser)
     else if (redirectAfterLogin) window.location.href = redirectAfterLogin
   }
 
-  const authModal = <AuthModal open={authOpen} notice={authNotice} onClose={closeAuth} onSuccess={handleLogin} />
+  const closeWelcome = () => {
+    sessionStorage.removeItem('scorenow-welcome')
+    setWelcomeName(null)
+  }
+
+  const authModal = <>
+    <AuthModal open={authOpen} notice={authNotice} onClose={closeAuth} onSuccess={handleLogin} />
+    {welcomeName && <LoginWelcomePopup userName={welcomeName} onClose={closeWelcome} />}
+  </>
 
   return { user, logout, requireLogin, openAuth, authModal }
 }
@@ -949,6 +956,9 @@ function AssessmentPathways() {
 }
 
 function PlansSection() {
+  const content = useSiteContent()
+  const servicePlans = effectiveServicePlans(content)
+  const subscriptionPlans = effectiveSubscriptionPlans(content)
   return (
     <section className="plans-section section reveal-section" id="plans" data-reveal>
       <div className="container plans-heading"><p className="section-kicker">35% Launch Offer</p><h2>Choose the Support That <span>Fits Your Profile</span></h2><p>Limited-period pricing across all plans. The final service scope is confirmed after reviewing your credit profile.</p></div>
@@ -961,7 +971,10 @@ function PlansSection() {
       <div className="container subscription-panel" id="subscription">
         <div className="subscription-heading"><p className="section-kicker">Subscription</p><h3>A plan is an option. A subscription is your <span>active support engagement.</span></h3><p>Selecting a plan does not start a subscription. We confirm your scope, pricing, and start date with you first.</p></div>
         <div className="subscription-pricing" aria-label="Scorenow subscription plans">
-          {subscriptionPlans.map((plan) => <article className={plan.featured ? 'featured' : ''} key={plan.name}>{plan.featured && <span className="subscription-popular">Most Popular</span>}<small>{plan.duration}</small><h4>{plan.name}</h4><strong>{plan.price}</strong><span>{plan.note}</span><a className="button button-primary" href={`https://wa.me/919114141011?text=${encodeURIComponent(`Hello Scorenow, I would like to subscribe to the ${plan.name} plan for ${plan.price}. Please share the next steps.`)}`} target="_blank" rel="noreferrer"><MessageCircle /> Subscribe</a></article>)}
+          {subscriptionPlans.map((plan) => {
+            const price = formatRupees(plan.price)
+            return <article className={plan.featured ? 'featured' : ''} key={plan.id}>{plan.featured && <span className="subscription-popular">Most Popular</span>}<small>{formatSubscriptionDuration(plan.months)}</small><h4>{plan.name}</h4><strong>{price}</strong><span>{plan.note}</span><a className="button button-primary" href={`https://wa.me/919114141011?text=${encodeURIComponent(`Hello Scorenow, I would like to subscribe to the ${plan.name} plan for ${price}. Please share the next steps.`)}`} target="_blank" rel="noreferrer"><MessageCircle /> Subscribe</a></article>
+          })}
         </div>
         <div className="subscription-steps">
           {subscriptionSteps.map((step, index) => { const Icon = step.icon; return <article key={step.title}><span><Icon /></span><small>Step {index + 1}</small><strong>{step.title}</strong><p>{step.text}</p></article> })}
@@ -1592,23 +1605,13 @@ function LoanPaymentPage({ user, report, onGetReport }: { user: AuthUser; report
   )
 }
 
-type FdPlan = { bank: string; rate: number; min: number; max: string; minMonths: number; maxMonths: number; tenure: string; payout: string }
-
-// Indicative rates for display only; they are not live bank offers.
-const fdPlans: FdPlan[] = [
-  { bank: 'ICICI Bank', rate: 7.25, min: 5000, max: '₹5 Crore', minMonths: 6, maxMonths: 120, tenure: '6 months – 10 years', payout: 'At maturity / Monthly' },
-  { bank: 'SBI', rate: 7.1, min: 5000, max: '₹5 Crore', minMonths: 0, maxMonths: 120, tenure: '7 days – 10 years', payout: 'Monthly / Quarterly' },
-  { bank: 'HDFC Bank', rate: 7.4, min: 5000, max: '₹5 Crore', minMonths: 6, maxMonths: 120, tenure: '6 months – 10 years', payout: 'Monthly / At maturity' },
-  { bank: 'Axis Bank', rate: 7.3, min: 5000, max: '₹5 Crore', minMonths: 6, maxMonths: 120, tenure: '6 months – 10 years', payout: 'Monthly / Quarterly' },
-  { bank: 'Kotak Mahindra Bank', rate: 7.2, min: 5000, max: '₹5 Crore', minMonths: 6, maxMonths: 120, tenure: '6 months – 10 years', payout: 'At maturity' },
-  { bank: 'IndusInd Bank', rate: 7.15, min: 5000, max: '₹5 Crore', minMonths: 6, maxMonths: 120, tenure: '6 months – 10 years', payout: 'Monthly / At maturity' },
-]
 const fdTenures = [
   { label: '6 Months', months: 6 }, { label: '1 Year', months: 12 }, { label: '2 Years', months: 24 },
   { label: '3 Years', months: 36 }, { label: '5 Years', months: 60 }, { label: '10 Years', months: 120 },
 ]
 
 function FixedDepositsPage() {
+  const fdPlans = effectiveFdPlans(useSiteContent())
   const [tenure, setTenure] = useState(12)
   const [descending, setDescending] = useState(true)
   const [notice, setNotice] = useState('')
@@ -2432,8 +2435,8 @@ function DashboardPage({ user, onLogout }: { user: AuthUser; onLogout: () => voi
   const [downloadingReport, setDownloadingReport] = useState(false)
   const [downloadReportError, setDownloadReportError] = useState('')
   const [selectedBureau, setSelectedBureau] = useState<BureauId | null>(null)
-  type DashboardPage = 'overview' | 'loans' | 'fd' | 'cards'
-  const standalonePages: Record<string, DashboardPage> = { '#loan-payment': 'loans', '#fixed-deposits': 'fd', '#credit-cards': 'cards' }
+  type DashboardPage = 'overview' | 'loans' | 'fd' | 'cards' | 'payments' | 'health' | 'settings'
+  const standalonePages: Record<string, DashboardPage> = { '#loan-payment': 'loans', '#fixed-deposits': 'fd', '#credit-cards': 'cards', '#payments-invoices': 'payments', '#health-assessment': 'health', '#settings': 'settings' }
   const initialHash = standalonePages[window.location.hash] ? window.location.hash : '#dashboard-overview'
   const [activeNav, setActiveNav] = useState(initialHash)
   const [page, setPage] = useState<DashboardPage>(standalonePages[initialHash] ?? 'overview')
@@ -2458,7 +2461,7 @@ function DashboardPage({ user, onLogout }: { user: AuthUser; onLogout: () => voi
   }
   const [notice, setNotice] = useState<{ tone: 'info' | 'success' | 'error'; text: string } | null>(null)
   const [simCheckout, setSimCheckout] = useState<SimulatedCheckoutState | null>(null)
-  const firstName = user.full_name.trim().split(' ')[0] || 'there'
+  const displayName = status?.profile?.name_as_per_pan?.trim() || user.full_name.trim() || 'there'
   const hour = new Date().getHours()
   const greeting = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening'
   const loadStatus = async (refresh = false) => {
@@ -2564,7 +2567,7 @@ function DashboardPage({ user, onLogout }: { user: AuthUser; onLogout: () => voi
   const completedReports = status.reports.filter((report) => report.status === 'completed')
   const activeBureau = selectedBureau && reportFor(selectedBureau)?.status === 'completed' ? selectedBureau : completedReports[0]?.bureau ?? null
   const activeReport = activeBureau ? reportFor(activeBureau) : undefined
-  const price = options?.price ?? 99
+  const price = options?.price ?? DEFAULT_REPORT_PRICE
   const downloadActiveReport = async () => {
     if (!activeReport || downloadingReport) return
     setDownloadingReport(true)
@@ -2596,7 +2599,8 @@ function DashboardPage({ user, onLogout }: { user: AuthUser; onLogout: () => voi
     { icon: CreditCard, image: '/icons-3d/image-0b1794fb465020f2.png', label: 'Loan payment', href: '#loan-payment' },
     { icon: PiggyBank, image: '/icons-3d/image-1c2db40da8b9f3b7.png', label: 'Fixed deposits', href: '#fixed-deposits' },
     { icon: CreditCard, image: '/icons-3d/image-1d4a9bf1ec71ab79.png', label: 'Credit cards', href: '#credit-cards' },
-    { icon: UserRound, image: '/icons-3d/image-ee4e7008110907f5.png', label: 'My profile', href: '#my-profile' },
+    { icon: WalletCards, label: 'Payments & invoices', href: '#payments-invoices' },
+    { icon: Gauge, label: 'Health assessment', href: '#health-assessment' },
     { icon: Settings, image: '/icons-3d/image-5a88f5e812fceb30.png', label: 'Settings', href: '#settings' },
     { icon: CircleHelp, image: '/icons-3d/image-7e7a446b84557e61.png', label: 'Help & support', href: '#help-support' },
   ]
@@ -2790,7 +2794,7 @@ function DashboardPage({ user, onLogout }: { user: AuthUser; onLogout: () => voi
       <main className="dashboard-main" id="dashboard-main">
         <header className="dashboard-topbar">
           <button className="dashboard-menu-button" type="button" aria-label="Open menu" aria-expanded={mobileNavOpen} aria-controls="dashboard-sidebar" onClick={() => setMobileNavOpen(true)}><Menu /></button>
-          <div className="dashboard-page-heading"><span>Scorenow <b>/</b> {page === 'fd' ? 'Investment products' : page === 'cards' ? 'Credit cards' : 'Credit workspace'}</span><strong>{{ loans: 'Loan payment', fd: 'Fixed deposits', cards: 'Credit Cards', overview: 'Your dashboard' }[page]}</strong></div>
+          <div className="dashboard-page-heading"><span>Scorenow <b>/</b> {page === 'fd' ? 'Investment products' : page === 'cards' ? 'Credit cards' : 'Credit workspace'}</span><strong>{{ loans: 'Loan payment', fd: 'Fixed deposits', cards: 'Credit Cards', payments: 'Payments & invoices', health: 'Health assessment', settings: 'Settings', overview: 'Your dashboard' }[page]}</strong></div>
           <div className="dashboard-top-actions">
             <span className="dashboard-updated">{activeReport ? <>Last updated <strong>{formatDate(activeReport.report_date)}</strong></> : 'Your credit workspace'}</span>
             <button className="dashboard-refresh-button" type="button" onClick={() => void loadStatus(true)} disabled={refreshing}>
@@ -2802,9 +2806,28 @@ function DashboardPage({ user, onLogout }: { user: AuthUser; onLogout: () => voi
         </header>
 
         <div className="dashboard-content">
-          {page === 'loans' ? <LoanPaymentPage user={user} report={activeReport} onGetReport={() => setPage('overview')} /> : page === 'fd' ? <FixedDepositsPage /> : page === 'cards' ? <CreditCardsPage /> : <>
+          {page === 'loans' ? <LoanPaymentPage user={user} report={activeReport} onGetReport={() => setPage('overview')} /> : page === 'fd' ? <FixedDepositsPage /> : page === 'cards' ? <CreditCardsPage /> : page === 'payments' ? <section className="dashboard-card" id="payments-invoices">
+            <div className="dashboard-card-heading"><strong>Payments and invoices</strong><small>Your past orders and receipts</small></div>
+            <CustomerPaymentsPanel token={user.token} />
+          </section> : page === 'health' ? <section className="dashboard-card" id="health-assessment">
+            <div className="dashboard-card-heading"><strong>Request a health assessment</strong><small>Our team reviews every request</small></div>
+            <HealthAssessmentForm user={{ id: user.id, fullName: user.full_name, mobile: user.mobile, email: user.email ?? undefined }} token={user.token} />
+          </section> : page === 'settings' ? <article className="dashboard-card account-card" id="settings">
+            <div className="dashboard-card-heading"><strong><Settings /> Settings</strong></div>
+            <ul className="settings-list">
+              <li><span><Smartphone /></span><div><strong>Sign-in method</strong><small>{user.mobile ? `Mobile OTP · +91 ${user.mobile}` : user.email ? `Email · ${user.email}` : 'Scorenow account'}</small></div></li>
+              <li><span><FileCheck2 /></span><div><strong>Update profile details</strong><small>To correct your PAN, name, or date of birth, contact our support team so the change can be verified.</small></div><a href="mailto:info@scorenow.in?subject=Profile%20update%20request">Request <ArrowRight /></a></li>
+              <li><span><img className="dash-3d-icon" src="/icons-3d/image-323f6902b5183bba.png" alt="" /></span><div><strong>Data &amp; privacy</strong><small>Your details are shared only with the credit bureau you choose when fetching a report.</small></div></li>
+            </ul>
+            <div className="settings-privacy" id="privacy-notifications">
+              <h3>Notifications, consent and privacy</h3>
+              <p className="settings-privacy-note">Control your data and alerts</p>
+              <CustomerPrivacyPanel token={user.token} onAccountDeleted={onLogout} />
+            </div>
+            <button type="button" className="button button-outline account-logout" onClick={onLogout}>Log out <ArrowRight /></button>
+          </article> : <>
           <div className="dashboard-welcome">
-            <div><span className="dashboard-kicker">YOUR CREDIT WORKSPACE</span><h1>{greeting}, {firstName}! <span>👋</span></h1><p>{completedReports.length ? 'Your credit picture, with Scorenow here to help you understand what comes next.' : 'Start with a report. We’ll help you understand it and guide you through what to do next.'}</p></div>
+            <div><span className="dashboard-kicker">YOUR CREDIT WORKSPACE</span><h1>{greeting}, {displayName}! <span>👋</span></h1><p>{completedReports.length ? 'Your credit picture, with Scorenow here to help you understand what comes next.' : 'Start with a report. We’ll help you understand it and guide you through what to do next.'}</p></div>
           </div>
 
           {notice && <p className={`dashboard-notice ${notice.tone}`} role="status">{notice.text}</p>}
@@ -2988,34 +3011,10 @@ function DashboardPage({ user, onLogout }: { user: AuthUser; onLogout: () => voi
             </div>
           </section>
 
-          <section className="dashboard-account-grid">
-            <article className="dashboard-card account-card" id="my-profile">
-              <div className="dashboard-card-heading"><strong><img className="dash-3d-icon" src="/icons-3d/image-1bcac97a1936ebb9.png" alt="" /> My profile</strong><span className={`kyc-badge${status.profile.kyc_status === 'verified' ? ' verified' : ''}`}>{status.profile.kyc_status === 'verified' ? <><Check /> Verified</> : status.profile.kyc_status.replace(/_/g, ' ')}</span></div>
-              <dl className="account-details">
-                <dt>Account name</dt><dd>{user.full_name}</dd>
-                <dt>Name as per PAN</dt><dd>{status.profile.name_as_per_pan}</dd>
-                <dt>PAN</dt><dd>{status.profile.pan_last4 ? `••••••${status.profile.pan_last4}` : '—'}</dd>
-                <dt>Date of birth</dt><dd>{formatDate(status.profile.date_of_birth?.slice(0, 10))}</dd>
-                <dt>Location</dt><dd>{[status.profile.city, status.profile.state].filter(Boolean).join(', ') || '—'}</dd>
-                <dt>Mobile</dt><dd>{user.mobile ? `+91 ${user.mobile}` : '—'}</dd>
-                <dt>Email</dt><dd>{user.email || '—'}</dd>
-              </dl>
-              <p className="account-note"><ShieldCheck /> Your PAN is stored encrypted. Only the last four characters are shown.</p>
-            </article>
-
-            <article className="dashboard-card account-card" id="settings">
-              <div className="dashboard-card-heading"><strong><Settings /> Settings</strong></div>
-              <ul className="settings-list">
-                <li><span><Smartphone /></span><div><strong>Sign-in method</strong><small>{user.mobile ? `Mobile OTP · +91 ${user.mobile}` : user.email ? `Email · ${user.email}` : 'Scorenow account'}</small></div></li>
-                <li><span><FileCheck2 /></span><div><strong>Update profile details</strong><small>To correct your PAN, name, or date of birth, contact our support team so the change can be verified.</small></div><a href="mailto:info@scorenow.in?subject=Profile%20update%20request">Request <ArrowRight /></a></li>
-                <li><span><img className="dash-3d-icon" src="/icons-3d/image-323f6902b5183bba.png" alt="" /></span><div><strong>Data &amp; privacy</strong><small>Your details are shared only with the credit bureau you choose when fetching a report.</small></div></li>
-              </ul>
-              <button type="button" className="button button-outline account-logout" onClick={onLogout}>Log out <ArrowRight /></button>
-            </article>
-          </section>
 
           <section className="dashboard-card help-card" id="help-support">
             <div className="dashboard-card-heading"><strong><img className="dash-3d-icon" src="/icons-3d/image-b62083721987aca5.png" alt="" /> Help &amp; support</strong><small>Mon–Sat · 10 AM – 7 PM</small></div>
+            
             
             <div className="help-tabs-section">
               <button className="help-tab-toggle" onClick={() => setShowFaqs(!showFaqs)} type="button">
@@ -3319,6 +3318,8 @@ function HomePage() {
           </div>
         </section>
 
+        <TestimonialsSection />
+
         <section className="partner-opportunity section reveal-section" id="partner-opportunity" data-reveal>
           <div className="container">
             <div className="partner-opportunity-heading">
@@ -3362,6 +3363,7 @@ function HomePage() {
 function BusinessPage() {
   const [menuOpen, setMenuOpen] = useState(false)
   const { user, logout, requireLogin, openAuth, authModal } = useLoginGate()
+  const businessPrices = effectiveBusinessPrices(useSiteContent())
   const businessMessage = encodeURIComponent('Hello Scorenow, I would like to discuss the Business CMR Improvement Programme.')
   const shieldMessage = encodeURIComponent('Hello Scorenow, I would like to discuss the Credit Shield 360 annual business membership.')
 
@@ -3392,8 +3394,8 @@ function BusinessPage() {
         <section className="business-plans-section section" id="business-plans">
           <div className="container plans-heading"><p className="section-kicker">Business Credit Plans</p><h2>CMR Support Built for <span>Growing Businesses</span></h2><p>Choose a structured improvement programme or request a custom advisory scope for complex profiles.</p></div>
           <div className="container business-plan-grid">
-            <article className="business-plan-featured"><span className="popular-label"><Star /> CMR Programme</span><span className="business-discount">35% OFF</span><div className="business-plan-heading"><div><small>Six-month programme</small><h3>Business CMR Improvement</h3><p>Credit counselling, issue-resolution guidance, and CMR improvement support for funding readiness.</p></div><div><span>Launch offer</span><del>₹47,999 + GST</del><strong>₹31,199.35 <small>+ GST</small></strong><a className="button button-primary" href={`https://wa.me/919114141011?text=${businessMessage}`} target="_blank" rel="noreferrer">Choose CMR Plan <ArrowRight /></a></div></div><div className="business-plan-details"><div><h4>What’s included</h4><ul><li><Check />12 credit counselling sessions</li><li><Check />6 report reviews during programme</li><li><Check />Commercial report analysis</li><li><Check />Error identification guidance</li></ul></div><div><h4>Dedicated support</h4><ul><li><Check />Issue-resolution roadmap</li><li><Check />Senior credit expert access</li><li><Check />CMR improvement programme</li><li><Check />Financial health check</li></ul></div></div></article>
-            <article className="enterprise-plan"><span className="business-discount">35% OFF</span><span><ShieldCheck /></span><small>12-month membership</small><h3>Credit Shield 360°</h3><p>Continuous business and promoter credit monitoring designed to keep your company funding-ready throughout the year.</p><ul><li><Check />Commercial credit monitoring</li><li><Check />Monthly CMR tracking and alerts</li><li><Check />Director and partner credit monitoring</li><li><Check />Quarterly credit health reviews</li><li><Check />Dedicated senior credit expert</li><li><Check />Funding readiness assessment</li></ul><div className="enterprise-price"><del>₹99,999 + GST onwards</del><strong>₹64,999.35 <small>+ GST onwards</small></strong></div><a className="button button-outline" href={`https://wa.me/919114141011?text=${shieldMessage}`} target="_blank" rel="noreferrer">Choose Credit Shield <ArrowRight /></a></article>
+            <article className="business-plan-featured"><span className="popular-label"><Star /> CMR Programme</span><span className="business-discount">35% OFF</span><div className="business-plan-heading"><div><small>Six-month programme</small><h3>Business CMR Improvement</h3><p>Credit counselling, issue-resolution guidance, and CMR improvement support for funding readiness.</p></div><div><span>Launch offer</span><del>{businessPrices.cmr.original} {businessPrices.cmr.suffix}</del><strong>{businessPrices.cmr.offer} <small>{businessPrices.cmr.suffix}</small></strong><a className="button button-primary" href={`https://wa.me/919114141011?text=${businessMessage}`} target="_blank" rel="noreferrer">Choose CMR Plan <ArrowRight /></a></div></div><div className="business-plan-details"><div><h4>What’s included</h4><ul><li><Check />12 credit counselling sessions</li><li><Check />6 report reviews during programme</li><li><Check />Commercial report analysis</li><li><Check />Error identification guidance</li></ul></div><div><h4>Dedicated support</h4><ul><li><Check />Issue-resolution roadmap</li><li><Check />Senior credit expert access</li><li><Check />CMR improvement programme</li><li><Check />Financial health check</li></ul></div></div></article>
+            <article className="enterprise-plan"><span className="business-discount">35% OFF</span><span><ShieldCheck /></span><small>12-month membership</small><h3>Credit Shield 360°</h3><p>Continuous business and promoter credit monitoring designed to keep your company funding-ready throughout the year.</p><ul><li><Check />Commercial credit monitoring</li><li><Check />Monthly CMR tracking and alerts</li><li><Check />Director and partner credit monitoring</li><li><Check />Quarterly credit health reviews</li><li><Check />Dedicated senior credit expert</li><li><Check />Funding readiness assessment</li></ul><div className="enterprise-price"><del>{businessPrices.shield.original} {businessPrices.shield.suffix}</del><strong>{businessPrices.shield.offer} <small>{businessPrices.shield.suffix}</small></strong></div><a className="button button-outline" href={`https://wa.me/919114141011?text=${shieldMessage}`} target="_blank" rel="noreferrer">Choose Credit Shield <ArrowRight /></a></article>
           </div>
         </section>
 
@@ -3617,7 +3619,7 @@ type AdminCustomer = {
   profile_complete?: boolean
 }
 
-type AdminTicket = SupportTicket
+type AdminTicket = SupportTicket & { sla?: { targetHours: number; ageHours: number; breached: boolean; remainingHours: number } | null }
 
 type AdminAnalytics = {
   summary: Record<string, number>
@@ -3627,7 +3629,7 @@ type AdminAnalytics = {
   bureaus: { bureau: string; paid_orders: number; revenue: number; completed: number; failed: number }[]
 }
 
-type AdminSectionId = 'overview' | 'customers' | 'reports' | 'analytics' | 'tickets' | 'journey' | 'team' | 'failed' | 'health' | 'audit' | 'partners' | 'portal' | 'crm'
+type AdminSectionId = 'overview' | 'customers' | 'reports' | 'analytics' | 'tickets' | 'journey' | 'team' | 'failed' | 'health' | 'audit' | 'partners' | 'portal' | 'monitor' | 'crm' | 'content' | 'assessments' | 'ops'
 const defaultAdminSection = (role?: AdminRole): AdminSectionId => role === 'support' ? 'customers' : role === 'analyst' ? 'analytics' : role === 'partner' || role === 'agent' ? 'portal' : 'overview'
 type PartnerAccountOption = { email: string; full_name: string; role: AdminRole; status: string }
 
@@ -3733,6 +3735,7 @@ function AdminPage() {
   const [adminId, setAdminId] = useState('')
   const [adminRole, setAdminRole] = useState<AdminRole>('owner')
   const [partnerOptions, setPartnerOptions] = useState<PartnerAccountOption[]>([])
+  const [partnerPages, setPartnerPages] = useState<string[]>([])
   const [inviteRole, setInviteRole] = useState<AdminRole>('support')
   const isPartnerRole = adminRole === 'partner' || adminRole === 'agent'
   const [activeSection, setActiveSection] = useState<AdminSectionId>('overview')
@@ -3765,6 +3768,8 @@ function AdminPage() {
   const [sectionRefresh, setSectionRefresh] = useState(0)
   const [ticketStatus, setTicketStatus] = useState('open')
   const [inviteUrl, setInviteUrl] = useState('')
+  const [inviteNotice, setInviteNotice] = useState('')
+  const [credentialTarget, setCredentialTarget] = useState<{ email: string; isPrimary: boolean } | null>(null)
   const [teamInviteToken, setTeamInviteToken] = useState(() => new URLSearchParams(window.location.search).get('invite') || '')
   const [teamNotice, setTeamNotice] = useState('')
   const [sectionLoading, setSectionLoading] = useState(true)
@@ -3862,6 +3867,19 @@ function AdminPage() {
     }, 350)
     return () => window.clearTimeout(timer)
   }, [activitySearch, activityQuery])
+
+  useEffect(() => {
+    if (authState !== 'signed-in' || !token || !isPartnerRole) return
+    let cancelled = false
+    fetch(`${apiUrl}/api/admin/partner-access`, { headers: { Authorization: 'Bearer ' + token } })
+      .then(async (response) => {
+        if (!response.ok) return
+        const result = await response.json() as { pages?: string[] }
+        if (!cancelled) setPartnerPages(result.pages || [])
+      })
+      .catch(() => undefined)
+    return () => { cancelled = true }
+  }, [authState, token, isPartnerRole])
 
   useEffect(() => {
     if (authState !== 'signed-in' || !token || isPartnerRole) return
@@ -4321,6 +4339,7 @@ function AdminPage() {
     const formElement = event.currentTarget
     setSectionLoading(true)
     setSectionError('')
+    setInviteNotice('')
     const form = new FormData(event.currentTarget)
     try {
       const response = await fetch(`${apiUrl}/api/admin/team/invitations`, {
@@ -4328,13 +4347,14 @@ function AdminPage() {
         headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
         body: JSON.stringify(Object.fromEntries(form.entries())),
       })
-      const result = await response.json() as { invitationUrl?: string; message?: string }
-      if (!response.ok || !result.invitationUrl) throw new Error(result.message || 'Unable to invite this admin.')
-      setInviteUrl(result.invitationUrl)
+      const result = await response.json() as { invitationUrl?: string; active?: boolean; message?: string }
+      if (!response.ok || (!result.invitationUrl && !result.active)) throw new Error(result.message || 'Unable to add this admin.')
+      setInviteUrl(result.invitationUrl ?? '')
+      setInviteNotice(result.active ? 'Admin account created. They can sign in now with the email, password and PIN you set.' : '')
       setSectionRefresh((refresh) => refresh + 1)
       formElement.reset()
     } catch (error) {
-      setSectionError(error instanceof Error ? error.message : 'Unable to invite this admin.')
+      setSectionError(error instanceof Error ? error.message : 'Unable to add this admin.')
     } finally {
       setSectionLoading(false)
     }
@@ -4354,6 +4374,35 @@ function AdminPage() {
       setSectionRefresh((refresh) => refresh + 1)
     } catch (error) {
       setSectionError(error instanceof Error ? error.message : 'Unable to update admin status.')
+    } finally {
+      setSectionLoading(false)
+    }
+  }
+
+  const updateTeamCredentials = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    if (!credentialTarget) return
+    const form = new FormData(event.currentTarget)
+    const field = (name: string) => String(form.get(name) ?? '').trim()
+    const body = {
+      email: field('email') || undefined,
+      password: field('password') || undefined,
+      pin: field('pin') || undefined,
+    }
+    setSectionLoading(true)
+    setSectionError('')
+    try {
+      const response = await fetch(`${apiUrl}/api/admin/team/${encodeURIComponent(credentialTarget.email)}/credentials`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify(body),
+      })
+      const result = await response.json() as { message?: string }
+      if (!response.ok) throw new Error(result.message || 'Unable to update admin credentials.')
+      setCredentialTarget(null)
+      setSectionRefresh((refresh) => refresh + 1)
+    } catch (error) {
+      setSectionError(error instanceof Error ? error.message : 'Unable to update admin credentials.')
     } finally {
       setSectionLoading(false)
     }
@@ -4387,10 +4436,14 @@ function AdminPage() {
     { id: 'audit', label: 'Audit log', icon: ShieldCheck, roles: ['owner', 'manager'] },
     { id: 'team', label: 'Manage admins', icon: LockKeyhole, roles: ['owner'] },
     { id: 'crm', label: 'CRM', icon: Users, roles: ['owner', 'manager', 'support'] },
+    { id: 'content', label: 'Site content', icon: Settings, roles: ['owner', 'manager'] },
     { id: 'partners', label: 'Partners & agents', icon: Handshake, roles: ['owner'] },
+    { id: 'monitor', label: 'Partner monitor', icon: ShieldCheck, roles: ['owner', 'manager'] },
+    { id: 'assessments', label: 'Health assessments', icon: ShieldCheck, roles: ['owner', 'manager', 'support'] },
+    { id: 'ops', label: 'Operations', icon: Settings, roles: ['owner', 'manager', 'support', 'analyst'] },
     { id: 'portal', label: 'My referrals', icon: Handshake, roles: ['partner', 'agent'] },
   ]
-  const visibleAdminSections = adminSections.filter((section) => section.roles.includes(adminRole))
+  const visibleAdminSections = adminSections.filter((section) => section.roles.includes(adminRole) || (isPartnerRole && partnerPages.includes(section.id)))
   const changeAdminSection = (section: AdminSectionId) => {
     setSectionError('')
     setActionNotice(null)
@@ -4409,7 +4462,7 @@ function AdminPage() {
   const sectionHasData: Record<AdminSectionId, boolean> = {
     overview: Boolean(activity), reports: Boolean(report), customers: customers.length > 0, analytics: Boolean(analytics),
     journey: Boolean(analytics) && journeyCustomers.length > 0, tickets: tickets.length > 0, team: team.length > 0 || Boolean(primaryAdmin),
-    failed: Boolean(failedOps), health: Boolean(health), audit: Boolean(auditLog), partners: true, portal: true, crm: true,
+    failed: Boolean(failedOps), health: Boolean(health), audit: Boolean(auditLog), partners: true, portal: true, monitor: true, crm: true, content: true, assessments: true, ops: true,
   }
   const sectionIsLoading = activeSection === 'overview' ? activityLoading : activeSection === 'reports' ? loading : sectionLoading
   const canManageCustomers = adminRole === 'owner' || adminRole === 'manager'
@@ -4457,6 +4510,7 @@ function AdminPage() {
       </section> : <div className="admin-layout">
         <aside className="admin-sidebar">
           <div className="admin-sidebar-identity"><span>ADMINISTRATOR</span><strong>{adminId}</strong><small>{adminRole}</small></div>
+          <AdminSessionExpiryBanner token={token} onExpired={signOut} />
           <nav aria-label="Admin sections">{visibleAdminSections.map((section) => { const Icon = section.icon; return <button key={section.id} type="button" className={activeSection === section.id ? 'active' : ''} onClick={() => changeAdminSection(section.id)}><Icon /><span>{section.label}</span>{Boolean(section.badge) && <em className="admin-nav-badge" aria-label={`${section.badge} need attention`}>{section.badge}</em>}</button> })}</nav>
           <p>Private operations workspace</p>
         </aside>
@@ -4673,7 +4727,7 @@ function AdminPage() {
           <div className="admin-heading"><span>CUSTOMER SUPPORT</span><h1>Helpline tickets</h1><p>Review customer-submitted requests, reply in the ticket conversation, assign an owner, and update status. Website callback requests are also added here.</p></div>
           <div className="admin-ticket-toolbar"><label className="admin-activity-search admin-ticket-search"><Search /><input type="search" aria-label="Search tickets" value={ticketSearch} onChange={(event) => setTicketSearch(event.target.value)} placeholder="Search subject, customer, or mobile" /></label><label>Assigned to<select value={ticketAssignee} onChange={(event) => setTicketAssignee(event.target.value)}><option value="">Anyone</option><option value="me">Me</option><option value="unassigned">Unassigned</option>{ticketAssignees.map((assignee) => <option key={assignee} value={assignee}>{assignee}</option>)}</select></label><label>Status filter<select value={ticketStatus} onChange={(event) => { setTicketStatus(event.target.value); setSectionLoading(true) }}><option value="">All tickets</option><option value="open">Open</option><option value="in_progress">In progress</option><option value="resolved">Resolved</option><option value="closed">Closed</option></select></label><button className="button button-outline" type="button" onClick={() => { setSectionLoading(true); setSectionRefresh((refresh) => refresh + 1) }} disabled={sectionLoading}><Spinner size={16} active={sectionLoading} /> Refresh</button></div>
           <div className="admin-ticket-list">{visibleTickets.length ? visibleTickets.map((ticket) => <article className="dashboard-card admin-ticket" key={ticket.id}>
-            <div className="admin-ticket-top"><div><span className={`admin-status ${ticket.priority === 'urgent' || ticket.priority === 'high' ? 'failed' : 'pending'}`}>{ticket.priority}</span><span className={`admin-status ${ticket.status === 'resolved' || ticket.status === 'closed' ? 'completed' : 'pending'}`}>{ticket.status.replace('_', ' ')}</span></div><time>{formatAdminTimestamp(ticket.created_at)}</time></div>
+            <div className="admin-ticket-top"><div><span className={`admin-status ${ticket.priority === 'urgent' || ticket.priority === 'high' ? 'failed' : 'pending'}`}>{ticket.priority}</span><span className={`admin-status ${ticket.status === 'resolved' || ticket.status === 'closed' ? 'completed' : 'pending'}`}>{ticket.status.replace('_', ' ')}</span>{ticket.sla && <span className={`admin-status ${ticket.sla.breached ? 'failed' : 'pending'}`}>{ticket.sla.breached ? `SLA breached by ${Math.abs(ticket.sla.remainingHours)}h` : `${ticket.sla.remainingHours}h to SLA`}</span>}</div><time>{formatAdminTimestamp(ticket.created_at)}</time></div>
             <h2>{ticket.subject}</h2><p>{ticket.message}</p><div className="admin-ticket-customer"><strong>{ticket.requester_name}</strong><span>{ticket.requester_mobile}</span><small>Created by {ticket.created_by}</small></div>
             <div className="admin-ticket-actions"><label>Assign to<span className="admin-assign-field"><input key={ticket.assigned_to || ''} defaultValue={ticket.assigned_to || ''} placeholder="Admin email or name" onBlur={(event) => { const value = event.currentTarget.value.trim() || null; if (value !== ticket.assigned_to) void updateTicket(ticket, ticket.status, value) }} />{ticket.assigned_to !== adminId && <button type="button" className="button button-outline admin-small-button" onClick={() => void updateTicket(ticket, ticket.status, adminId)}>Assign to me</button>}</span></label><label>Ticket status<select value={ticket.status} onChange={(event) => void updateTicket(ticket, event.target.value as AdminTicket['status'])}><option value="open">Open</option><option value="in_progress">In progress</option><option value="resolved">Resolved</option><option value="closed">Closed</option></select></label></div>
             <div className="admin-ticket-thread">
@@ -4681,6 +4735,7 @@ function AdminPage() {
               {ticket.comments.length ? ticket.comments.map((comment) => <div className={`admin-ticket-comment ${comment.author_type}`} key={comment.id}><div><b>{comment.author_name}</b><time>{formatAdminTimestamp(comment.created_at)}</time></div><p>{comment.message}</p></div>) : <p className="admin-ticket-no-replies">No replies yet.</p>}
               <form className="admin-ticket-reply" onSubmit={(event) => void replyToAdminTicket(event, ticket.id)}>
                 <label className="sr-only" htmlFor={`admin-ticket-reply-${ticket.id}`}>Reply to {ticket.subject}</label>
+                <CannedReplyPicker token={token} targetId={`admin-ticket-reply-${ticket.id}`} />
                 <textarea id={`admin-ticket-reply-${ticket.id}`} name="message" rows={2} maxLength={4000} placeholder="Write an update for the customer…" required />
                 <button className="button button-primary" type="submit" disabled={sectionLoading}><MessageCircle /> Send reply</button>
               </form>
@@ -4744,26 +4799,41 @@ function AdminPage() {
             </tbody></table></div> : <p className="admin-activity-empty">{auditLog ? 'No audit entries match these filters.' : ''}</p>}
           </article>
           {auditLog && auditTotalPages > 1 && <nav className="admin-activity-pagination" aria-label="Audit pages"><button className="button button-outline" type="button" disabled={auditPage <= 1 || sectionLoading} onClick={() => { setSectionLoading(true); setAuditPage((page) => page - 1) }}><ArrowLeft /> Previous</button><span>Page {auditPage} of {auditTotalPages}</span><button className="button button-outline" type="button" disabled={auditPage >= auditTotalPages || sectionLoading} onClick={() => { setSectionLoading(true); setAuditPage((page) => page + 1) }}>Next <ArrowRight /></button></nav>}
-        </> : activeSection === 'crm' ? <CrmManagement token={token} role={adminRole} refreshKey={sectionRefresh} />
-        : activeSection === 'partners' ? <PartnerManagement token={token} refreshKey={sectionRefresh} />
+        </> : activeSection === 'assessments' ? <AdminHealthAssessmentManagement token={token} adminId={adminId} />
+        : activeSection === 'ops' ? <AdminOpsPanel token={token} role={adminRole} />
+        : activeSection === 'crm' ? <CrmManagement token={token} role={adminRole} refreshKey={sectionRefresh} />        : activeSection === 'content' ? <AdminSiteContent token={token} refreshKey={sectionRefresh} />        : activeSection === 'partners' ? <PartnerManagement token={token} refreshKey={sectionRefresh} />
+        : activeSection === 'monitor' ? <PartnerMonitor token={token} enabled={adminRole === 'owner' || adminRole === 'manager' || partnerPages.includes('monitor')} />
         : activeSection === 'portal' ? <PartnerPortal token={token} role={adminRole === 'agent' ? 'agent' : 'partner'} refreshKey={sectionRefresh} />
         : <>
           <div className="admin-heading"><span>ACCESS CONTROL</span><h1>Manage admins</h1><p>Invite trusted teammates with role-based access. Invitations expire after 48 hours and each admin chooses a private password and PIN.</p></div>          <article className="dashboard-card admin-management-card">
-            <div className="dashboard-card-heading"><strong>Invite an admin</strong><small>Invite link shown once; share it through a secure channel</small></div>
+            <div className="dashboard-card-heading"><strong>Add an admin or partner</strong><small>Set email, password and PIN now so they can sign in right away, or leave password and PIN empty to send an invite link</small></div>
             <form className="admin-management-form" onSubmit={(event) => void inviteAdmin(event)}>
               <label>Full name<input name="fullName" minLength={2} maxLength={120} required /></label>
-              <label>Email<input name="email" type="email" required /></label>
+              <label>Email (login ID)<input name="email" type="email" required /></label>
               <label>Role<select name="role" value={inviteRole} onChange={(event) => setInviteRole(event.target.value as AdminRole)}><option value="manager">Manager — customers, analytics, tickets, reports</option><option value="support">Support — customer help and tickets</option><option value="analyst">Analyst — analytics and funnel</option><option value="partner">Partner — own referred customers and earnings</option><option value="agent">Agent — referred customers under a partner</option></select></label>
               {inviteRole === 'agent' && <label>Partner (optional)<select name="partnerEmail" defaultValue=""><option value="">No partner</option>{partnerOptions.map((partner) => <option value={partner.email} key={partner.email}>{partner.full_name} ({partner.email})</option>)}</select></label>}
-              <button className="button button-primary" type="submit" disabled={sectionLoading}><UserRound /> Create invite</button>
+              <label>Password (min 12 characters, optional)<input name="password" type="password" minLength={12} autoComplete="new-password" /></label>
+              <label>6-digit PIN (optional)<input name="pin" inputMode="numeric" pattern="\d{6}" maxLength={6} autoComplete="off" /></label>
+              <button className="button button-primary" type="submit" disabled={sectionLoading}><UserRound /> Add admin</button>
             </form>
+            {inviteNotice && <p className="dashboard-notice success" role="status">{inviteNotice}</p>}
             {inviteUrl && <label className="admin-invite-link">One-time invite link<input readOnly value={inviteUrl} onFocus={(event) => event.currentTarget.select()} /><small>Copy and share privately. The invite is valid for 48 hours.</small></label>}
           </article>
           <article className="dashboard-card admin-activity-card">
             <div className="dashboard-card-heading"><strong>Admin accounts</strong><small>{team.length + (primaryAdmin ? 1 : 0)} accounts</small></div>
+            {credentialTarget && <form className="admin-management-form admin-credentials-form" onSubmit={(event) => void updateTeamCredentials(event)}>
+              <p><strong>Edit credentials for {credentialTarget.email}</strong><small> Existing passwords and PINs cannot be shown. Enter new values, or leave a field empty to keep it. Saving signs this admin out.</small></p>
+              <label>Email<input name="email" type="email" defaultValue={credentialTarget.email} /></label>
+              <label>New password<input name="password" type="password" minLength={12} autoComplete="new-password" placeholder={credentialTarget.isPrimary ? 'Required if not set yet' : 'Leave empty to keep'} /></label>
+              <label>New 6-digit PIN<input name="pin" inputMode="numeric" pattern="\d{6}" maxLength={6} autoComplete="off" placeholder={credentialTarget.isPrimary ? 'Required if not set yet' : 'Leave empty to keep'} /></label>
+              <div className="admin-credentials-actions">
+                <button className="button button-primary" type="submit" disabled={sectionLoading}>Save credentials</button>
+                <button className="button button-outline" type="button" onClick={() => setCredentialTarget(null)}>Cancel</button>
+              </div>
+            </form>}
             <div className="admin-table-wrap"><table className="admin-activity-table"><thead><tr><th>Admin</th><th>Role</th><th>Status</th><th>Added</th><th>Manage</th></tr></thead><tbody>
-              {primaryAdmin && <tr><td><strong>{primaryAdmin}</strong><small>Environment-protected primary admin</small></td><td>Owner</td><td><span className="admin-status completed">active</span></td><td>—</td><td>Protected</td></tr>}
-              {team.map((member) => <tr key={member.email}><td><strong>{member.full_name}</strong><small>{member.email}</small></td><td>{member.role}</td><td><span className={`admin-status ${member.status === 'active' ? 'completed' : member.status === 'disabled' ? 'failed' : 'pending'}`}>{member.status}</span></td><td>{formatAdminTimestamp(member.created_at)}</td><td>{member.status !== 'invited' && <button className="button button-outline admin-small-button" type="button" disabled={sectionLoading || member.email === adminId} onClick={() => void setTeamMemberStatus(member)}>{member.status === 'disabled' ? 'Enable' : 'Disable'}</button>}</td></tr>)}
+              {primaryAdmin && <tr><td><strong>{primaryAdmin}</strong><small>Primary admin</small></td><td>Owner</td><td><span className="admin-status completed">active</span></td><td>—</td><td><button className="button button-outline admin-small-button" type="button" disabled={sectionLoading} onClick={() => setCredentialTarget({ email: primaryAdmin, isPrimary: true })}>Edit credentials</button></td></tr>}
+              {team.map((member) => <tr key={member.email}><td><strong>{member.full_name}</strong><small>{member.email}</small></td><td>{member.role}</td><td><span className={`admin-status ${member.status === 'active' ? 'completed' : member.status === 'disabled' ? 'failed' : 'pending'}`}>{member.status}</span></td><td>{formatAdminTimestamp(member.created_at)}</td><td>{member.status !== 'invited' && <><button className="button button-outline admin-small-button" type="button" disabled={sectionLoading} onClick={() => setCredentialTarget({ email: member.email, isPrimary: false })}>Edit credentials</button> <button className="button button-outline admin-small-button" type="button" disabled={sectionLoading || member.email === adminId} onClick={() => void setTeamMemberStatus(member)}>{member.status === 'disabled' ? 'Enable' : 'Disable'}</button></>}</td></tr>)}
             </tbody></table></div>
           </article>
         </>}

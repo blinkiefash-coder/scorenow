@@ -1,6 +1,6 @@
 import 'package:http/http.dart' as http;
 import 'dart:convert';
-import 'health_assessment.dart';
+import '../models/health_assessment.dart';
 
 class HealthAssessmentApi {
   final String baseUrl;
@@ -102,13 +102,13 @@ class TestimonialApi {
   final String baseUrl;
   final String? Function() getToken;
 
-  TestimonialApi({required this.baseUrl, this.getToken});
+  TestimonialApi({required this.baseUrl, required this.getToken});
 
   Future<List<Testimonial>> fetchTestimonials({bool publishedOnly = true}) async {
     final response = await http.get(
       Uri.parse(publishedOnly ? '$baseUrl/api/testimonials' : '$baseUrl/api/admin/testimonials?published=false'),
-      headers: if (getToken != null && getToken!() != null) ...{
-        'Authorization': 'Bearer ${getToken!()}',
+      headers: {
+        if (getToken() != null) 'Authorization': 'Bearer ${getToken()}',
       },
     );
 
@@ -150,7 +150,7 @@ class TestimonialApi {
     final response = await http.put(
       Uri.parse('$baseUrl/api/admin/testimonials/$testimonialId/publish'),
       headers: {
-        'Authorization': 'Bearer ${getToken!()}',
+        'Authorization': 'Bearer ${getToken()}',
         'Content-Type': 'application/json',
       },
     );
@@ -165,7 +165,7 @@ class TestimonialApi {
   Future<void> deleteTestimonial(String testimonialId) async {
     final response = await http.delete(
       Uri.parse('$baseUrl/api/admin/testimonials/$testimonialId'),
-      headers: {'Authorization': 'Bearer ${getToken!()}'},
+      headers: {'Authorization': 'Bearer ${getToken()}'},
     );
 
     if (response.statusCode != 200) {

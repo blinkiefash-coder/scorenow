@@ -43,6 +43,13 @@ const _tabs = [
     roles: {'owner', 'manager'},
   ),
   _AdminTab(
+    path: '/admin/portal',
+    label: 'Portal',
+    icon: Icons.dashboard_outlined,
+    activeIcon: Icons.dashboard,
+    roles: {'partner', 'agent'},
+  ),
+  _AdminTab(
     path: '/admin/customers',
     label: 'Customers',
     icon: Icons.people_outline,
@@ -62,6 +69,13 @@ const _tabs = [
     icon: Icons.bar_chart_outlined,
     activeIcon: Icons.bar_chart,
     roles: {'owner', 'manager', 'analyst'},
+  ),
+  _AdminTab(
+    path: '/admin/ops',
+    label: 'Ops',
+    icon: Icons.fact_check_outlined,
+    activeIcon: Icons.fact_check,
+    roles: {'owner', 'manager', 'support', 'analyst'},
   ),
   _AdminTab(
     path: '/admin/account',

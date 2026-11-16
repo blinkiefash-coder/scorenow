@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart';
 import 'package:scorenow_mobile/core/api.dart';
 import 'package:scorenow_mobile/core/app_services.dart';
 import 'package:scorenow_mobile/core/format.dart';
@@ -87,6 +88,12 @@ class _AdminPartnerScreenState extends State<AdminPartnerScreen> {
         subtitle: 'Partners, agents, and commissions',
       ),
       children: [
+        AppButton(
+          label: 'Live partner monitor',
+          variant: AppButtonVariant.outline,
+          onPressed: () => context.push('/admin/monitor'),
+        ),
+        const SizedBox(height: 12),
         _resource.builder(
           (context, data) {
             if (data == null) {
@@ -110,18 +117,18 @@ class _AdminPartnerScreenState extends State<AdminPartnerScreen> {
                             ),
                             const SizedBox(height: 16),
                             Text(
-                              'Total Commissions: ${formatRupees(data.commissions.fold<int>(0, (sum, c) => sum + (c.amountPaise as int)))}',
+                              'Total Commissions: ${formatMoney(data.commissions.fold<num>(0, (sum, c) => sum + c.amountPaise) / 100)}',
                               style: Theme.of(context).textTheme.bodyMedium,
                             ),
                             Text(
-                              'Pending: ${formatRupees(data.commissions.where((c) => c.status == 'pending').fold<int>(0, (sum, c) => sum + (c.amountPaise as int)))}',
+                              'Pending: ${formatMoney(data.commissions.where((c) => c.status == 'pending').fold<num>(0, (sum, c) => sum + c.amountPaise) / 100)}',
                               style: Theme.of(context)
                                   .textTheme
                                   .bodySmall
                                   ?.copyWith(color: Colors.orange),
                             ),
                             Text(
-                              'Paid: ${formatRupees(data.commissions.where((c) => c.status == 'paid').fold<int>(0, (sum, c) => sum + (c.amountPaise as int)))}',
+                              'Paid: ${formatMoney(data.commissions.where((c) => c.status == 'paid').fold<num>(0, (sum, c) => sum + c.amountPaise) / 100)}',
                               style: Theme.of(context)
                                   .textTheme
                                   .bodySmall
@@ -217,7 +224,7 @@ class _AdminPartnerScreenState extends State<AdminPartnerScreen> {
                                         ),
                                         DataCell(
                                           Text(
-                                            formatRupees(comm.amountPaise),
+                                            formatMoney(comm.amountPaise / 100),
                                           ),
                                         ),
                                         DataCell(
@@ -296,7 +303,7 @@ class _PartnerTile extends StatelessWidget {
                   : Colors.grey,
             ),
             Text(
-              formatRupees(partner.pendingPaise),
+              formatMoney(partner.pendingPaise / 100),
               style: Theme.of(context).textTheme.labelSmall?.copyWith(
                 color: Colors.orange,
               ),

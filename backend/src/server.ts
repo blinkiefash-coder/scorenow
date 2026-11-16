@@ -39,13 +39,20 @@ import {
   findReportRequest,
   findSessionUser,
   findAdminSession,
+  extendAdminSession,
+  ADMIN_SESSION_TTL_MS,
   findUserByEmail,
   getApplicant,
   getAdminActivity,
   getAdminAnalytics,
+  getRevenueReport,
   getAdminCustomers,
-  getAdminReportDocument,
+    getAdminReportDocument,
   getDashboardStatus,
+  getPrimaryAdminEmail,
+  getPrimaryAdminRow,
+  createPrimaryAdmin,
+  updateAdminCredentials,
   getReportDetail,
   getReportPdf,
   initializeDatabase,
@@ -122,8 +129,37 @@ import {
   listTestimonials,
   publishTestimonial,
   deleteTestimonial,
+  listSiteContent,
+  saveSiteContent,
+  deleteSiteContent,
+  listPartnerActivity,
+  listCustomerNames,
+  recordPartnerActivity,
+  deleteCustomerAccount,
+  recordConsent,
+  getCurrentConsents,
+  listConsentHistory,
+  getPaymentForUser,
+  listCustomerPayments,
+  createRefundRequest,
+  listRefundRequests,
+  decideRefundRequest,
+  listCustomerNotifications,
+  markCustomerNotificationsRead,
+  savePushToken,
+  listCannedReplies,
+  saveCannedReply,
+  deleteCannedReply,
+  createAdminPasswordReset,
+  acceptAdminPasswordReset,
+  exportRows,
+  getSupportTicketAssignee,
 } from "./database.js";
-import { SUBSCRIPTION_PLANS, findSubscriptionPlan, gstIncluded } from "./subscriptions.js";
+import { notifyCustomer } from "./notifications.js";
+import { ticketSla } from "./sla.js";
+import { PARTNER_ACTIVITY_CHANNEL, partnerEvents, type PartnerActivityEvent } from "./realtime.js";
+import { gstIncluded } from "./subscriptions.js";
+import { isSiteContentKey, resolveReportPrice, resolveSubscriptionPlans, validateSiteContent } from "./siteContent.js";
 import { generateReportPdf } from "./reportPdf.js";
 import { captureBureauDocument, htmlToPdf } from "./bureauDocument.js";
 import { tryGenerateCibilPdf } from "./cibilPdf.js";
@@ -162,8 +198,8 @@ const sessionAdminRole = (response: Response) => response.locals.adminRole as Ad
 const startSession = (request: Request, userId: string) =>
   createSession({ userId, ipAddress: request.ip, userAgent: request.get("user-agent") });
 
-const REPORT_PRICE_RUPEES = 99;
-const REPORT_GST_RUPEES = Math.round((REPORT_PRICE_RUPEES - REPORT_PRICE_RUPEES / 1.18) * 100) / 100;
+const currentReportPrice = async () => resolveReportPrice((await listSiteContent()).report_price);
+const currentSubscriptionPlans = async () => resolveSubscriptionPlans((await listSiteContent()).subscription_plans);
 
 const requireAdmin = async (request: Request, response: Response, next: NextFunction) => {
   const token = bearerToken(request);
@@ -174,6 +210,7 @@ const requireAdmin = async (request: Request, response: Response, next: NextFunc
   }
   response.locals.adminId = admin.admin_id;
   response.locals.adminRole = admin.role;
+  response.locals.adminExpiresAt = new Date(admin.expires_at).toISOString();
   next();
 };
 
@@ -184,6 +221,34 @@ const requireAdminRoles = (...roles: AdminRole[]) =>
       return;
     }
     next();
+  };
+
+// Pages the superadmin can open to partner and agent logins. Ids match the admin sidebar section ids.
+const PARTNER_PAGE_IDS = ["analytics", "monitor", "journey", "customers", "assessments", "tickets", "crm"] as const;
+type PartnerPageId = (typeof PARTNER_PAGE_IDS)[number];
+const PARTNER_ACCESS_KEY = "partner_page_access";
+
+const enabledPartnerPages = async (): Promise<PartnerPageId[]> => {
+  const saved = (await listSiteContent())[PARTNER_ACCESS_KEY];
+  return Array.isArray(saved) ? saved.filter((page): page is PartnerPageId => (PARTNER_PAGE_IDS as readonly string[]).includes(page)) : [];
+};
+
+// Lets the listed roles through, and partner or agent sessions through when any of the pages is enabled.
+const requireAdminOrPartnerPage = (roles: AdminRole[], pages: PartnerPageId[]) =>
+  async (request: Request, response: Response, next: NextFunction) => {
+    const role = sessionAdminRole(response);
+    if (roles.includes(role)) {
+      next();
+      return;
+    }
+    if (role === "partner" || role === "agent") {
+      const enabled = await enabledPartnerPages().catch(() => [] as PartnerPageId[]);
+      if (pages.some((page) => enabled.includes(page))) {
+        next();
+        return;
+      }
+    }
+    response.status(403).json({ message: "Your admin role does not have access to this action." });
   };
 
 // Audit writes must never block or fail the admin action they describe.
@@ -342,7 +407,7 @@ app.post("/api/admin/login", async (request, response) => {
   const submittedPassword = String(request.body.password || "");
   const submittedPin = String(request.body.pin || "");
   const databaseAdmin = await authenticateDatabaseAdmin(submittedId, submittedPassword, submittedPin);
-  const rootConfigured = Boolean(adminId && password.length >= 12 && /^\d{6}$/.test(pin));
+  const rootConfigured = Boolean(adminId && password.length >= 12 && /^\d{6}$/.test(pin)) && !(await getPrimaryAdminRow());
   const isRootAdmin = rootConfigured &&
     equalSecret(submittedId, adminId) &&
     equalSecret(submittedPassword, password) &&
@@ -368,11 +433,24 @@ app.post("/api/admin/login", async (request, response) => {
   });
   void recordAdminAudit({ adminId: sessionAdmin.adminId, action: "login", ipAddress })
     .catch((error) => console.error("Admin audit write failed", error));
-  response.json({ token, adminId: sessionAdmin.adminId, role: sessionAdmin.role });
+  if (sessionAdmin.role === "partner" || sessionAdmin.role === "agent") {
+    void recordPartnerActivity({ actorEmail: sessionAdmin.adminId, actorRole: sessionAdmin.role, event: "signed_in" });
+  }
+  response.json({ token, adminId: sessionAdmin.adminId, role: sessionAdmin.role, expiresAt: new Date(Date.now() + ADMIN_SESSION_TTL_MS).toISOString() });
 });
 
 app.get("/api/admin/session", requireAdmin, (request, response) => {
-  response.json({ adminId: sessionAdminId(response), role: sessionAdminRole(response) });
+  response.json({ adminId: sessionAdminId(response), role: sessionAdminRole(response), expiresAt: response.locals.adminExpiresAt });
+});
+
+app.post("/api/admin/session/extend", requireAdmin, async (request, response) => {
+  const expiresAt = await extendAdminSession(bearerToken(request)).catch(() => null);
+  if (!expiresAt) {
+    response.status(401).json({ message: "Admin sign-in is required." });
+    return;
+  }
+  response.locals.adminExpiresAt = expiresAt.toISOString();
+  response.json({ expiresAt: expiresAt.toISOString() });
 });
 
 app.get("/api/admin/activity", requireAdmin, requireAdminRoles("owner", "manager"), async (request, response) => {
@@ -483,7 +561,7 @@ app.get("/api/admin/audit", requireAdmin, requireAdminRoles("owner", "manager"),
   }
 });
 
-app.get("/api/admin/customers", requireAdmin, requireAdminRoles("owner", "manager", "support", "analyst"), async (request, response) => {
+app.get("/api/admin/customers", requireAdmin, requireAdminOrPartnerPage(["owner", "manager", "support", "analyst"], ["customers", "journey"]), async (request, response) => {
   const page = Number(request.query.page ?? 1);
   if (!Number.isSafeInteger(page) || page < 1) {
     response.status(400).json({ message: "Choose a valid customer page." });
@@ -497,7 +575,7 @@ app.get("/api/admin/customers", requireAdmin, requireAdminRoles("owner", "manage
   }
 });
 
-app.get("/api/admin/customers/:id", requireAdmin, requireAdminRoles("owner", "manager", "support"), async (request, response) => {
+app.get("/api/admin/customers/:id", requireAdmin, requireAdminOrPartnerPage(["owner", "manager", "support"], ["customers"]), async (request, response) => {
   const userId = String(request.params.id);
   if (!/^[0-9a-f-]{36}$/i.test(userId)) {
     response.status(400).json({ message: "Choose a valid customer." });
@@ -516,7 +594,7 @@ app.get("/api/admin/customers/:id", requireAdmin, requireAdminRoles("owner", "ma
   }
 });
 
-app.post("/api/admin/customers/:id/follow-up", requireAdmin, requireAdminRoles("owner", "manager", "support"), async (request, response) => {
+app.post("/api/admin/customers/:id/follow-up", requireAdmin, requireAdminOrPartnerPage(["owner", "manager", "support"], ["customers"]), async (request, response) => {
   const userId = String(request.params.id);
   const note = String(request.body.note || "").trim();
   if (!/^[0-9a-f-]{36}$/i.test(userId) || note.length < 3 || note.length > 2000) {
@@ -615,7 +693,7 @@ app.patch("/api/admin/customers/:id/status", requireAdmin, requireAdminRoles("ow
   response.json({ ok: true });
 });
 
-app.get("/api/admin/analytics", requireAdmin, requireAdminRoles("owner", "manager", "analyst"), async (request, response) => {
+app.get("/api/admin/analytics", requireAdmin, requireAdminOrPartnerPage(["owner", "manager", "analyst"], ["analytics", "journey"]), async (request, response) => {
   try {
     response.json(await getAdminAnalytics(Number(request.query.days) || 14));
   } catch (error) {
@@ -624,10 +702,27 @@ app.get("/api/admin/analytics", requireAdmin, requireAdminRoles("owner", "manage
   }
 });
 
-app.get("/api/admin/tickets", requireAdmin, requireAdminRoles("owner", "manager", "support"), async (request, response) => {
+app.get("/api/admin/revenue", requireAdmin, requireAdminRoles("owner", "manager", "analyst"), async (request, response) => {
+  const today = new Date().toISOString().slice(0, 10);
+  const defaultFrom = new Date(Date.now() - 29 * 86_400_000).toISOString().slice(0, 10);
+  const from = String(request.query.from || defaultFrom);
+  const to = String(request.query.to || today);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(from) || !/^\d{4}-\d{2}-\d{2}$/.test(to) || from > to) {
+    response.status(400).json({ message: "Choose a valid from and to date (YYYY-MM-DD)." });
+    return;
+  }
+  try {
+    response.json(await getRevenueReport(from, to));
+  } catch (error) {
+    console.error("Revenue report failed", error);
+    response.status(500).json({ message: "Unable to load revenue report." });
+  }
+});
+
+app.get("/api/admin/tickets", requireAdmin, requireAdminOrPartnerPage(["owner", "manager", "support"], ["tickets"]), async (request, response) => {
   const status = String(request.query.status || "");
   try {
-    response.json({ tickets: await listSupportTickets(status) });
+    response.json({ tickets: (await listSupportTickets(status)).map((ticket) => ({ ...ticket, sla: ticketSla(ticket.priority, ticket.created_at, ticket.status) })) });
   } catch (error) {
     console.error("Support ticket list failed", error);
     response.status(500).json({ message: "Unable to load support tickets." });
@@ -696,7 +791,7 @@ app.post("/api/support/tickets/:id/comments", requireUser, async (request, respo
   }
 });
 
-app.post("/api/admin/tickets/:id/comments", requireAdmin, requireAdminRoles("owner", "manager", "support"), async (request, response) => {
+app.post("/api/admin/tickets/:id/comments", requireAdmin, requireAdminOrPartnerPage(["owner", "manager", "support"], ["tickets"]), async (request, response) => {
   const ticketId = String(request.params.id);
   const message = String(request.body.message || "").trim();
   if (!/^[0-9a-f-]{36}$/i.test(ticketId) || message.length < 1 || message.length > 4000) {
@@ -723,21 +818,233 @@ app.post("/api/admin/tickets/:id/comments", requireAdmin, requireAdminRoles("own
   }
 });
 
-app.patch("/api/admin/tickets/:id", requireAdmin, requireAdminRoles("owner", "manager", "support"), async (request, response) => {
+app.patch("/api/admin/tickets/:id", requireAdmin, requireAdminOrPartnerPage(["owner", "manager", "support"], ["tickets"]), async (request, response) => {
   const status = String(request.body.status || "");
   const assignedTo = String(request.body.assignedTo || "").trim() || null;
-  const updated = await updateSupportTicket(String(request.params.id), status, assignedTo);
+  const ticketId = String(request.params.id);
+  const previous = await getSupportTicketAssignee(ticketId);
+  const updated = await updateSupportTicket(ticketId, status, assignedTo);
   if (!updated) {
     response.status(404).json({ message: "Support ticket not found or status is invalid." });
     return;
   }
-  auditAdmin(request, response, "ticket_updated", { type: "ticket", id: String(request.params.id), details: { status, assignedTo } });
+  if (previous.exists && previous.assignedTo !== assignedTo) {
+    auditAdmin(request, response, "ticket_reassigned", { type: "ticket", id: ticketId, details: { from: previous.assignedTo, to: assignedTo } });
+  }
+  auditAdmin(request, response, "ticket_updated", { type: "ticket", id: ticketId, details: { status, assignedTo } });
   response.json({ ok: true });
+});
+
+const toCsv = (rows: Record<string, unknown>[]) => {
+  if (!rows.length) return "";
+  const headers = Object.keys(rows[0]);
+  const cell = (value: unknown) => {
+    const text = value instanceof Date ? value.toISOString() : value === null || value === undefined ? "" : String(value);
+    return /[",\n\r]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+  };
+  return [headers.join(","), ...rows.map((row) => headers.map((header) => cell(row[header])).join(","))].join("\n");
+};
+const CONSENT_TYPES = ["marketing", "data_sharing", "sms_notifications", "push_notifications"];
+
+app.post("/api/account/delete", requireUser, async (request, response) => {
+  if (String(request.body.confirm || "") !== "DELETE") {
+    response.status(400).json({ message: 'Type DELETE to confirm account deletion.' });
+    return;
+  }
+  try {
+    const deleted = await deleteCustomerAccount(sessionUser(response).id);
+    if (!deleted) {
+      response.status(404).json({ message: "Account not found." });
+      return;
+    }
+    await revokeSession(bearerToken(request));
+    response.json({ ok: true, message: "Your personal details have been removed. Payment and report records are kept as required by law." });
+  } catch (error) {
+    console.error("Account deletion failed", error);
+    response.status(500).json({ message: "Unable to delete your account right now." });
+  }
+});
+
+app.get("/api/consents", requireUser, async (_request, response) => {
+  const userId = sessionUser(response).id;
+  const [current, history] = await Promise.all([getCurrentConsents(userId), listConsentHistory(userId)]);
+  response.json({ current, history });
+});
+
+app.post("/api/consents", requireUser, async (request, response) => {
+  const consentType = String(request.body.type || "");
+  if (!CONSENT_TYPES.includes(consentType) || typeof request.body.granted !== "boolean") {
+    response.status(400).json({ message: "Choose a valid consent type and set granted to true or false." });
+    return;
+  }
+  await recordConsent(sessionUser(response).id, consentType, request.body.granted);
+  response.status(201).json({ ok: true });
+});
+
+app.get("/api/payments", requireUser, async (_request, response) => {
+  response.json({ payments: await listCustomerPayments(sessionUser(response).id) });
+});
+
+app.get("/api/payments/:id/invoice", requireUser, async (request, response) => {
+  const payment = await getPaymentForUser(sessionUser(response).id, String(request.params.id)).catch(() => null);
+  if (!payment || payment.status !== "paid") {
+    response.status(404).json({ message: "Paid invoice not found." });
+    return;
+  }
+  const net = Number(payment.amount);
+  const gst = Number(payment.gst_amount);
+  const total = net + gst;
+  const formatted = (value: number) => `Rs. ${value.toFixed(2)}`;
+  const description = payment.plan_id ? `Subscription plan (${escapeHtml(payment.plan_id)})` : `Credit report (${escapeHtml(payment.report_bureau || "report")})`;
+  response.type("html").send(`<!doctype html><html><head><meta charset="utf-8"><title>ScoreNow invoice ${escapeHtml(payment.id)}</title>
+<style>body{font-family:Arial,sans-serif;color:#081446;max-width:640px;margin:32px auto;padding:0 16px}table{width:100%;border-collapse:collapse}td,th{padding:8px;border-bottom:1px solid #ddd;text-align:left}</style></head>
+<body><h1>ScoreNow invoice</h1><p>Invoice no: ${escapeHtml(payment.id)}<br>Order: ${escapeHtml(payment.gateway_order_id)}<br>Date: ${new Date(payment.created_at).toISOString().slice(0, 10)}</p>
+<table><tr><th>Description</th><th>Amount</th></tr><tr><td>${description}</td><td>${formatted(net)}</td></tr>
+<tr><td>GST</td><td>${formatted(gst)}</td></tr><tr><th>Total paid</th><th>${formatted(total)}</th></tr></table>
+<p>Status: paid</p></body></html>`);
+});
+
+app.post("/api/payments/:id/refund-request", requireUser, async (request, response) => {
+  const reason = String(request.body.reason || "").trim();
+  if (reason.length < 10 || reason.length > 1000) {
+    response.status(400).json({ message: "Describe the reason in 10 to 1000 characters." });
+    return;
+  }
+  const refund = await createRefundRequest(sessionUser(response).id, String(request.params.id), reason).catch(() => null);
+  if (!refund) {
+    response.status(409).json({ message: "This payment is not eligible for a refund request, or one was already submitted." });
+    return;
+  }
+  response.status(201).json({ refund });
+});
+
+app.get("/api/notifications", requireUser, async (_request, response) => {
+  response.json({ notifications: await listCustomerNotifications(sessionUser(response).id) });
+});
+
+app.post("/api/notifications/read", requireUser, async (request, response) => {
+  const id = request.body.id === undefined || request.body.id === null ? null : String(request.body.id);
+  if (id !== null && !/^\d+$/.test(id)) {
+    response.status(400).json({ message: "Invalid notification id." });
+    return;
+  }
+  const updated = await markCustomerNotificationsRead(sessionUser(response).id, id);
+  response.json({ updated });
+});
+
+app.post("/api/notifications/push-token", requireUser, async (request, response) => {
+  const token = String(request.body.token || "").trim();
+  const platform = request.body.platform;
+  if (token.length < 20 || token.length > 4096 || !["android", "ios", "web"].includes(platform)) {
+    response.status(400).json({ message: "Send a device token and a platform of android, ios, or web." });
+    return;
+  }
+  await savePushToken(sessionUser(response).id, token, platform);
+  response.status(201).json({ ok: true });
+});
+
+app.get("/api/admin/refunds", requireAdmin, requireAdminRoles("owner", "manager"), async (request, response) => {
+  const status = ["pending", "approved", "rejected", "processed"].includes(String(request.query.status)) ? String(request.query.status) : null;
+  response.json({ refunds: await listRefundRequests(status) });
+});
+
+app.post("/api/admin/refunds/:id/decision", requireAdmin, requireAdminRoles("owner", "manager"), async (request, response) => {
+  const id = Number(request.params.id);
+  const decision = request.body.decision;
+  const note = String(request.body.note || "").trim().slice(0, 500) || null;
+  if (!Number.isInteger(id) || !["approved", "rejected", "processed"].includes(decision)) {
+    response.status(400).json({ message: "Choose a valid refund decision." });
+    return;
+  }
+  const refund = await decideRefundRequest(id, decision, sessionAdminId(response), note);
+  if (!refund) {
+    response.status(409).json({ message: "This refund cannot move to that status." });
+    return;
+  }
+  auditAdmin(request, response, "refund_decided", { type: "refund", id: String(id), details: { decision, note } });
+  const messages: Record<string, string> = {
+    approved: "Your refund request was approved. Our team will process it shortly.",
+    rejected: "Your refund request was not approved. Contact support for details.",
+    processed: "Your refund has been processed.",
+  };
+  void notifyCustomer({ userId: refund.user_id, title: "Refund update", body: messages[decision] });
+  response.json({ ok: true });
+});
+
+app.get("/api/admin/canned-replies", requireAdmin, requireAdminOrPartnerPage(["owner", "manager", "support"], ["tickets"]), async (_request, response) => {
+  response.json({ replies: await listCannedReplies() });
+});
+
+app.post("/api/admin/canned-replies", requireAdmin, requireAdminOrPartnerPage(["owner", "manager", "support"], ["tickets"]), async (request, response) => {
+  const title = String(request.body.title || "").trim();
+  const body = String(request.body.body || "").trim();
+  const id = request.body.id ? String(request.body.id) : null;
+  if (title.length < 2 || title.length > 120 || body.length < 2 || body.length > 2000) {
+    response.status(400).json({ message: "Enter a title up to 120 characters and a reply up to 2000 characters." });
+    return;
+  }
+  const saved = await saveCannedReply(id, title, body, sessionAdminId(response));
+  if (!saved) {
+    response.status(404).json({ message: "Canned reply not found." });
+    return;
+  }
+  auditAdmin(request, response, "canned_reply_saved", { type: "canned_reply", id: String(saved.id) });
+  response.status(201).json({ id: saved.id });
+});
+
+app.delete("/api/admin/canned-replies/:id", requireAdmin, requireAdminOrPartnerPage(["owner", "manager", "support"], ["tickets"]), async (request, response) => {
+  const removed = await deleteCannedReply(String(request.params.id));
+  if (!removed) {
+    response.status(404).json({ message: "Canned reply not found." });
+    return;
+  }
+  auditAdmin(request, response, "canned_reply_deleted", { type: "canned_reply", id: String(request.params.id) });
+  response.json({ ok: true });
+});
+
+app.post("/api/admin/team/:email/password-reset", requireAdmin, requireAdminRoles("owner"), async (request, response) => {
+  const email = decodeURIComponent(String(request.params.email)).trim().toLowerCase();
+  const reset = await createAdminPasswordReset(email);
+  if (!reset) {
+    response.status(404).json({ message: "No active admin with that email." });
+    return;
+  }
+  auditAdmin(request, response, "admin_password_reset_issued", { type: "admin", id: email });
+  const requestOrigin = request.get("origin");
+  const requestAppUrl = requestOrigin && /^https?:\/\//i.test(requestOrigin) ? new URL(requestOrigin).origin : null;
+  const baseUrl = process.env.ADMIN_APP_URL || requestAppUrl || `${request.protocol}://${request.get("host")}`;
+  response.status(201).json({ email, expiresInHours: 2, resetUrl: `${baseUrl}/admin?reset=${reset.token}` });
+});
+
+app.post("/api/admin/password-reset/accept", async (request, response) => {
+  const token = String(request.body.token || "");
+  const password = String(request.body.password || "");
+  if (!/^[0-9a-f]{64}$/.test(token) || password.length < 12) {
+    response.status(400).json({ message: "Use a valid reset link and a password of at least 12 characters." });
+    return;
+  }
+  const admin = await acceptAdminPasswordReset(token, password);
+  if (!admin) {
+    response.status(400).json({ message: "This reset link has expired or was already used." });
+    return;
+  }
+  response.json({ ok: true, message: "Password updated. Sign in again." });
+});
+
+app.get("/api/admin/exports/:kind", requireAdmin, requireAdminRoles("owner", "manager"), async (request, response) => {
+  const kind = String(request.params.kind);
+  if (!["customers", "payments", "refunds"].includes(kind)) {
+    response.status(404).json({ message: "Unknown export." });
+    return;
+  }
+  const rows = await exportRows(kind as "customers" | "payments" | "refunds");
+  auditAdmin(request, response, "export_downloaded", { type: "export", id: kind, details: { rows: rows.length } });
+  response.type("text/csv").attachment(`scorenow-${kind}-${new Date().toISOString().slice(0, 10)}.csv`).send(toCsv(rows as Record<string, unknown>[]));
 });
 
 app.get("/api/admin/team", requireAdmin, requireAdminRoles("owner"), async (_request, response) => {
   try {
-    response.json({ admins: await listAdminAccounts(), primaryAdmin: process.env.ADMIN_LOGIN_ID || null });
+  response.json({ admins: await listAdminAccounts(), primaryAdmin: await getPrimaryAdminEmail() });
   } catch (error) {
     console.error("Admin team list failed", error);
     response.status(500).json({ message: "Unable to load admin team." });
@@ -749,19 +1056,43 @@ app.post("/api/admin/team/invitations", requireAdmin, requireAdminRoles("owner")
   const email = String(request.body.email || "").trim().toLowerCase();
   const role = request.body.role;
   const parentEmail = role === "agent" && request.body.partnerEmail ? String(request.body.partnerEmail).trim().toLowerCase() : null;
+  const primaryEmail = await getPrimaryAdminEmail();
   if (fullName.length < 2 || fullName.length > 120 || !/^\S+@\S+\.\S+$/.test(email) ||
-      !["manager", "support", "analyst", "partner", "agent"].includes(role) || email === (process.env.ADMIN_LOGIN_ID || "").toLowerCase() ||
+      !["manager", "support", "analyst", "partner", "agent"].includes(role) || email === primaryEmail ||
       (role === "agent" && parentEmail !== null && !/^\S+@\S+\.\S+$/.test(parentEmail))) {
     response.status(400).json({ message: "Enter a valid name, email, and non-owner role." });
     return;
   }
+  const password = request.body.password ? String(request.body.password) : "";
+  const pin = request.body.pin ? String(request.body.pin) : "";
+  const setCredentialsNow = password !== "" || pin !== "";
+  if (setCredentialsNow && (password.length < 12 || !/^\d{6}$/.test(pin))) {
+    response.status(400).json({ message: "To set credentials now, enter a password of at least 12 characters and a 6-digit PIN. Leave both empty to send an invite link instead." });
+    return;
+  }
   try {
+    if (setCredentialsNow && (await listAdminAccounts()).some((admin) => admin.email === email)) {
+      response.status(409).json({ message: "An admin with this email already exists." });
+      return;
+    }
     const invite = await createAdminInvitation({ fullName, email, role, invitedBy: sessionAdminId(response), parentEmail });
-    auditAdmin(request, response, "admin_invited", { type: "admin", id: email, details: { role, partner: parentEmail } });
+    if (setCredentialsNow) {
+      await updateAdminCredentials({ email: invite.email, password, pin });
+    }
+    auditAdmin(request, response, "admin_invited", { type: "admin", id: email, details: { role, partner: parentEmail, credentialsSetByOwner: setCredentialsNow } });
+    if (role === "partner" || role === "agent") {
+      void recordPartnerActivity({
+        actorEmail: sessionAdminId(response), actorRole: sessionAdminRole(response),
+        event: "invited", targetEmail: parentEmail ?? email, details: { role, email },
+      });
+    }
     const requestOrigin = request.get("origin");
     const requestAppUrl = requestOrigin && /^https?:\/\//i.test(requestOrigin) ? new URL(requestOrigin).origin : null;
     const baseUrl = process.env.ADMIN_APP_URL || requestAppUrl || `${request.protocol}://${request.get("host")}`;
-    response.status(201).json({ email: invite.email, role, invitationUrl: `${baseUrl}/admin?invite=${invite.token}` });
+    response.status(201).json({
+      email: invite.email, role, active: setCredentialsNow,
+      ...(setCredentialsNow ? {} : { invitationUrl: `${baseUrl}/admin?invite=${invite.token}` }),
+    });
   } catch (error) {
     console.error("Admin invitation creation failed", error);
     response.status(409).json({ message: "Unable to invite this admin. Check whether the email is already registered." });
@@ -787,14 +1118,63 @@ app.post("/api/admin/team/invitations/accept", async (request, response) => {
     ipAddress: request.ip,
     userAgent: request.get("user-agent"),
   });
+  if (admin.role === "partner" || admin.role === "agent") {
+    void recordPartnerActivity({ actorEmail: admin.email, actorRole: admin.role, event: "invite_accepted" });
+  }
   response.status(201).json({ token: sessionToken, adminId: admin.email, role: admin.role });
+});
+
+app.patch("/api/admin/team/:email/credentials", requireAdmin, requireAdminRoles("owner"), async (request, response) => {
+  const email = decodeURIComponent(String(request.params.email)).trim().toLowerCase();
+  const newEmail = request.body.email ? String(request.body.email).trim().toLowerCase() : undefined;
+  const password = request.body.password ? String(request.body.password) : undefined;
+  const pin = request.body.pin ? String(request.body.pin) : undefined;
+  if ((newEmail !== undefined && !/^\S+@\S+\.\S+$/.test(newEmail)) ||
+      (password !== undefined && password.length < 12) ||
+      (pin !== undefined && !/^\d{6}$/.test(pin)) ||
+      (newEmail === undefined && password === undefined && pin === undefined)) {
+    response.status(400).json({ message: "Enter a valid email, a password of at least 12 characters, and/or a 6-digit PIN. Leave a field empty to keep it." });
+    return;
+  }
+  try {
+    const primaryEmail = await getPrimaryAdminEmail();
+    const primaryRow = await getPrimaryAdminRow();
+    let finalEmail = newEmail ?? email;
+    if (email === primaryEmail && !primaryRow) {
+      if (password === undefined || pin === undefined) {
+        response.status(400).json({ message: "Set both a password and a 6-digit PIN for the primary admin the first time." });
+        return;
+      }
+      await createPrimaryAdmin({ previousEmail: email, email: finalEmail, password, pin });
+    } else {
+      const updated = await updateAdminCredentials({ email, newEmail, password, pin });
+      if (!updated) {
+        response.status(404).json({ message: "Admin account not found." });
+        return;
+      }
+      finalEmail = updated.email;
+    }
+    auditAdmin(request, response, "admin_credentials_updated", {
+      type: "admin", id: finalEmail,
+      details: { emailChanged: newEmail !== undefined && newEmail !== email, passwordChanged: password !== undefined, pinChanged: pin !== undefined },
+    });
+    response.json({ ok: true, email: finalEmail });
+  } catch (error) {
+    if ((error as { code?: string }).code === "23505") {
+      response.status(409).json({ message: "That email is already used by another admin account." });
+      return;
+    }
+    console.error("Admin credential update failed", error);
+    response.status(500).json({ message: "Unable to update admin credentials." });
+  }
 });
 
 app.patch("/api/admin/team/:email/status", requireAdmin, requireAdminRoles("owner"), async (request, response) => {
   const email = String(request.params.email).toLowerCase();
   const status = request.body.status;
+  const primaryEmail = await getPrimaryAdminEmail();
   if (!/^\S+@\S+\.\S+$/.test(email) || !["active", "disabled"].includes(status) ||
-      email === (process.env.ADMIN_LOGIN_ID || "").toLowerCase() || email === sessionAdminId(response).toLowerCase()) {
+      email === primaryEmail || email === sessionAdminId(response).toLowerCase()) {
     response.status(400).json({ message: "Choose a valid admin account and status. You cannot disable the primary admin or your own account." });
     return;
   }
@@ -804,6 +1184,10 @@ app.patch("/api/admin/team/:email/status", requireAdmin, requireAdminRoles("owne
     return;
   }
   auditAdmin(request, response, status === "disabled" ? "admin_disabled" : "admin_enabled", { type: "admin", id: email });
+  void recordPartnerActivity({
+    actorEmail: sessionAdminId(response), actorRole: sessionAdminRole(response),
+    event: status === "disabled" ? "account_disabled" : "account_enabled", targetEmail: email,
+  });
   response.json({ ok: true });
 });
 
@@ -823,7 +1207,7 @@ const parseCrmTags = (value: unknown) => {
   return tags;
 };
 
-app.get("/api/admin/crm/pipeline", requireAdmin, requireAdminRoles(...CRM_CUSTOMER_ROLES), async (_request, response) => {
+app.get("/api/admin/crm/pipeline", requireAdmin, requireAdminOrPartnerPage([...CRM_CUSTOMER_ROLES], ["crm"]), async (_request, response) => {
   try {
     response.json({ stages: CRM_STAGES, counts: await getCrmPipeline() });
   } catch (error) {
@@ -832,7 +1216,7 @@ app.get("/api/admin/crm/pipeline", requireAdmin, requireAdminRoles(...CRM_CUSTOM
   }
 });
 
-app.get("/api/admin/crm/customers", requireAdmin, requireAdminRoles(...CRM_CUSTOMER_ROLES), async (request, response) => {
+app.get("/api/admin/crm/customers", requireAdmin, requireAdminOrPartnerPage([...CRM_CUSTOMER_ROLES], ["crm"]), async (request, response) => {
   const page = Number(request.query.page ?? 1);
   const stage = request.query.stage ? String(request.query.stage) : "";
   const tag = request.query.tag ? String(request.query.tag).trim().toLowerCase() : "";
@@ -862,7 +1246,7 @@ app.get("/api/admin/crm/customers", requireAdmin, requireAdminRoles(...CRM_CUSTO
   }
 });
 
-app.get("/api/admin/crm/customers/:id", requireAdmin, requireAdminRoles(...CRM_CUSTOMER_ROLES), async (request, response) => {
+app.get("/api/admin/crm/customers/:id", requireAdmin, requireAdminOrPartnerPage([...CRM_CUSTOMER_ROLES], ["crm"]), async (request, response) => {
   const userId = String(request.params.id);
   if (!/^[0-9a-f-]{36}$/i.test(userId)) {
     response.status(400).json({ message: "Choose a valid customer." });
@@ -876,7 +1260,7 @@ app.get("/api/admin/crm/customers/:id", requireAdmin, requireAdminRoles(...CRM_C
   }
 });
 
-app.put("/api/admin/crm/customers/:id/profile", requireAdmin, requireAdminRoles(...CRM_CUSTOMER_ROLES), async (request, response) => {
+app.put("/api/admin/crm/customers/:id/profile", requireAdmin, requireAdminOrPartnerPage([...CRM_CUSTOMER_ROLES], ["crm"]), async (request, response) => {
   const userId = String(request.params.id);
   const stage = request.body.stage === undefined ? undefined : String(request.body.stage);
   const tags = parseCrmTags(request.body.tags);
@@ -894,7 +1278,7 @@ app.put("/api/admin/crm/customers/:id/profile", requireAdmin, requireAdminRoles(
   }
 });
 
-app.post("/api/admin/crm/customers/:id/activities", requireAdmin, requireAdminRoles(...CRM_CUSTOMER_ROLES), async (request, response) => {
+app.post("/api/admin/crm/customers/:id/activities", requireAdmin, requireAdminOrPartnerPage([...CRM_CUSTOMER_ROLES], ["crm"]), async (request, response) => {
   const userId = String(request.params.id);
   const kind = String(request.body.kind || "note");
   const body = String(request.body.body || "").trim();
@@ -912,7 +1296,7 @@ app.post("/api/admin/crm/customers/:id/activities", requireAdmin, requireAdminRo
   }
 });
 
-app.post("/api/admin/crm/customers/:id/tasks", requireAdmin, requireAdminRoles(...CRM_CUSTOMER_ROLES), async (request, response) => {
+app.post("/api/admin/crm/customers/:id/tasks", requireAdmin, requireAdminOrPartnerPage([...CRM_CUSTOMER_ROLES], ["crm"]), async (request, response) => {
   const userId = String(request.params.id);
   const title = String(request.body.title || "").trim();
   const dueInput = String(request.body.dueAt || "").trim();
@@ -938,7 +1322,7 @@ app.post("/api/admin/crm/customers/:id/tasks", requireAdmin, requireAdminRoles(.
   }
 });
 
-app.patch("/api/admin/crm/tasks/:taskId", requireAdmin, requireAdminRoles(...CRM_CUSTOMER_ROLES), async (request, response) => {
+app.patch("/api/admin/crm/tasks/:taskId", requireAdmin, requireAdminOrPartnerPage([...CRM_CUSTOMER_ROLES], ["crm"]), async (request, response) => {
   const taskId = Number(request.params.taskId);
   const status = String(request.body.status || "");
   if (!Number.isSafeInteger(taskId) || taskId < 1 || (status !== "open" && status !== "done")) {
@@ -959,7 +1343,7 @@ app.patch("/api/admin/crm/tasks/:taskId", requireAdmin, requireAdminRoles(...CRM
   }
 });
 
-app.get("/api/admin/crm/tasks", requireAdmin, requireAdminRoles(...CRM_CUSTOMER_ROLES), async (_request, response) => {
+app.get("/api/admin/crm/tasks", requireAdmin, requireAdminOrPartnerPage([...CRM_CUSTOMER_ROLES], ["crm"]), async (_request, response) => {
   try {
     response.json({ tasks: await listOpenCrmTasks() });
   } catch (error) {
@@ -980,6 +1364,28 @@ app.get("/api/admin/crm/export.csv", requireAdmin, requireAdminRoles("owner", "m
   } catch (error) {
     console.error("CRM export failed", error);
     response.status(500).json({ message: "Unable to export CRM data." });
+  }
+});
+
+// Which admin pages partner and agent logins may open. Any admin can read it; only the owner can change it.
+app.get("/api/admin/partner-access", requireAdmin, async (_request, response) => {
+  response.json({ pages: await enabledPartnerPages().catch(() => []), available: PARTNER_PAGE_IDS });
+});
+
+app.put("/api/admin/partner-access", requireAdmin, requireAdminRoles("owner"), async (request, response) => {
+  const submitted = Array.isArray(request.body?.pages) ? request.body.pages : null;
+  if (!submitted || submitted.some((page: unknown) => !(PARTNER_PAGE_IDS as readonly unknown[]).includes(page))) {
+    response.status(400).json({ message: "Choose pages from the list." });
+    return;
+  }
+  const pages = PARTNER_PAGE_IDS.filter((page) => submitted.includes(page));
+  try {
+    await saveSiteContent(PARTNER_ACCESS_KEY, pages, sessionAdminId(response) || "unknown");
+    auditAdmin(request, response, "partner_access_updated", { type: "site_content", id: PARTNER_ACCESS_KEY, details: { pages } });
+    response.json({ pages, available: PARTNER_PAGE_IDS });
+  } catch (error) {
+    console.error("Partner access save failed", error);
+    response.status(500).json({ message: "Unable to save partner page access." });
   }
 });
 
@@ -1020,6 +1426,10 @@ app.put("/api/admin/customers/:id/assignment", requireAdmin, requireAdminRoles("
     return;
   }
   auditAdmin(request, response, "customer_assigned", { type: "customer", id: userId, details: { owner: ownerEmail } });
+  void recordPartnerActivity({
+    actorEmail: sessionAdminId(response), actorRole: sessionAdminRole(response),
+    event: "customer_assigned", targetEmail: ownerEmail, details: { customerId: userId },
+  });
   response.json({ ok: true });
 });
 
@@ -1035,6 +1445,10 @@ app.delete("/api/admin/customers/:id/assignment", requireAdmin, requireAdminRole
     return;
   }
   auditAdmin(request, response, "customer_unassigned", { type: "customer", id: userId });
+  void recordPartnerActivity({
+    actorEmail: sessionAdminId(response), actorRole: sessionAdminRole(response),
+    event: "customer_unassigned", details: { customerId: userId },
+  });
   response.json({ ok: true });
 });
 
@@ -1069,6 +1483,10 @@ app.post("/api/admin/commissions", requireAdmin, requireAdminRoles("owner"), asy
     return;
   }
   auditAdmin(request, response, "commission_added", { type: "commission", id: commission.id, details: { payee: payeeEmail, amountRupees } });
+  void recordPartnerActivity({
+    actorEmail: sessionAdminId(response), actorRole: sessionAdminRole(response),
+    event: "commission_added", targetEmail: payeeEmail, details: { amountRupees },
+  });
   response.status(201).json({ id: commission.id });
 });
 
@@ -1084,24 +1502,131 @@ app.patch("/api/admin/commissions/:id/paid", requireAdmin, requireAdminRoles("ow
     return;
   }
   auditAdmin(request, response, "commission_paid", { type: "commission", id });
+  void recordPartnerActivity({
+    actorEmail: sessionAdminId(response), actorRole: sessionAdminRole(response),
+    event: "commission_paid", details: { commissionId: id },
+  });
   response.json({ ok: true });
 });
 
 // Partners and agents see only their own book of customers and their own earnings.
+const partnerPortalSnapshot = async (email: string, role: PartnerRole) => {
+  const [customers, earnings, commissions, activity] = await Promise.all([
+    getPortalCustomers(email, role),
+    getPortalEarnings(email),
+    listCommissions(email),
+    listPartnerActivity(email, 50),
+  ]);
+  return { role, customers, earnings, commissions, activity };
+};
+
+const partnerMonitorSnapshot = async () => {
+  const [partners, activity] = await Promise.all([listPartnerAccounts(), listPartnerActivity(undefined, 100)]);
+  const customerIds = activity.map((row) => row.details?.customerId).filter((id): id is string => typeof id === "string");
+  const names = await listCustomerNames(customerIds);
+  const enriched = activity.map((row) => {
+    const customerId = row.details?.customerId;
+    return typeof customerId === "string" && names.has(customerId)
+      ? { ...row, details: { ...row.details, customerName: names.get(customerId) } }
+      : row;
+  });
+  return { partners, activity: enriched };
+};
+
+// Customer-list changes that a partner's own view must refresh for. Snapshots are scoped server-side, so this only controls refresh timing.
+const PORTAL_REFRESH_EVENTS = new Set(["customer_assigned", "customer_unassigned", "report_completed"]);
+
+// Server-Sent Events over fetch with the Bearer header, so the session token never appears in a URL.
+// Sends a snapshot on connect and after relevant changes (debounced). The heartbeat re-checks the session and disconnects revoked or expired ones.
+const streamAdminSnapshots = (
+  request: Request,
+  response: Response,
+  buildSnapshot: () => Promise<unknown>,
+  isRelevant: (event: PartnerActivityEvent) => boolean,
+) => {
+  response.writeHead(200, {
+    "Content-Type": "text/event-stream",
+    "Cache-Control": "no-cache, no-transform",
+    Connection: "keep-alive",
+    "X-Accel-Buffering": "no",
+  });
+  let closed = false;
+  let debounce: NodeJS.Timeout | null = null;
+  const send = (event: string, data: unknown) => {
+    if (!closed) response.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+  };
+  const push = () => {
+    buildSnapshot()
+      .then((data) => send("snapshot", data))
+      .catch((error) => {
+        console.error("Admin live snapshot failed", error);
+        send("error", { message: "Live update failed. Refresh to try again." });
+      });
+  };
+  const onActivity = (event: PartnerActivityEvent) => {
+    if (!isRelevant(event)) return;
+    if (debounce) clearTimeout(debounce);
+    debounce = setTimeout(push, 300);
+  };
+  const close = () => {
+    if (closed) return;
+    closed = true;
+    clearInterval(heartbeat);
+    if (debounce) clearTimeout(debounce);
+    partnerEvents.off(PARTNER_ACTIVITY_CHANNEL, onActivity);
+    response.end();
+  };
+  const heartbeat = setInterval(() => {
+    findAdminSession(bearerToken(request))
+      .then((admin) => {
+        if (!admin) {
+          send("expired", {});
+          close();
+          return;
+        }
+        if (!closed) response.write(": keep-alive\n\n");
+      })
+      .catch(close);
+  }, 25_000);
+  partnerEvents.on(PARTNER_ACTIVITY_CHANNEL, onActivity);
+  request.on("close", close);
+  push();
+};
+
 app.get("/api/admin/portal", requireAdmin, requireAdminRoles("partner", "agent"), async (request, response) => {
   const email = sessionAdminId(response).toLowerCase();
   const role = sessionAdminRole(response) as PartnerRole;
   try {
-    const [customers, earnings, commissions] = await Promise.all([
-      getPortalCustomers(email, role),
-      getPortalEarnings(email),
-      listCommissions(email),
-    ]);
-    response.json({ role, customers, earnings, commissions });
+    response.json(await partnerPortalSnapshot(email, role));
   } catch (error) {
     console.error("Partner portal load failed", error);
     response.status(500).json({ message: "Unable to load your portal." });
   }
+});
+
+app.get("/api/admin/portal/stream", requireAdmin, requireAdminRoles("partner", "agent"), (request, response) => {
+  const email = sessionAdminId(response).toLowerCase();
+  const role = sessionAdminRole(response) as PartnerRole;
+  streamAdminSnapshots(
+    request,
+    response,
+    () => partnerPortalSnapshot(email, role),
+    (event) => event.actor_email === email || event.target_email === email || PORTAL_REFRESH_EVENTS.has(event.event),
+  );
+});
+
+// Owner and manager only: all partners and agents with live status and activity.
+app.get("/api/admin/partner-monitor", requireAdmin, requireAdminOrPartnerPage(["owner", "manager"], ["monitor"]), async (_request, response) => {
+  try {
+    response.json(await partnerMonitorSnapshot());
+  } catch (error) {
+    console.error("Partner monitor load failed", error);
+    response.status(500).json({ message: "Unable to load partner monitoring." });
+  }
+});
+
+app.get("/api/admin/partner-monitor/stream", requireAdmin, requireAdminOrPartnerPage(["owner", "manager"], ["monitor"]), (request, response) => {
+  streamAdminSnapshots(request, response, partnerMonitorSnapshot, () => true);
 });
 
 // Partners and agents save their payout details here. The account number is only returned masked.
@@ -1157,6 +1682,7 @@ app.put("/api/admin/portal/payout-profile", requireAdmin, requireAdminRoles("par
 
   try {
     await savePayoutProfile({ email, fullName, upiId, bankAccountNumber, ifsc });
+    void recordPartnerActivity({ actorEmail: email, actorRole: sessionAdminRole(response), event: "payout_profile_updated" });
     response.json(payoutProfileResponse(await getPayoutProfile(email)));
   } catch (error) {
     console.error("Payout profile save failed", error);
@@ -1173,6 +1699,10 @@ app.post("/api/admin/commissions/pay-batch", requireAdmin, requireAdminRoles("ow
   try {
     const result = await payPendingCommissions(payeeEmail);
     auditAdmin(request, response, "commission_batch_paid", { type: "commission", details: { payee: payeeEmail, payoutId: result.payoutId, amountPaise: result.amountPaise, count: result.count, mode: result.mode } });
+    void recordPartnerActivity({
+      actorEmail: sessionAdminId(response), actorRole: sessionAdminRole(response),
+      event: "commission_batch_paid", targetEmail: payeeEmail, details: { amountRupees: result.amountPaise / 100, count: result.count },
+    });
     response.json({ ok: true, ...result });
   } catch (error) {
     if (error instanceof PayoutError) {
@@ -1187,6 +1717,10 @@ app.post("/api/admin/commissions/pay-batch", requireAdmin, requireAdminRoles("ow
 app.post("/api/admin/logout", requireAdmin, async (request, response) => {
   await revokeAdminSession(bearerToken(request));
   auditAdmin(request, response, "logout");
+  const role = sessionAdminRole(response);
+  if (role === "partner" || role === "agent") {
+    void recordPartnerActivity({ actorEmail: sessionAdminId(response), actorRole: role, event: "signed_out" });
+  }
   response.json({ ok: true });
 });
 
@@ -1389,6 +1923,21 @@ const canSendSmsOtp = (ipAddress: string) => {
   return true;
 };
 
+const otpVerifyAttempts = new Map<string, { count: number; resetAt: number }>();
+const MAX_OTP_VERIFY_ATTEMPTS = 5;
+const OTP_VERIFY_WINDOW_MS = 15 * 60 * 1000;
+const canVerifyOtp = (contactKey: string) => {
+  const now = Date.now();
+  const attempt = otpVerifyAttempts.get(contactKey);
+  if (!attempt || attempt.resetAt <= now) {
+    otpVerifyAttempts.set(contactKey, { count: 1, resetAt: now + OTP_VERIFY_WINDOW_MS });
+    return true;
+  }
+  if (attempt.count >= MAX_OTP_VERIFY_ATTEMPTS) return false;
+  attempt.count += 1;
+  return true;
+};
+
 app.post("/api/auth/otp/request", async (request, response) => {
   const type = request.body.type === "email" ? "email" : request.body.type === "mobile" ? "mobile" : null;
   const value = String(request.body.value || "").trim();
@@ -1456,6 +2005,10 @@ app.post("/api/auth/otp/verify", async (request, response) => {
 
   if (!type || !value || !/^\d{6}$/.test(code)) {
     response.status(400).json({ message: "Enter the 6-digit code you received." });
+    return;
+  }
+  if (!canVerifyOtp(`${type}:${value.toLowerCase()}`)) {
+    response.status(429).json({ message: "Too many verification attempts. Wait 15 minutes and request a new code." });
     return;
   }
   if (intent === "signup" && (type !== "mobile" || fullName.length < 2 ||
@@ -1615,14 +2168,19 @@ app.post("/api/profile", requireUser, async (request, response) => {
   }
 });
 
-app.get("/api/reports/options", (_request, response) => {
-  response.json({
-    price: REPORT_PRICE_RUPEES,
-    paymentsEnabled: isSimulatedPayments() || isRazorpayConfigured(),
-    paymentsMode: isSimulatedPayments() ? "simulated" : "razorpay",
-    demoMode: isReportsDemoMode(),
-    bureaus: BUREAUS.map((id) => ({ id, name: bureauNames[id], available: isBureauAvailable(id) })),
-  });
+app.get("/api/reports/options", async (_request, response) => {
+  try {
+    response.json({
+      price: await currentReportPrice(),
+      paymentsEnabled: isSimulatedPayments() || isRazorpayConfigured(),
+      paymentsMode: isSimulatedPayments() ? "simulated" : "razorpay",
+      demoMode: isReportsDemoMode(),
+      bureaus: BUREAUS.map((id) => ({ id, name: bureauNames[id], available: isBureauAvailable(id) })),
+    });
+  } catch (error) {
+    console.error("Report options lookup failed", error);
+    response.status(500).json({ message: "Unable to load report options." });
+  }
 });
 
 const runReportFetch = async (userId: string, requestId: string, bureau: Bureau, consentIpAddress: string): Promise<ProviderDiagnostics | null> => {
@@ -1745,15 +2303,16 @@ app.post("/api/reports/order", requireUser, async (request, response) => {
     }
 
     const simulated = isSimulatedPayments();
+    const reportPrice = await currentReportPrice();
     const order = simulated
-      ? { id: simulatedId("order"), amount: REPORT_PRICE_RUPEES * 100, currency: "INR" }
+      ? { id: simulatedId("order"), amount: reportPrice * 100, currency: "INR" }
       : await createRazorpayOrder({
-        amountPaise: REPORT_PRICE_RUPEES * 100,
+        amountPaise: reportPrice * 100,
         receipt: `rpt_${bureau}_${Date.now()}`,
         notes: { userId: user.id, bureau },
       });
     await createReportPayment({
-      userId: user.id, bureau, orderId: order.id, amount: REPORT_PRICE_RUPEES, gstAmount: REPORT_GST_RUPEES,
+      userId: user.id, bureau, orderId: order.id, amount: reportPrice, gstAmount: gstIncluded(reportPrice),
       gateway: simulated ? "simulated" : "razorpay",
     });
     response.status(201).json({
@@ -1814,7 +2373,7 @@ app.post("/api/reports/verify", requireUser, async (request, response) => {
 app.get("/api/subscription", requireUser, async (_request, response) => {
   try {
     response.json({
-      plans: SUBSCRIPTION_PLANS,
+      plans: await currentSubscriptionPlans(),
       paymentsEnabled: isSimulatedPayments() || isRazorpayConfigured(),
       paymentsMode: isSimulatedPayments() ? "simulated" : "razorpay",
       ...(await getUserSubscriptions(sessionUser(response).id)),
@@ -1827,7 +2386,7 @@ app.get("/api/subscription", requireUser, async (_request, response) => {
 
 app.post("/api/subscription/order", requireUser, async (request, response) => {
   const user = sessionUser(response);
-  const plan = findSubscriptionPlan(request.body.planId);
+  const plan = (await currentSubscriptionPlans()).find((item) => item.id === request.body.planId) ?? null;
   if (!plan) {
     response.status(400).json({ message: "Choose a valid plan." });
     return;
@@ -1867,7 +2426,7 @@ app.post("/api/subscription/verify", requireUser, async (request, response) => {
   let paymentId = String(request.body.paymentId || "");
   const signature = String(request.body.signature || "");
   const payment = orderId ? await findSubscriptionPayment(user.id, orderId) : null;
-  const plan = findSubscriptionPlan(payment?.plan_id);
+  const plan = payment?.plan_id ? (await currentSubscriptionPlans()).find((item) => item.id === payment.plan_id) ?? null : null;
   if (!payment || !plan) {
     response.status(404).json({ message: "We could not find that payment." });
     return;
@@ -1885,8 +2444,10 @@ app.post("/api/subscription/verify", requireUser, async (request, response) => {
     return;
   }
   try {
-    await activateSubscription({ userId: user.id, paymentDbId: payment.id, gatewayPaymentId: paymentId, plan });
-    response.json({ plans: SUBSCRIPTION_PLANS, ...(await getUserSubscriptions(user.id)) });
+    // Activate at the price recorded when the order was placed, so later catalogue edits never change what the customer paid for.
+    const paidAmount = Math.round((Number(payment.amount) + Number(payment.gst_amount)) * 100) / 100;
+    await activateSubscription({ userId: user.id, paymentDbId: payment.id, gatewayPaymentId: paymentId, plan: { ...plan, price: paidAmount } });
+    response.json({ plans: await currentSubscriptionPlans(), ...(await getUserSubscriptions(user.id)) });
   } catch (error) {
     console.error("Subscription activation failed", error);
     response.status(500).json({ message: "Payment received, but we could not activate the plan. Please contact support." });
@@ -2181,7 +2742,7 @@ app.get("/api/health-assessment-requests", requireUser, async (_request, respons
   }
 });
 
-app.get("/api/admin/health-assessment-requests", requireAdmin, requireAdminRoles("owner", "manager", "support"), async (request, response) => {
+app.get("/api/admin/health-assessment-requests", requireAdmin, requireAdminOrPartnerPage(["owner", "manager", "support"], ["assessments"]), async (request, response) => {
   try {
     const status = String(request.query.status || "");
     const limit = Math.min(parseInt(String(request.query.limit || 50)), 200);
@@ -2199,7 +2760,7 @@ app.get("/api/admin/health-assessment-requests", requireAdmin, requireAdminRoles
   }
 });
 
-app.put("/api/admin/health-assessment-requests/:id/status", requireAdmin, requireAdminRoles("owner", "manager", "support"), async (request, response) => {
+app.put("/api/admin/health-assessment-requests/:id/status", requireAdmin, requireAdminOrPartnerPage(["owner", "manager", "support"], ["assessments"]), async (request, response) => {
   try {
     const { status } = request.body;
     if (!status || !["pending", "reviewed", "closed"].includes(status)) {
@@ -2287,6 +2848,66 @@ app.put("/api/admin/testimonials/:id/publish", requireAdmin, requireAdminRoles("
   } catch (error) {
     console.error("Failed to publish testimonial", error);
     response.status(500).json({ message: "Failed to publish testimonial." });
+  }
+});
+
+const publicSiteContent = async () => {
+  const stored = await listSiteContent();
+  const storedOrNull = (key: "service_plans" | "fd_plans" | "business_plan_prices") => (validateSiteContent(key, stored[key]).ok ? stored[key] : null);
+  return {
+    subscription_plans: resolveSubscriptionPlans(stored.subscription_plans),
+    report_price: { amount: resolveReportPrice(stored.report_price) },
+    service_plans: storedOrNull("service_plans"),
+    fd_plans: storedOrNull("fd_plans"),
+    business_plan_prices: storedOrNull("business_plan_prices"),
+  };
+};
+
+// Public values come from the admin-editable catalogue; null means the site uses its built-in copy for that section.
+app.get("/api/site-content", async (_request, response) => {
+  try {
+    response.json(await publicSiteContent());
+  } catch (error) {
+    console.error("Site content lookup failed", error);
+    response.status(500).json({ message: "Unable to load site content." });
+  }
+});
+
+app.put("/api/admin/site-content/:key", requireAdmin, requireAdminRoles("owner", "manager"), async (request, response) => {
+  const key = String(request.params.key);
+  if (!isSiteContentKey(key)) {
+    response.status(404).json({ message: "Unknown content section." });
+    return;
+  }
+  const result = validateSiteContent(key, request.body?.value);
+  if (!result.ok) {
+    response.status(400).json({ message: result.error });
+    return;
+  }
+  try {
+    await saveSiteContent(key, result.value, sessionAdminId(response) || "unknown");
+    auditAdmin(request, response, "site_content_updated", { type: "site_content", id: key });
+    response.json(await publicSiteContent());
+  } catch (error) {
+    console.error("Site content save failed", error);
+    response.status(500).json({ message: "Unable to save this section." });
+  }
+});
+
+// Removes the admin override so the section goes back to the built-in default.
+app.delete("/api/admin/site-content/:key", requireAdmin, requireAdminRoles("owner", "manager"), async (request, response) => {
+  const key = String(request.params.key);
+  if (!isSiteContentKey(key)) {
+    response.status(404).json({ message: "Unknown content section." });
+    return;
+  }
+  try {
+    await deleteSiteContent(key);
+    auditAdmin(request, response, "site_content_reset", { type: "site_content", id: key });
+    response.json(await publicSiteContent());
+  } catch (error) {
+    console.error("Site content reset failed", error);
+    response.status(500).json({ message: "Unable to reset this section." });
   }
 });
 

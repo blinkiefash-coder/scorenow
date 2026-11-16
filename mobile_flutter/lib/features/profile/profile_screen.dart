@@ -92,6 +92,16 @@ class ProfileScreen extends StatelessWidget {
                 onTap: () => context.push('/assistant'),
               ),
               ProfileMenuItem(
+                icon: Icons.receipt_long_outlined,
+                label: 'Payments & refunds',
+                onTap: () => context.push('/my-payments'),
+              ),
+              ProfileMenuItem(
+                icon: Icons.privacy_tip_outlined,
+                label: 'Privacy & data',
+                onTap: () => context.push('/privacy'),
+              ),
+              ProfileMenuItem(
                 icon: Icons.question_answer_outlined,
                 label: 'Help & support',
                 onTap: () => context.push('/support'),

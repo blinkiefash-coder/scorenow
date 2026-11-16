@@ -1,5 +1,6 @@
 import 'package:scorenow_mobile/core/app_services.dart';
 import 'package:scorenow_mobile/models/admin_crm.dart';
+import 'package:scorenow_mobile/models/admin_ops.dart';
 import 'package:scorenow_mobile/models/support.dart';
 
 Future<Map<String, dynamic>> adminRequest(
@@ -204,6 +205,20 @@ Future<Map<String, dynamic>> fetchPartnerPortal(
   };
 }
 
+Future<PartnerMonitorData> fetchPartnerMonitor(AppServices services) async {
+  final json = await adminRequest(services, 'GET', '/api/admin/partner-monitor');
+  return PartnerMonitorData(
+    partners: [
+      for (final item in (json['partners'] as List<dynamic>? ?? []))
+        PartnerAccount.fromJson(item as Map<String, dynamic>),
+    ],
+    activity: [
+      for (final item in (json['activity'] as List<dynamic>? ?? []))
+        PartnerActivityRow.fromJson(item as Map<String, dynamic>),
+    ],
+  );
+}
+
 Future<PayoutProfileForm> fetchPayoutProfile(
   AppServices services,
 ) async {
@@ -229,4 +244,57 @@ Future<void> updatePayoutProfile(
       if (ifsc != null) 'ifsc': ifsc,
     },
   );
+}
+
+Future<RevenueReport> fetchRevenue(AppServices services) async {
+  final json = await adminRequest(services, 'GET', '/api/admin/revenue');
+  return RevenueReport.fromJson(json);
+}
+
+Future<List<RefundRequest>> fetchRefunds(AppServices services) async {
+  final json = await adminRequest(services, 'GET', '/api/admin/refunds');
+  return [
+    for (final item in (json['refunds'] as List<dynamic>? ?? []))
+      RefundRequest.fromJson(item as Map<String, dynamic>),
+  ];
+}
+
+Future<void> decideRefund(
+  AppServices services,
+  int id, {
+  required String decision,
+  String? note,
+}) async {
+  await adminRequest(
+    services,
+    'POST',
+    '/api/admin/refunds/$id/decision',
+    body: {'decision': decision, if (note != null && note.isNotEmpty) 'note': note},
+  );
+}
+
+Future<List<CannedReply>> fetchCannedReplies(AppServices services) async {
+  final json = await adminRequest(services, 'GET', '/api/admin/canned-replies');
+  return [
+    for (final item in (json['replies'] as List<dynamic>? ?? []))
+      CannedReply.fromJson(item as Map<String, dynamic>),
+  ];
+}
+
+Future<void> saveCannedReply(
+  AppServices services, {
+  String? id,
+  required String title,
+  required String body,
+}) async {
+  await adminRequest(
+    services,
+    'POST',
+    '/api/admin/canned-replies',
+    body: {'id': id, 'title': title, 'body': body},
+  );
+}
+
+Future<void> deleteCannedReply(AppServices services, String id) async {
+  await adminRequest(services, 'DELETE', '/api/admin/canned-replies/$id');
 }

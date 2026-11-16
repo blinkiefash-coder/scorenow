@@ -11,7 +11,7 @@ Future<Map<String, dynamic>> requestPayment(
   final response = await services.api.request(
     'POST',
     '/api/payment/request',
-    token: services.auth.user!.token,
+    token: services.auth.customer!.token,
     body: {
       'description': description,
       'amount_paise': amountPaise,
@@ -36,7 +36,7 @@ Future<void> confirmPayment(
   await services.api.request(
     'POST',
     '/api/payment/confirm',
-    token: services.auth.user!.token,
+    token: services.auth.customer!.token,
     body: {
       'order_id': orderId,
       'razorpay_payment_id': razorpayPaymentId,
@@ -55,7 +55,7 @@ Future<void> handlePaymentWebhook(
   await services.api.request(
     'POST',
     '/api/payment/webhook',
-    token: services.auth.user?.token,
+    token: services.auth.customer?.token,
     body: {
       'webhook_id': webhookId,
       'signature': signature,
@@ -71,7 +71,7 @@ Future<Map<String, dynamic>> getRazorpayConfig(
   final response = await services.api.request(
     'GET',
     '/api/payment/razorpay-config',
-    token: services.auth.user?.token,
+    token: services.auth.customer?.token,
   );
   
   return {

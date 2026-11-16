@@ -1,8 +1,7 @@
-import 'package:json_annotation/json_annotation.dart';
+// The API returns snake_case rows, so these models parse them by hand.
+DateTime? _parseDate(Object? value) =>
+    value is String ? DateTime.tryParse(value) : null;
 
-part 'health_assessment.g.dart';
-
-@JsonSerializable()
 class HealthAssessmentRequest {
   final String id;
   final String userId;
@@ -33,12 +32,22 @@ class HealthAssessmentRequest {
   });
 
   factory HealthAssessmentRequest.fromJson(Map<String, dynamic> json) =>
-      _$HealthAssessmentRequestFromJson(json);
-
-  Map<String, dynamic> toJson() => _$HealthAssessmentRequestToJson(this);
+      HealthAssessmentRequest(
+        id: json['id'] as String,
+        userId: json['user_id'] as String,
+        fullName: json['full_name'] as String,
+        mobile: json['mobile'] as String,
+        email: json['email'] as String?,
+        requestType: json['request_type'] as String,
+        description: json['description'] as String?,
+        status: json['status'] as String,
+        submittedAt: _parseDate(json['submitted_at']) ?? DateTime.now(),
+        reviewedAt: _parseDate(json['reviewed_at']),
+        reviewedBy: json['reviewed_by'] as String?,
+        customerName: json['customer_name'] as String?,
+      );
 }
 
-@JsonSerializable()
 class Testimonial {
   final String id;
   final String customerName;
@@ -62,34 +71,15 @@ class Testimonial {
     this.publishedAt,
   });
 
-  factory Testimonial.fromJson(Map<String, dynamic> json) =>
-      _$TestimonialFromJson(json);
-
-  Map<String, dynamic> toJson() => _$TestimonialToJson(this);
-}
-
-@JsonSerializable()
-class ServicePlan {
-  final String name;
-  final String audience;
-  final String duration;
-  final String originalPrice;
-  final String offerPrice;
-  final bool featured;
-  final List<String> features;
-
-  ServicePlan({
-    required this.name,
-    required this.audience,
-    required this.duration,
-    required this.originalPrice,
-    required this.offerPrice,
-    this.featured = false,
-    required this.features,
-  });
-
-  factory ServicePlan.fromJson(Map<String, dynamic> json) =>
-      _$ServicePlanFromJson(json);
-
-  Map<String, dynamic> toJson() => _$ServicePlanToJson(this);
+  factory Testimonial.fromJson(Map<String, dynamic> json) => Testimonial(
+        id: json['id'] as String,
+        customerName: json['customer_name'] as String,
+        customerImageUrl: json['customer_image_url'] as String?,
+        rating: (json['rating'] as num).toInt(),
+        reviewText: json['review_text'] as String,
+        resultDescription: json['result_description'] as String?,
+        published: json['published'] as bool? ?? false,
+        submittedAt: _parseDate(json['submitted_at']) ?? DateTime.now(),
+        publishedAt: _parseDate(json['published_at']),
+      );
 }

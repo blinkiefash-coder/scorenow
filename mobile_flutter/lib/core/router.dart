@@ -1,15 +1,19 @@
 import 'package:go_router/go_router.dart';
 import 'package:scorenow_mobile/core/app_services.dart';
+import 'package:scorenow_mobile/features/admin/admin_accept_screen.dart';
 import 'package:scorenow_mobile/features/admin/admin_account_screen.dart';
 import 'package:scorenow_mobile/features/admin/admin_analytics_screen.dart';
 import 'package:scorenow_mobile/features/admin/admin_crm_screen.dart';
 import 'package:scorenow_mobile/features/admin/admin_customers_screen.dart';
 import 'package:scorenow_mobile/features/admin/admin_login_screen.dart';
+import 'package:scorenow_mobile/features/admin/admin_ops_screen.dart';
 import 'package:scorenow_mobile/features/admin/admin_overview_screen.dart';
 import 'package:scorenow_mobile/features/admin/admin_partner_screen.dart';
 import 'package:scorenow_mobile/features/admin/admin_shell.dart';
 import 'package:scorenow_mobile/features/admin/admin_ticket_screen.dart';
 import 'package:scorenow_mobile/features/admin/admin_tickets_screen.dart';
+import 'package:scorenow_mobile/features/partner/partner_monitor_screen.dart';
+import 'package:scorenow_mobile/features/partner/partner_portal_screen.dart';
 import 'package:scorenow_mobile/features/assistant/assistant_screen.dart';
 import 'package:scorenow_mobile/features/auth/login_screen.dart';
 import 'package:scorenow_mobile/features/credit_cards/credit_cards_screen.dart';
@@ -20,8 +24,10 @@ import 'package:scorenow_mobile/features/home/home_screen.dart';
 import 'package:scorenow_mobile/features/landing/landing_page.dart';
 import 'package:scorenow_mobile/features/notifications/notifications_screen.dart';
 import 'package:scorenow_mobile/features/products/products_screen.dart';
+import 'package:scorenow_mobile/features/payments/my_payments_screen.dart';
 import 'package:scorenow_mobile/features/payments/payments_screen.dart';
 import 'package:scorenow_mobile/features/profile/profile_screen.dart';
+import 'package:scorenow_mobile/features/profile/privacy_screen.dart';
 import 'package:scorenow_mobile/features/profile/profile_setup_screen.dart';
 import 'package:scorenow_mobile/features/reports/report_detail_screen.dart';
 import 'package:scorenow_mobile/features/reports/reports_screen.dart';
@@ -47,13 +53,15 @@ String? _redirect(AppServices services, GoRouterState state) {
   if (path == '/' && auth.customer != null) return '/home';
   if (_customerTabs.contains(path) && auth.customer == null) return '/';
 
-  if (path.startsWith('/admin') && path != '/admin/login') {
+  if (path.startsWith('/admin') && path != '/admin/login' && path != '/admin/accept') {
     final admin = auth.admin;
     if (admin == null) return '/admin/login';
     final canSeeOverview = admin.role == 'owner' || admin.role == 'manager';
     if (path == '/admin' && !canSeeOverview) {
+      if (admin.role == 'partner' || admin.role == 'agent') return '/admin/portal';
       return admin.role == 'analyst' ? '/admin/analytics' : '/admin/tickets';
     }
+    if (path == '/admin/monitor' && !canSeeOverview) return '/admin/portal';
   }
   return null;
 }
@@ -143,6 +151,14 @@ GoRouter createRouter(AppServices services) {
         builder: (context, state) => const ProfileSetupScreen(),
       ),
       GoRoute(
+        path: '/privacy',
+        builder: (context, state) => const PrivacyScreen(),
+      ),
+      GoRoute(
+        path: '/my-payments',
+        builder: (context, state) => const MyPaymentsScreen(),
+      ),
+      GoRoute(
         path: '/fixed-deposits',
         builder: (context, state) => const FixedDepositsScreen(),
       ),
@@ -162,6 +178,10 @@ GoRouter createRouter(AppServices services) {
       GoRoute(
         path: '/admin/login',
         builder: (context, state) => const AdminLoginScreen(),
+      ),
+      GoRoute(
+        path: '/admin/accept',
+        builder: (context, state) => const AdminAcceptScreen(),
       ),
       GoRoute(
         path: '/admin/ticket/:id',
@@ -184,6 +204,14 @@ GoRouter createRouter(AppServices services) {
             builder: (context, state) => const AdminPartnerScreen(),
           ),
           GoRoute(
+            path: '/admin/portal',
+            builder: (context, state) => const PartnerPortalScreen(),
+          ),
+          GoRoute(
+            path: '/admin/monitor',
+            builder: (context, state) => const PartnerMonitorScreen(),
+          ),
+          GoRoute(
             path: '/admin/customers',
             builder: (context, state) => const AdminCustomersScreen(),
           ),
@@ -194,6 +222,10 @@ GoRouter createRouter(AppServices services) {
           GoRoute(
             path: '/admin/analytics',
             builder: (context, state) => const AdminAnalyticsScreen(),
+          ),
+          GoRoute(
+            path: '/admin/ops',
+            builder: (context, state) => const AdminOpsScreen(),
           ),
           GoRoute(
             path: '/admin/account',

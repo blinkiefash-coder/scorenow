@@ -1,5 +1,5 @@
-import { useState, useEffect, Fragment } from 'react'
-import { X, Star, Check, MapPin, Phone, Mail, MessageCircle, ArrowRight } from 'lucide-react'
+import { useState, useEffect } from 'react'
+import { X, Star, Check, Phone, Mail, ArrowRight } from 'lucide-react'
 
 const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:3000'
 
@@ -454,16 +454,16 @@ export function HealthAssessmentForm({ user, token, onSuccess }: HealthAssessmen
 
   return (
     <form className="health-assessment-form" onSubmit={handleSubmit}>
-      <div className="form-group">
-        <label>Assessment Type</label>
-        <div className="radio-group">
+      <fieldset className="form-group assessment-type-field">
+        <legend>Assessment type</legend>
+        <div className="assessment-type-options">
           <label>
             <input
               type="radio"
               name="type"
               value="personal"
               checked={type === 'personal'}
-              onChange={(e) => setType('personal')}
+              onChange={() => setType('personal')}
             />
             Personal Credit Health
           </label>
@@ -473,12 +473,12 @@ export function HealthAssessmentForm({ user, token, onSuccess }: HealthAssessmen
               name="type"
               value="business"
               checked={type === 'business'}
-              onChange={(e) => setType('business')}
+              onChange={() => setType('business')}
             />
             Business Credit Health
           </label>
         </div>
-      </div>
+      </fieldset>
 
       <div className="form-group">
         <label htmlFor="fullName">Full Name *</label>

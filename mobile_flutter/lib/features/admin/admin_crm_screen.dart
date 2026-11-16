@@ -175,7 +175,7 @@ class _CrmContent extends StatelessWidget {
     required this.onTimelineActionRefresh,
   });
 
-  final AdminCrmPage page;
+  final AdminCrmPage? page;
   final String query;
   final CrmStage? stageFilter;
   final String tagFilter;
@@ -228,8 +228,7 @@ class _CrmContent extends StatelessWidget {
                 AppField(
                   controller: TextEditingController(text: query),
                   onChanged: onSearchChanged,
-                  hintText: 'Search customers…',
-                  suffixIcon: Icons.search,
+                  hint: 'Search customers…',
                 ),
                 const SizedBox(height: 12),
                 if (tagFilter.isNotEmpty)
@@ -613,9 +612,8 @@ class _CustomerTimelineState extends State<_CustomerTimeline> {
                   const SizedBox(height: 8),
                   AppField(
                     controller: _activityController,
-                    hintText: 'Add a note…',
-                    maxLines: 3,
-                    enabled: !_busy,
+                    hint: 'Add a note…',
+                    multiline: true,
                   ),
                   const SizedBox(height: 8),
                   Wrap(
@@ -624,10 +622,9 @@ class _CustomerTimelineState extends State<_CustomerTimeline> {
                       for (final kind in ActivityKind.values)
                         AppButton(
                           label: kind.value.toUpperCase(),
-                          variant: 'outline',
-                          size: 'sm',
-                          disabled: _busy,
-                          onPressed: () => _addActivity(kind),
+                          variant: AppButtonVariant.outline,
+                          small: true,
+                          onPressed: _busy ? null : () => _addActivity(kind),
                         ),
                     ],
                   ),
@@ -651,7 +648,7 @@ class _CustomerTimelineState extends State<_CustomerTimeline> {
                       (payment) => ListTile(
                         contentPadding: EdgeInsets.zero,
                         title: Text(payment.planName),
-                        subtitle: Text(formatRupees(payment.amount)),
+                        subtitle: Text(formatMoney(payment.amount)),
                         trailing: Chip(
                           label: Text(payment.status),
                           backgroundColor: payment.status == 'paid'

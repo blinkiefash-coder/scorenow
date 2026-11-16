@@ -1,6 +1,48 @@
 import { useEffect, useState, type FormEvent } from 'react'
+import { subscribeAdminStream } from './adminLive'
 
 const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:3000'
+
+type ActivityRow = { id: string; actor_email: string; actor_role: string; event: string; target_email: string | null; details: Record<string, unknown> | null; created_at: string }
+type PortalData = { customers: PortalCustomer[]; earnings: { pending_paise: string; paid_paise: string }; commissions: CommissionRow[]; activity: ActivityRow[] }
+type MonitorData = { partners: PartnerAccount[]; activity: ActivityRow[] }
+
+const ACTIVITY_LABELS: Record<string, string> = {
+  signed_in: 'signed in', signed_out: 'signed out', invited: 'was invited', invite_accepted: 'accepted invitation',
+  customer_assigned: 'customer assigned', customer_unassigned: 'customer unassigned', report_completed: 'report completed',
+  commission_added: 'commission added', commission_paid: 'commission paid', commission_batch_paid: 'commissions paid in batch',
+  account_disabled: 'account disabled', account_enabled: 'account enabled', payout_profile_updated: 'payout details updated',
+}
+
+function ActivityFeed({ rows, showActor }: { rows: ActivityRow[]; showActor: boolean }) {
+  if (!rows.length) return <p className="admin-activity-empty">No activity recorded yet.</p>
+  return (
+    <ul className="admin-activity-feed" aria-label="Recent activity">
+      {rows.map((row) => <li key={row.id}>
+        <time dateTime={row.created_at}>{formatDate(row.created_at)}</time>
+        {' '}{showActor && <strong>{row.actor_email} </strong>}
+        <span>{ACTIVITY_LABELS[row.event] || row.event.replace(/_/g, ' ')}</span>
+        {row.target_email && row.target_email !== row.actor_email && <> · {row.target_email}</>}
+        {typeof row.details?.customerName === 'string' && <> · customer <strong>{row.details.customerName}</strong></>}
+      </li>)}
+    </ul>
+  )
+}
+
+// Keeps a dashboard in sync with the server's live stream and reports stream health.
+function useLiveSnapshot<T>(url: string, token: string, enabled: boolean) {
+  const [data, setData] = useState<T | null>(null)
+  const [error, setError] = useState('')
+  useEffect(() => {
+    if (!enabled) return
+    return subscribeAdminStream<T>(url, token, {
+      onSnapshot: (next) => { setData(next); setError('') },
+      onError: (message) => setError(message),
+      onExpired: () => setError('Your session has ended. Sign in again to see live updates.'),
+    })
+  }, [url, token, enabled])
+  return { data, error }
+}
 
 type PortalCustomer = { id: string; full_name: string; assigned_at: string; latest_report_status: string | null; paid: boolean; owner_email?: string }
 type CommissionRow = { id: string; amount_paise: number | string; status: 'pending' | 'paid'; note: string | null; created_at: string; paid_at: string | null; razorpay_payout_id?: string | null }
@@ -8,6 +50,7 @@ type OwnerCommission = CommissionRow & { payee_email: string }
 type PartnerAccount = {
   email: string; full_name: string; role: 'partner' | 'agent'; status: string; parent_email: string | null; created_at: string
   assigned_customers: string; completed_reports: string; agent_count: string; pending_paise: string; paid_paise: string; payout_ready: boolean
+  last_login: string | null; signed_in: boolean; last_activity: string | null
 }
 type PayoutProfileForm = { upiId: string | null; bankAccountMasked: string | null; ifsc: string | null; hasBank: boolean }
 type SearchCustomer = { id: string; full_name: string; mobile: string }
@@ -97,19 +140,24 @@ function PayoutDetailsForm({ token }: { token: string }) {
 }
 
 export function PartnerPortal({ token, role, refreshKey }: { token: string; role: 'partner' | 'agent'; refreshKey: number }) {
-  const [data, setData] = useState<{ customers: PortalCustomer[]; earnings: { pending_paise: string; paid_paise: string }; commissions: CommissionRow[] } | null>(null)
-  const [error, setError] = useState('')
+  const [manualData, setManualData] = useState<PortalData | null>(null)
+  const [manualError, setManualError] = useState('')
+  const live = useLiveSnapshot<PortalData>(`${apiUrl}/api/admin/portal/stream`, token, true)
+  const data = live.data ?? manualData
+  const error = live.data ? '' : (manualError || live.error)
   const label = role === 'partner' ? 'Partner' : 'Agent'
 
+  // A manual refresh (for example after an assignment change) re-reads the portal immediately.
   useEffect(() => {
+    if (!refreshKey) return
     let cancelled = false
     fetch(`${apiUrl}/api/admin/portal`, { headers: authHeaders(token) })
       .then(async (response) => {
         if (!response.ok) throw new Error(await readError(response, 'Unable to load your portal.'))
-        const result = await response.json() as { customers: PortalCustomer[]; earnings: { pending_paise: string; paid_paise: string }; commissions: CommissionRow[] }
-        if (!cancelled) { setData(result); setError('') }
+        const result = await response.json() as PortalData
+        if (!cancelled) { setManualData(result); setManualError('') }
       })
-      .catch((err: unknown) => { if (!cancelled) setError(errorText(err, 'Unable to load your portal.')) })
+      .catch((err: unknown) => { if (!cancelled) setManualError(errorText(err, 'Unable to load your portal.')) })
     return () => { cancelled = true }
   }, [token, refreshKey])
 
@@ -143,8 +191,115 @@ export function PartnerPortal({ token, role, refreshKey }: { token: string; role
       <div className="dashboard-card-heading"><strong>My commissions</strong><small>Your own earnings only</small></div>
       <CommissionTable rows={data.commissions} showPayee={false} busy={false} />
     </article>
+    <article className="dashboard-card admin-activity-card">
+      <div className="dashboard-card-heading"><strong>My activity</strong><small>Live · sign-ins, assignments and commissions</small></div>
+      <ActivityFeed rows={data.activity} showActor={false} />
+    </article>
     <PayoutDetailsForm token={token} />
   </>
+}
+
+export function PartnerMonitor({ token, enabled }: { token: string; enabled: boolean }) {
+  const { data, error } = useLiveSnapshot<MonitorData>(`${apiUrl}/api/admin/partner-monitor/stream`, token, enabled)
+  if (!enabled) return null
+  const heading = <div className="admin-heading"><span>PARTNER MONITOR</span><h1>Partners and agents</h1><p>Live view of partner sign-ins and activity. Read-only.</p></div>
+  if (!data) return <>{heading}{error ? <p className="dashboard-notice error" role="alert">{error}</p> : <p className="admin-activity-empty">Connecting…</p>}</>
+  const signedIn = data.partners.filter((partner) => partner.signed_in).length
+  return <>
+    {heading}
+    {error && <p className="dashboard-notice error" role="alert">{error}</p>}
+    <section className="admin-activity" aria-label="Monitor summary">
+      <article className="dashboard-card"><strong>{data.partners.length}</strong><small>Partners and agents</small></article>
+      <article className="dashboard-card"><strong>{signedIn}</strong><small>Signed in now</small></article>
+    </section>
+    <article className="dashboard-card admin-activity-card">
+      <div className="dashboard-card-heading"><strong>Accounts</strong><small>{data.partners.length} accounts</small></div>
+      {data.partners.length
+        ? <div className="admin-table-wrap"><table className="admin-activity-table"><thead><tr><th>Account</th><th>Role</th><th>Status</th><th>Signed in</th><th>Last login</th><th>Last activity</th><th>Customers</th></tr></thead><tbody>
+            {data.partners.map((partner) => <tr key={partner.email}>
+              <td><strong>{partner.full_name}</strong><br /><small>{partner.email}</small></td>
+              <td>{partner.role}</td>
+              <td><span className={`admin-status ${partner.status === 'active' ? 'completed' : 'pending'}`}>{partner.status}</span></td>
+              <td><span className={`admin-status ${partner.signed_in ? 'completed' : 'pending'}`}>{partner.signed_in ? 'online' : 'offline'}</span></td>
+              <td>{formatDate(partner.last_login)}</td>
+              <td>{formatDate(partner.last_activity)}</td>
+              <td>{partner.assigned_customers}</td>
+            </tr>)}
+          </tbody></table></div>
+        : <p className="admin-activity-empty">No partner or agent accounts yet.</p>}
+    </article>
+    <article className="dashboard-card admin-activity-card">
+      <div className="dashboard-card-heading"><strong>Activity feed</strong><small>Latest 200 events</small></div>
+      <ActivityFeed rows={data.activity} showActor />
+    </article>
+  </>
+}
+
+const PARTNER_PAGE_LABELS: Record<string, string> = {
+  analytics: 'Analytics (aggregate numbers)',
+  monitor: 'Partner monitor',
+  journey: 'Signup journey (aggregate funnel)',
+  customers: 'Customers (personal data)',
+  assessments: 'Health assessments (personal data)',
+  tickets: 'Helpline tickets (personal data)',
+  crm: 'CRM (personal data)',
+}
+
+function PartnerPageAccess({ token }: { token: string }) {
+  const [available, setAvailable] = useState<string[]>([])
+  const [pages, setPages] = useState<string[]>([])
+  const [savedPages, setSavedPages] = useState<string[]>([])
+  const [busy, setBusy] = useState(false)
+  const [notice, setNotice] = useState<Notice | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    fetch(`${apiUrl}/api/admin/partner-access`, { headers: authHeaders(token) })
+      .then(async (response) => {
+        if (!response.ok) throw new Error(await readError(response, 'Unable to load partner page access.'))
+        const result = await response.json() as { pages: string[]; available: string[] }
+        if (!cancelled) { setAvailable(result.available); setPages(result.pages); setSavedPages(result.pages) }
+      })
+      .catch((err: unknown) => { if (!cancelled) setNotice({ tone: 'error', text: errorText(err, 'Unable to load partner page access.') }) })
+    return () => { cancelled = true }
+  }, [token])
+
+  const togglePage = (page: string) => setPages((current) => current.includes(page) ? current.filter((item) => item !== page) : [...current, page])
+
+  const savePages = async () => {
+    setBusy(true)
+    setNotice(null)
+    try {
+      const response = await fetch(`${apiUrl}/api/admin/partner-access`, {
+        method: 'PUT',
+        headers: { ...authHeaders(token), 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pages }),
+      })
+      if (!response.ok) throw new Error(await readError(response, 'Unable to save partner page access.'))
+      const result = await response.json() as { pages: string[] }
+      setPages(result.pages)
+      setSavedPages(result.pages)
+      setNotice({ tone: 'info', text: 'Saved. Partners and agents see these pages after they reload the portal.' })
+    } catch (err) {
+      setNotice({ tone: 'error', text: errorText(err, 'Unable to save partner page access.') })
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const changed = pages.length !== savedPages.length || pages.some((page) => !savedPages.includes(page))
+
+  return <article className="dashboard-card admin-management-card">
+    <div className="dashboard-card-heading"><strong>Pages partners and agents can open</strong><small>Partners always see My referrals. Turn on any other page they should see. Pages with customer personal data stay off until you enable them.</small></div>
+    {notice && <p className={`dashboard-notice ${notice.tone}`} role="status">{notice.text}</p>}
+    <div className="partner-page-options">
+      {available.map((page) => <label key={page}>
+        <input type="checkbox" checked={pages.includes(page)} onChange={() => togglePage(page)} disabled={busy} />
+        {PARTNER_PAGE_LABELS[page] || page}
+      </label>)}
+    </div>
+    <button className="button button-primary" type="button" onClick={savePages} disabled={busy || !changed}>Save page access</button>
+  </article>
 }
 
 export function PartnerManagement({ token, refreshKey }: { token: string; refreshKey: number }) {
@@ -158,6 +313,8 @@ export function PartnerManagement({ token, refreshKey }: { token: string; refres
   const [searchText, setSearchText] = useState('')
   const [searchResults, setSearchResults] = useState<SearchCustomer[]>([])
   const [assignTo, setAssignTo] = useState('')
+  const [newRole, setNewRole] = useState<'partner' | 'agent'>('partner')
+  const [inviteLink, setInviteLink] = useState('')
 
   const reload = () => setReloadKey((key) => key + 1)
   const activeAccounts = accounts.filter((account) => account.status === 'active')
@@ -256,6 +413,27 @@ export function PartnerManagement({ token, refreshKey }: { token: string; refres
     }, 'Unable to record this commission.')
   }
 
+  const addPartnerAccount = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    const formElement = event.currentTarget
+    const fields = Object.fromEntries(new FormData(formElement).entries())
+    setInviteLink('')
+    void runAction(async () => {
+      const response = await fetch(`${apiUrl}/api/admin/team/invitations`, {
+        method: 'POST',
+        headers: jsonHeaders(token),
+        body: JSON.stringify({ ...fields, role: newRole }),
+      })
+      const result = await response.json() as { active?: boolean; invitationUrl?: string; message?: string }
+      if (!response.ok) throw new Error(result.message || 'Unable to add this account.')
+      const label = newRole === 'partner' ? 'Partner' : 'Agent'
+      setInviteLink(result.invitationUrl ?? '')
+      setNotice({ tone: 'info', text: result.active ? `${label} account created. They can sign in now with the email, password and PIN you set.` : `${label} invite link created. Share it privately.` })
+      formElement.reset()
+      reload()
+    }, 'Unable to add this account.')
+  }
+
   const payPending = (account: PartnerAccount) => {
     const amount = formatRupees(account.pending_paise)
     if (!window.confirm(`Send a RazorpayX payout of ${amount} to ${account.full_name} (${account.email})? All pending commissions for this person will be paid in one transfer.`)) return
@@ -288,9 +466,26 @@ export function PartnerManagement({ token, refreshKey }: { token: string; refres
   </>
 
   return <>
-    <div className="admin-heading"><span>PARTNER ACCESS</span><h1>Partners & agents</h1><p>Track the customers each partner and agent referred, and record commissions. Invite new partners and agents from Manage admins.</p></div>
+    <div className="admin-heading"><span>PARTNER ACCESS</span><h1>Partners & agents</h1><p>Create partner and agent logins, track the customers each one referred, and record commissions.</p></div>
     {loadError && <p className="dashboard-notice error" role="alert">{loadError}</p>}
     {notice && <p className={`dashboard-notice ${notice.tone}`} role="status">{notice.text}</p>}
+    <article className="dashboard-card admin-management-card">
+      <div className="dashboard-card-heading"><strong>Add a partner or agent</strong><small>Set email, password and PIN so they can sign in and see only their own referrals. Leave password and PIN empty to send an invite link.</small></div>
+      <form className="admin-management-form" onSubmit={addPartnerAccount}>
+        <label>Full name<input name="fullName" minLength={2} maxLength={120} required /></label>
+        <label>Email (login ID)<input name="email" type="email" required /></label>
+        <label>Type<select value={newRole} onChange={(event) => setNewRole(event.target.value as 'partner' | 'agent')}><option value="partner">Partner</option><option value="agent">Agent (under a partner)</option></select></label>
+        {newRole === 'agent' && <label>Partner (optional)<select name="partnerEmail" defaultValue="">
+          <option value="">No partner</option>
+          {activeAccounts.filter((account) => account.role === 'partner').map((partner) => <option value={partner.email} key={partner.email}>{partner.full_name} ({partner.email})</option>)}
+        </select></label>}
+        <label>Password (min 12 characters, optional)<input name="password" type="password" minLength={12} autoComplete="new-password" /></label>
+        <label>6-digit PIN (optional)<input name="pin" inputMode="numeric" pattern="\d{6}" maxLength={6} autoComplete="off" /></label>
+        <button className="button button-primary" type="submit" disabled={busy}>Add {newRole}</button>
+      </form>
+      {inviteLink && <label className="admin-invite-link">One-time invite link<input readOnly value={inviteLink} onFocus={(event) => event.currentTarget.select()} /><small>Copy and share privately. The invite is valid for 48 hours.</small></label>}
+    </article>
+    <PartnerPageAccess token={token} />
     <article className="dashboard-card admin-activity-card">
       <div className="dashboard-card-heading"><strong>Partners and agents</strong><small>{accounts.length} accounts</small></div>
       {accounts.length
@@ -310,7 +505,7 @@ export function PartnerManagement({ token, refreshKey }: { token: string; refres
               <td><button className="button button-outline" type="button" disabled={busy} onClick={() => void openDetail(account)}>View customers</button></td>
             </tr>)}
           </tbody></table></div>
-        : <p className="admin-activity-empty">No partners or agents yet. Invite them from Manage admins.</p>}
+        : <p className="admin-activity-empty">No partners or agents yet. Add one above.</p>}
     </article>
 
     {detail && <article className="dashboard-card admin-activity-card">

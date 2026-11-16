@@ -197,6 +197,10 @@ class _AdminLoginScreenState extends State<AdminLoginScreen> {
             loading: _loading,
             onPressed: _canSubmit && !_loading ? _submit : null,
           ),
+          TextButton(
+            onPressed: () => context.push('/admin/accept'),
+            child: const Text('Have an invite or reset link?'),
+          ),
         ],
       ),
     );

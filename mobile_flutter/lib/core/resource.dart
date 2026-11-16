@@ -1,4 +1,5 @@
-import 'package:flutter/foundation.dart';
+import 'package:flutter/widgets.dart';
+import 'package:scorenow_mobile/widgets/feedback_widgets.dart';
 
 // Loads one API resource and tracks the initial, refresh, and error states.
 class ApiResource<T> extends ChangeNotifier {
@@ -15,6 +16,20 @@ class ApiResource<T> extends ChangeNotifier {
   Future<void> reload() => _load(refresh: false);
 
   Future<void> refresh() => _load(refresh: true);
+
+  // Rebuilds on every state change: shows the error banner when nothing is loaded yet,
+  // otherwise passes the current data (null while loading) to [child].
+  Widget builder(Widget Function(BuildContext context, T? data) child) {
+    return ListenableBuilder(
+      listenable: this,
+      builder: (context, _) {
+        if (data == null && error.isNotEmpty) {
+          return ErrorBanner(message: error, onRetry: () => reload());
+        }
+        return child(context, data);
+      },
+    );
+  }
 
   void setData(T value) {
     data = value;

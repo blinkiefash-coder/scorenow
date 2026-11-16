@@ -1151,6 +1151,12 @@ html.auth-open, html.auth-open body { overflow: hidden; }
 .admin-customer-toolbar .button, .admin-ticket-toolbar .button { min-height: 40px; display: inline-flex; align-items: center; gap: 7px; }
 .admin-customer-toolbar .button svg, .admin-ticket-toolbar .button svg { width: 15px; }
 .admin-management-card { margin: 16px 0; padding: 0; overflow: hidden; }
+.site-content-card { margin: 16px 0; display: grid; gap: 12px; }
+.site-content-card > .dashboard-card-heading { display: grid; gap: 4px; }
+.site-content-editor { width: 100%; min-height: 220px; padding: 12px; border: 1px solid #d8e0ea; border-radius: 8px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; line-height: 1.5; resize: vertical; box-sizing: border-box; }
+.site-content-actions { display: flex; flex-wrap: wrap; gap: 10px; }
+.site-content-notice { margin: 12px 0; padding: 10px 14px; border-radius: 8px; background: #eef6ff; color: #1f4f82; }
+.site-content-notice.error { background: #fdecec; color: #9b1c1c; }
 .admin-management-card > .dashboard-card-heading { padding: 17px 18px; border-bottom: 1px solid #edf1f6; }
 .admin-management-card > .dashboard-card-heading > strong { font-family: 'Sora Variable', sans-serif; font-size: 14px; }
 .admin-management-card > .dashboard-card-heading > small { color: #74839a; font-size: 10px; }
@@ -1163,6 +1169,9 @@ html.auth-open, html.auth-open body { overflow: hidden; }
 .admin-management-form > .button svg { width: 15px; }
 .admin-invite-link { padding: 0 18px 16px; }
 .admin-invite-link small { color: #7a8799; font-size: 9px; font-weight: 600; }
+.partner-page-options { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 10px; padding: 0 18px 14px; color: #263a59; font-size: 11px; font-weight: 700; }
+.partner-page-options label { display: flex; align-items: center; gap: 8px; }
+.admin-management-card > .button { margin: 0 18px 16px; min-height: 38px; font-size: 10px; }
 .admin-small-button { min-height: 30px; padding: 0 9px; font-size: 9px; }
 .admin-funnel { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 12px; margin-bottom: 16px; }
 .admin-funnel-step { display: grid; gap: 7px; padding: 16px; }
@@ -1225,6 +1234,9 @@ html.auth-open, html.auth-open body { overflow: hidden; }
 .admin-status.failed { background: #fff0f1; color: #a32235; }
 .admin-status.created, .admin-status.processing, .admin-status.pending { background: #fff6df; color: #8a5a00; }
 .admin-activity-empty { margin: 0; padding: 26px 18px; color: #77869a; font-size: 11px; text-align: center; }
+.admin-activity-feed { margin: 0; padding: 12px 18px; list-style: none; display: grid; gap: 8px; max-height: 420px; overflow-y: auto; font-size: 12px; color: #334155; }
+.admin-activity-feed li { display: flex; flex-wrap: wrap; gap: 6px; align-items: baseline; }
+.admin-activity-feed time { color: #77869a; font-size: 11px; }
 .admin-activity-pagination { display: flex; align-items: center; justify-content: center; gap: 14px; padding: 2px 0; }
 .admin-activity-pagination .button { min-height: 36px; display: inline-flex; align-items: center; gap: 6px; padding-inline: 12px; font-size: 10px; }
 .admin-activity-pagination .button svg { width: 14px; }
@@ -1367,7 +1379,8 @@ html.auth-open, html.auth-open body { overflow: hidden; }
 .dashboard-topbar { box-shadow: 0 5px 18px rgba(26, 48, 82, .035); }
 .dashboard-content { max-width: 1380px; }
 .dashboard-welcome { align-items: flex-end; }
-.dashboard-welcome h1 { font-size: clamp(25px, 2.4vw, 33px); }
+.dashboard-welcome > div { min-width: 0; }
+.dashboard-welcome h1 { font-size: clamp(25px, 2.4vw, 33px); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .dashboard-welcome p { max-width: 700px; font-size: 13px; line-height: 1.6; }
 .dashboard-overview-grid {
   grid-template-columns: minmax(0, 1fr);
@@ -1559,7 +1572,7 @@ html.auth-open, html.auth-open body { overflow: hidden; }
   .dashboard-guidance-action { transition: none; }
 }
 
-.dashboard-account-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; margin-top: 18px; }
+.dashboard-account-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; gap: 18px; margin-top: 18px; }
 .account-card, .help-card { padding: 22px; }
 .help-card { margin-top: 18px; margin-bottom: 110px; }
 .account-card .dashboard-card-heading > strong, .help-card .dashboard-card-heading > strong { display: flex; align-items: center; gap: 8px; font-size: 16px; }
@@ -1574,6 +1587,9 @@ html.auth-open, html.auth-open body { overflow: hidden; }
 .account-note { display: flex; align-items: flex-start; gap: 7px; margin: 16px 0 0; color: var(--muted); font-size: 11px; line-height: 1.5; }
 .account-note svg { width: 14px; flex-shrink: 0; color: #0eaa68; }
 .settings-list { display: grid; gap: 4px; margin: 0; padding: 0; list-style: none; }
+.settings-privacy { display: grid; gap: 10px; margin-top: 18px; padding-top: 16px; border-top: 1px solid #eef2f6; }
+.settings-privacy h3 { margin: 0; color: var(--navy); font-size: 14px; }
+.settings-privacy-note { margin: 0; color: var(--muted); font-size: 12px; }
 .settings-list li { display: flex; align-items: center; gap: 12px; padding: 12px 0; border-bottom: 1px solid #eef2f6; }
 .settings-list li > span { width: 34px; height: 34px; display: grid; flex: none; place-items: center; border-radius: 10px; background: #eaf4ff; color: var(--blue); }
 .settings-list li > span svg { width: 16px; }
@@ -1658,7 +1674,7 @@ html.auth-open, html.auth-open body { overflow: hidden; }
 .category-select:hover { border-color: #b6d4f1; }
 .category-select:focus { outline: none; border-color: var(--blue); box-shadow: 0 0 0 2px rgba(91, 155, 213, 0.1); }
 
-#my-profile, #settings, #help-support { scroll-margin-top: 88px; }
+#settings, #help-support { scroll-margin-top: 88px; }
 
 @media (max-width: 1100px) {
   .help-options { grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -1680,7 +1696,7 @@ html.auth-open, html.auth-open body { overflow: hidden; }
   .faq-link-buttons { flex-direction: column; }
   .faq-link-btn { width: 100%; justify-content: space-between; }
   .form-group { margin-bottom: 12px; }
-  #my-profile, #settings, #help-support { scroll-margin-top: 16px; }
+  #settings, #help-support { scroll-margin-top: 16px; }
 }
 
 .admin-section-actions { display: flex; justify-content: flex-end; margin: -12px 0 18px; }
@@ -4232,11 +4248,60 @@ button.admin-attention-item:hover { transform: translateY(-1px); box-shadow: 0 6
    HEALTH ASSESSMENT FORM
    ============================================================================ */
 .health-assessment-form {
-  background: white;
+  display: grid;
+  width: 100%;
+  max-width: 640px;
+}
+
+.assessment-type-field {
+  min-width: 0;
+  margin: 0 0 20px;
+  padding: 0;
+  border: 0;
+}
+
+.assessment-type-field legend {
+  padding: 0;
+  margin-bottom: 8px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--navy);
+}
+
+.assessment-type-options {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.assessment-type-options label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+  padding: 10px 12px;
   border: 1px solid #dce8f5;
-  border-radius: 12px;
-  padding: 28px;
-  max-width: 600px;
+  border-radius: 10px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--navy);
+  cursor: pointer;
+}
+
+.assessment-type-options label:has(input:checked) {
+  border-color: var(--blue);
+  background: #eaf4ff;
+}
+
+.assessment-type-options input[type="radio"] {
+  margin: 0;
+  accent-color: var(--blue);
+}
+
+@media (max-width: 480px) {
+  .assessment-type-options {
+    grid-template-columns: 1fr;
+  }
 }
 
 .form-group {
@@ -4502,11 +4567,13 @@ button.admin-attention-item:hover { transform: translateY(-1px); box-shadow: 0 6
     flex-wrap: wrap;
   }
 
-  .health-assessment-form {
-    padding: 20px;
-  }
-
   .modal-dialog {
     padding: 24px;
   }
 }
+
+/* Customer payments and canned reply picker */
+.customer-payments { display: grid; gap: 10px; }
+.customer-payment-row { display: grid; gap: 8px; padding: 12px 0; border-bottom: 1px solid rgba(7, 23, 63, 0.08); }
+.customer-payment-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.canned-reply-picker { display: grid; gap: 4px; font-size: 13px; }

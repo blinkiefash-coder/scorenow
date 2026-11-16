@@ -36,6 +36,40 @@ class SubscriptionPlan {
   final bool featured;
 }
 
+// Parses GET /api/site-content. Returns null when the admin has not saved usable plans, so the defaults below stay in use.
+({List<ServicePlan> services, List<SubscriptionPlan> subscriptions})? plansFromSiteContent(
+  Map<String, dynamic> json,
+) {
+  final rawServices = json['service_plans'];
+  final rawSubscriptions = json['subscription_plans'];
+  if (rawServices is! List || rawSubscriptions is! List) return null;
+
+  final services = [
+    for (final item in rawServices.whereType<Map<String, dynamic>>())
+      ServicePlan(
+        name: '${item['name'] ?? ''}',
+        audience: '${item['audience'] ?? ''}',
+        duration: '${item['duration'] ?? ''}',
+        originalPrice: '${item['originalPrice'] ?? ''}',
+        offerPrice: '${item['offerPrice'] ?? ''}',
+        featured: item['featured'] == true,
+        features: [for (final f in (item['features'] as List? ?? const [])) '$f'],
+      ),
+  ];
+  final subscriptions = [
+    for (final item in rawSubscriptions.whereType<Map<String, dynamic>>())
+      SubscriptionPlan(
+        name: '${item['name'] ?? ''}',
+        duration: '${item['months'] ?? ''} ${item['months'] == 1 ? 'month' : 'months'}',
+        price: '₹${item['price'] ?? ''}',
+        note: '${item['note'] ?? ''}',
+        featured: item['featured'] == true,
+      ),
+  ];
+  if (services.isEmpty || subscriptions.isEmpty) return null;
+  return (services: services, subscriptions: subscriptions);
+}
+
 const servicePlans = [
   ServicePlan(
     name: 'Basic',
