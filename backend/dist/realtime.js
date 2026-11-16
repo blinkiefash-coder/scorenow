@@ -3,3 +3,5 @@ import { EventEmitter } from "node:events";
 export const partnerEvents = new EventEmitter();
 partnerEvents.setMaxListeners(0);
 export const PARTNER_ACTIVITY_CHANNEL = "partner-activity";
+export const NEHA_MESSAGE_CHANNEL = "neha-message";
+export const AGENT_STATUS_CHANNEL = "agent-status";

@@ -6,10 +6,10 @@ import multer from "multer";
 import nodemailer from "nodemailer";
 import path from "node:path";
 import { BUREAUS, bureauNames, fetchBureauReport, isBureau, isBureauAvailable, missingApplicantFields, scoreBand, stateCodes, downloadReportPdf, } from "./bureaus.js";
-import { completeReportRequest, authenticateCustomerByEmail, authenticateDatabaseAdmin, createDemoReportRequest, createAdminReportAudit, addSupportTicketComment, createAdminSession, completeAdminReportAudit, createOtp, createCustomerInvitation, createAdminInvitation, acceptAdminInvitation, createReportPayment, createSession, failReportRequest, findReportPayment, findReportRequest, findSessionUser, findAdminSession, extendAdminSession, ADMIN_SESSION_TTL_MS, findUserByEmail, getApplicant, getAdminActivity, getAdminAnalytics, getRevenueReport, getAdminCustomers, getAdminReportDocument, getDashboardStatus, getPrimaryAdminEmail, getPrimaryAdminRow, createPrimaryAdmin, updateAdminCredentials, getReportDetail, getReportPdf, initializeDatabase, listAdminAccounts, listAdminUsers, listCustomerInvitations, listSupportTickets, markEmailVerified, markPaymentFailed, markPaymentPaidAndCreateRequest, recordPaymentFailure, markReportProcessing, revokeSession, revokeAdminSession, setAdminAccountStatus, setCustomerPassword, setCustomerAccountStatus, updateSupportTicket, createSupportTicket, cancelCustomerInvitation, saveAssessment, saveReportPdf, createSubscriptionPayment, findSubscriptionPayment, activateSubscription, getUserSubscriptions, saveReportDocument, saveAdminReportDocument, saveWebsiteInquiry, saveKycProfile, setUserEmailIfMissing, upsertUserByMobile, verifyOtp, exportAdminActivity, recordAdminAudit, listAdminAudit, getAdminCustomerDetail, findCustomerForFollowUp, findAdminRetryableReport, getAdminAttention, getFailedOperations, getHealthStats, listPartnerAccounts, getPortalCustomers, getPortalEarnings, getPayoutProfile, savePayoutProfile, listCommissions, createCommission, markCommissionPaid, assignCustomerToOwner, unassignCustomer, CRM_ACTIVITY_KINDS, CRM_STAGES, addCrmActivity, createCrmTask, getCrmExportRows, getCrmPipeline, getCrmTimeline, listCrmCustomers, listOpenCrmTasks, setCrmTaskStatus, updateCrmProfile, submitHealthAssessmentRequest, listHealthAssessmentRequests, updateHealthAssessmentStatus, submitTestimonial, listTestimonials, publishTestimonial, setTestimonialPublished, createTestimonial, deleteTestimonial, listSiteContent, saveSiteContent, deleteSiteContent, listPartnerActivity, listCustomerNames, recordPartnerActivity, deleteCustomerAccount, recordConsent, getCurrentConsents, listConsentHistory, getPaymentForUser, listCustomerPayments, createRefundRequest, listRefundRequests, decideRefundRequest, listCustomerNotifications, markCustomerNotificationsRead, savePushToken, listCannedReplies, saveCannedReply, deleteCannedReply, createAdminPasswordReset, acceptAdminPasswordReset, exportRows, getSupportTicketAssignee, } from "./database.js";
+import { completeReportRequest, authenticateCustomerByEmail, authenticateDatabaseAdmin, createDemoReportRequest, createAdminReportAudit, addSupportTicketComment, createAdminSession, completeAdminReportAudit, createOtp, createCustomerInvitation, createAdminInvitation, acceptAdminInvitation, createReportPayment, createSession, failReportRequest, findReportPayment, findReportRequest, findSessionUser, findAdminSession, extendAdminSession, ADMIN_SESSION_TTL_MS, findUserByEmail, getApplicant, getAdminActivity, getAdminAnalytics, getRevenueReport, getAdminCustomers, getAdminReportDocument, getDashboardStatus, getPrimaryAdminEmail, getPrimaryAdminRow, createPrimaryAdmin, updateAdminCredentials, getReportDetail, getReportPdf, initializeDatabase, listAdminAccounts, listAdminUsers, listCustomerInvitations, listSupportTickets, markEmailVerified, markPaymentFailed, markPaymentPaidAndCreateRequest, recordPaymentFailure, markReportProcessing, revokeSession, revokeAdminSession, setAdminAccountStatus, setCustomerPassword, setCustomerAccountStatus, updateSupportTicket, createSupportTicket, cancelCustomerInvitation, saveAssessment, saveReportPdf, createSubscriptionPayment, findSubscriptionPayment, activateSubscription, getUserSubscriptions, saveReportDocument, saveAdminReportDocument, saveWebsiteInquiry, saveKycProfile, setUserEmailIfMissing, upsertUserByMobile, verifyOtp, exportAdminActivity, recordAdminAudit, listAdminAudit, getAdminCustomerDetail, findCustomerForFollowUp, findAdminRetryableReport, getAdminAttention, getFailedOperations, getHealthStats, listPartnerAccounts, getPortalCustomers, getPortalEarnings, getPayoutProfile, savePayoutProfile, listCommissions, createCommission, markCommissionPaid, assignCustomerToOwner, unassignCustomer, CRM_ACTIVITY_KINDS, CRM_STAGES, addCrmActivity, createCrmTask, getCrmExportRows, getCrmPipeline, getCrmTimeline, listCrmCustomers, listOpenCrmTasks, setCrmTaskStatus, updateCrmProfile, submitHealthAssessmentRequest, listHealthAssessmentRequests, updateHealthAssessmentStatus, submitTestimonial, listTestimonials, publishTestimonial, setTestimonialPublished, createTestimonial, deleteTestimonial, listSiteContent, saveSiteContent, deleteSiteContent, listPartnerActivity, listCustomerNames, recordPartnerActivity, deleteCustomerAccount, recordConsent, getCurrentConsents, listConsentHistory, getPaymentForUser, listCustomerPayments, createRefundRequest, listRefundRequests, decideRefundRequest, listCustomerNotifications, markCustomerNotificationsRead, savePushToken, listCannedReplies, saveCannedReply, deleteCannedReply, createAdminPasswordReset, acceptAdminPasswordReset, exportRows, getSupportTicketAssignee, createNehaConversation, getNehaConversation, listNehaConversations, saveNehaMessage, getNehaMessages, updateAgentStatus, getAvailableAgents, } from "./database.js";
 import { notifyCustomer } from "./notifications.js";
 import { ticketSla } from "./sla.js";
-import { PARTNER_ACTIVITY_CHANNEL, partnerEvents } from "./realtime.js";
+import { PARTNER_ACTIVITY_CHANNEL, NEHA_MESSAGE_CHANNEL, AGENT_STATUS_CHANNEL, partnerEvents } from "./realtime.js";
 import { gstIncluded } from "./subscriptions.js";
 import { isSiteContentKey, resolveReportPrice, resolveSubscriptionPlans, validateSiteContent } from "./siteContent.js";
 import { generateReportPdf } from "./reportPdf.js";
@@ -2349,6 +2349,122 @@ app.post("/api/inquiries", requireUser, async (request, response) => {
     catch (error) {
         console.error("Website inquiry database save failed", error);
         response.status(503).json({ message: "We could not save your callback request. Please contact us on WhatsApp instead." });
+    }
+});
+// Neha Assistant - Shared Messaging Endpoints
+app.post("/api/neha/start-conversation", requireUser, async (request, response) => {
+    const user = sessionUser(response);
+    try {
+        const conversation = await createNehaConversation(user.id);
+        if (!conversation) {
+            response.status(500).json({ message: "Could not start conversation." });
+            return;
+        }
+        response.status(201).json({ conversation });
+    }
+    catch (error) {
+        console.error("Neha conversation creation failed", error);
+        response.status(503).json({ message: "Could not start a conversation right now." });
+    }
+});
+app.get("/api/neha/conversations", requireUser, async (request, response) => {
+    const user = sessionUser(response);
+    const role = request.query.role || 'customer';
+    try {
+        const conversations = await listNehaConversations(user.id, role);
+        response.json({ conversations });
+    }
+    catch (error) {
+        console.error("Neha conversations list failed", error);
+        response.status(503).json({ message: "Could not load conversations." });
+    }
+});
+app.get("/api/neha/messages/:conversationId", requireUser, async (request, response) => {
+    const user = sessionUser(response);
+    const conversationId = String(request.params.conversationId);
+    try {
+        const conversation = await getNehaConversation(conversationId);
+        if (!conversation) {
+            response.status(404).json({ message: "Conversation not found." });
+            return;
+        }
+        // Check if user has access to this conversation
+        const hasAccess = conversation.customer_id === user.id ||
+            conversation.assigned_to_id === user.id;
+        if (!hasAccess) {
+            response.status(403).json({ message: "Access denied." });
+            return;
+        }
+        const messages = await getNehaMessages(conversationId);
+        response.json({ conversation, messages });
+    }
+    catch (error) {
+        console.error("Neha messages fetch failed", error);
+        response.status(503).json({ message: "Could not load messages." });
+    }
+});
+app.post("/api/neha/send-message", requireUser, async (request, response) => {
+    const user = sessionUser(response);
+    const conversationId = String(request.body.conversationId || "").trim();
+    const message = String(request.body.message || "").trim();
+    if (!conversationId || !message || message.length > 5000) {
+        response.status(400).json({ message: "Invalid message." });
+        return;
+    }
+    try {
+        const conversation = await getNehaConversation(conversationId);
+        if (!conversation) {
+            response.status(404).json({ message: "Conversation not found." });
+            return;
+        }
+        // Customer can message their own conversation
+        // Admin/Partner can message any conversation assigned to them
+        const hasAccess = conversation.customer_id === user.id ||
+            conversation.assigned_to_id === user.id;
+        if (!hasAccess) {
+            response.status(403).json({ message: "Access denied." });
+            return;
+        }
+        const senderType = conversation.customer_id === user.id ? 'customer' : conversation.assigned_to_role;
+        const senderName = user.full_name;
+        const saved = await saveNehaMessage(conversationId, user.id, senderType, senderName, message);
+        // Emit real-time event
+        partnerEvents.emit(NEHA_MESSAGE_CHANNEL, { conversationId, message: saved });
+        response.status(201).json({ message: saved });
+    }
+    catch (error) {
+        console.error("Neha message send failed", error);
+        response.status(503).json({ message: "Could not send message." });
+    }
+});
+app.post("/api/neha/agent-status", requireAdmin, async (request, response) => {
+    const adminId = sessionAdminId(response);
+    const adminRole = sessionAdminRole(response);
+    const status = request.body.status || 'online';
+    if (!['online', 'away', 'offline'].includes(status)) {
+        response.status(400).json({ message: "Invalid status." });
+        return;
+    }
+    try {
+        // Convert admin role to agent role (owner/manager/support/analyst -> admin)
+        const agentRole = (adminRole === 'partner' || adminRole === 'agent') ? adminRole : 'admin';
+        const agentStatus = await updateAgentStatus(adminId, adminId, agentRole, status);
+        partnerEvents.emit(AGENT_STATUS_CHANNEL, { agentId: adminId, status });
+        response.json({ agentStatus });
+    }
+    catch (error) {
+        console.error("Agent status update failed", error);
+        response.status(503).json({ message: "Could not update status." });
+    }
+});
+app.get("/api/neha/agents", async (_request, response) => {
+    try {
+        const agents = await getAvailableAgents();
+        response.json({ agents });
+    }
+    catch (error) {
+        console.error("Available agents fetch failed", error);
+        response.status(503).json({ message: "Could not load agents." });
     }
 });
 app.post("/api/assessments", requireUser, upload.single("report"), async (request, response) => {

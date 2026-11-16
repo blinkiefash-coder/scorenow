@@ -362,6 +362,41 @@ export const initializeDatabase = async () => {
   `);
     await pool.query(`CREATE INDEX IF NOT EXISTS testimonials_published_idx ON testimonials (published, published_at DESC)`);
     await pool.query(`
+    CREATE TABLE IF NOT EXISTS neha_messages (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      conversation_id UUID NOT NULL,
+      sender_id UUID,
+      sender_type TEXT NOT NULL CHECK (sender_type IN ('customer', 'admin', 'partner', 'system')),
+      sender_name TEXT NOT NULL,
+      message TEXT NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+    await pool.query(`CREATE INDEX IF NOT EXISTS neha_messages_conversation_idx ON neha_messages (conversation_id, created_at DESC)`);
+    await pool.query(`
+    CREATE TABLE IF NOT EXISTS neha_conversations (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      customer_id UUID REFERENCES users(id),
+      assigned_to_id TEXT,
+      assigned_to_role TEXT CHECK (assigned_to_role IN ('admin', 'partner')),
+      status TEXT NOT NULL CHECK (status IN ('open', 'closed', 'pending')) DEFAULT 'open',
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      closed_at TIMESTAMPTZ
+    )
+  `);
+    await pool.query(`CREATE INDEX IF NOT EXISTS neha_conversations_customer_idx ON neha_conversations (customer_id, created_at DESC)`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS neha_conversations_assigned_idx ON neha_conversations (assigned_to_id, status)`);
+    await pool.query(`
+    CREATE TABLE IF NOT EXISTS agent_status (
+      agent_id TEXT PRIMARY KEY,
+      agent_name TEXT NOT NULL,
+      agent_role TEXT NOT NULL CHECK (agent_role IN ('admin', 'partner')),
+      status TEXT NOT NULL CHECK (status IN ('online', 'away', 'offline')) DEFAULT 'offline',
+      last_active TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+    await pool.query(`
     CREATE TABLE IF NOT EXISTS site_content (
       key TEXT PRIMARY KEY,
       value JSONB NOT NULL,
@@ -1985,4 +2020,85 @@ export const publishTestimonial = async (testimonialId) => {
 };
 export const deleteTestimonial = async (testimonialId) => {
     await pool.query(`DELETE FROM testimonials WHERE id = $1`, [testimonialId]);
+};
+// Neha Assistant - Shared Messaging Functions
+export const createNehaConversation = async (customerId) => {
+    const { rows } = await pool.query(`INSERT INTO neha_conversations (customer_id, status)
+     VALUES ($1, 'open')
+     RETURNING id, customer_id, assigned_to_id, assigned_to_role, status, created_at`, [customerId]);
+    return rows[0] ?? null;
+};
+export const getNehaConversation = async (conversationId, userId) => {
+    const { rows } = await pool.query(`SELECT id, customer_id, assigned_to_id, assigned_to_role, status, created_at, closed_at
+     FROM neha_conversations
+     WHERE id = $1`, [conversationId]);
+    return rows[0] ?? null;
+};
+export const listNehaConversations = async (userId, role) => {
+    let query = '';
+    const params = [];
+    if (role === 'customer') {
+        query = `SELECT id, customer_id, assigned_to_id, assigned_to_role, status, created_at, closed_at
+             FROM neha_conversations
+             WHERE customer_id = $1
+             ORDER BY created_at DESC`;
+        params.push(userId);
+    }
+    else if (role === 'admin' || role === 'partner') {
+        query = `SELECT id, customer_id, assigned_to_id, assigned_to_role, status, created_at, closed_at
+             FROM neha_conversations
+             WHERE assigned_to_id = $1 OR assigned_to_role = $2
+             ORDER BY created_at DESC`;
+        params.push(userId, role);
+    }
+    const { rows } = await pool.query(query, params);
+    return rows;
+};
+export const saveNehaMessage = async (conversationId, senderId, senderType, senderName, message) => {
+    const { rows } = await pool.query(`INSERT INTO neha_messages (conversation_id, sender_id, sender_type, sender_name, message)
+     VALUES ($1, $2, $3, $4, $5)
+     RETURNING id, conversation_id, sender_id, sender_type, sender_name, message, created_at`, [conversationId, senderId ?? null, senderType, senderName, message]);
+    return rows[0] ?? null;
+};
+export const getNehaMessages = async (conversationId, limit = 50) => {
+    const { rows } = await pool.query(`SELECT id, conversation_id, sender_id, sender_type, sender_name, message, created_at
+     FROM neha_messages
+     WHERE conversation_id = $1
+     ORDER BY created_at ASC
+     LIMIT $2`, [conversationId, limit]);
+    return rows;
+};
+export const updateAgentStatus = async (agentId, agentName, agentRole, status) => {
+    const { rows } = await pool.query(`INSERT INTO agent_status (agent_id, agent_name, agent_role, status, last_active, updated_at)
+     VALUES ($1, $2, $3, $4, NOW(), NOW())
+     ON CONFLICT (agent_id) DO UPDATE SET status = $4, last_active = NOW(), updated_at = NOW()
+     RETURNING agent_id, agent_name, agent_role, status, last_active`, [agentId, agentName, agentRole, status]);
+    return rows[0] ?? null;
+};
+export const getAvailableAgents = async () => {
+    const { rows } = await pool.query(`SELECT agent_id, agent_name, agent_role, status, last_active
+     FROM agent_status
+     WHERE status IN ('online', 'away')
+     ORDER BY status = 'online' DESC, last_active DESC`);
+    return rows;
+};
+export const getAllAgentStatus = async () => {
+    const { rows } = await pool.query(`SELECT agent_id, agent_name, agent_role, status, last_active
+     FROM agent_status
+     ORDER BY last_active DESC`);
+    return rows;
+};
+export const assignNehaConversation = async (conversationId, agentId, agentRole) => {
+    const { rows } = await pool.query(`UPDATE neha_conversations
+     SET assigned_to_id = $2, assigned_to_role = $3
+     WHERE id = $1
+     RETURNING id, customer_id, assigned_to_id, assigned_to_role, status, created_at`, [conversationId, agentId, agentRole]);
+    return rows[0] ?? null;
+};
+export const closeNehaConversation = async (conversationId) => {
+    const { rows } = await pool.query(`UPDATE neha_conversations
+     SET status = 'closed', closed_at = NOW()
+     WHERE id = $1
+     RETURNING id, customer_id, assigned_to_id, assigned_to_role, status, created_at, closed_at`, [conversationId]);
+    return rows[0] ?? null;
 };
