@@ -14,6 +14,7 @@ export interface LoginWelcomePopupProps {
 
 export function LoginWelcomePopup({ userName = 'Customer', token, onClose }: LoginWelcomePopupProps) {
   const [panName, setPanName] = useState<string | null>(null)
+  const [ready, setReady] = useState(!token)
 
   useEffect(() => {
     if (!token) return
@@ -25,8 +26,12 @@ export function LoginWelcomePopup({ userName = 'Customer', token, onClose }: Log
         if (!ignore && name) setPanName(name)
       })
       .catch(() => undefined)
+      .finally(() => { if (!ignore) setReady(true) })
     return () => { ignore = true }
   }, [token])
+
+  // Wait for the PAN lookup so the greeting never swaps from account name to PAN name.
+  if (!ready) return null
 
   const displayName = panName ?? userName
   const firstName = displayName.split(' ')[0] || 'there'
