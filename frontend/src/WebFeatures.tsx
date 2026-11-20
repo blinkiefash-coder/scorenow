@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { testimonialPhotoSrc } from './siteContent'
 import { X, Star, Check, Phone, Mail, ArrowRight } from 'lucide-react'
 
 const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:3000'
@@ -285,141 +286,68 @@ export function PlansServicesPage() {
 export interface Testimonial {
   id: string
   customer_name: string
-  customer_image_url?: string
+  customer_image_url?: string | null
   rating: number
   review_text: string
-  result_description?: string
-  published_at?: string
+  result_description?: string | null
+  published_at?: string | null
 }
 
 export interface TestimonialsSectionProps {
   displayLimit?: number
 }
 
+function TestimonialPhoto({ name, src }: { name: string; src: string | null }) {
+  const [failed, setFailed] = useState(false)
+  const initials = name.trim().split(/\s+/).slice(0, 2).map((part) => part.charAt(0).toUpperCase()).join('')
+  return src && !failed
+    ? <img className="testimonial-photo" src={src} alt={`Photo of ${name}`} width={72} height={72} loading="lazy" onError={() => setFailed(true)} />
+    : <span className="testimonial-photo testimonial-initials" aria-hidden="true">{initials}</span>
+}
+
+// Shows only testimonials the server returns, which are published with recorded customer consent.
 export function TestimonialsSection({ displayLimit = 6 }: TestimonialsSectionProps) {
   const [testimonials, setTestimonials] = useState<Testimonial[]>([])
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
-    const fetchTestimonials = async () => {
-      try {
-        const response = await fetch(`${apiUrl}/api/testimonials`)
-        if (!response.ok) throw new Error('Failed to fetch testimonials')
-        const data = await response.json()
-        setTestimonials(data.slice(0, displayLimit))
-      } catch (err) {
-        setError(err instanceof Error ? err.message : 'Failed to load testimonials')
-        // Use fallback testimonials for display
-        setTestimonials(DEFAULT_TESTIMONIALS.slice(0, displayLimit))
-      } finally {
-        setLoading(false)
-      }
-    }
-
-    fetchTestimonials()
+    let active = true
+    fetch(`${apiUrl}/api/testimonials`)
+      .then((response) => (response.ok ? response.json() as Promise<Testimonial[]> : []))
+      .then((data) => { if (active) setTestimonials(data.slice(0, displayLimit)) })
+      .catch(() => { if (active) setTestimonials([]) })
+    return () => { active = false }
   }, [displayLimit])
 
-  const displayedTestimonials = testimonials
-  // Sample reviews only appear when the API is unreachable; an empty published list hides the section.
-  if (!loading && displayedTestimonials.length === 0) return null
+  if (testimonials.length === 0) return null
 
   return (
-    <section className="testimonials-section">
+    <section className="testimonials-section" aria-labelledby="testimonials-heading">
       <div className="container testimonials-header">
         <p className="section-kicker">Success Stories</p>
-        <h2>Trusted by Thousands of Indians</h2>
-        <p>See how our clients have improved their credit profiles and achieved their financial goals.</p>
+        <h2 id="testimonials-heading">What Our Customers Say</h2>
+        <p>Real experiences from customers who chose to share their story with Scorenow.</p>
       </div>
 
       <div className="testimonials-grid">
-        {displayedTestimonials.map((testimonial) => (
-          <article key={testimonial.id} className="testimonial-card">
-            <div className="testimonial-header">
-              {testimonial.customer_image_url ? (
-                <img src={testimonial.customer_image_url} alt={testimonial.customer_name} className="customer-image" />
-              ) : (
-                <div className="customer-avatar">{testimonial.customer_name.charAt(0).toUpperCase()}</div>
-              )}
-              <div className="customer-info">
-                <h3>{testimonial.customer_name}</h3>
-                <div className="rating">
-                  {[...Array(5)].map((_, i) => (
-                    <Star
-                      key={i}
-                      size={16}
-                      className={i < testimonial.rating ? 'filled' : ''}
-                      fill={i < testimonial.rating ? 'currentColor' : 'none'}
-                    />
-                  ))}
-                </div>
-              </div>
+        {testimonials.map((testimonial) => (
+          <figure key={testimonial.id} className="testimonial-card">
+            <div className="testimonial-rating" aria-label={`Rated ${testimonial.rating} out of 5`}>
+              {[1, 2, 3, 4, 5].map((value) => (
+                <Star key={value} aria-hidden="true" className={value <= testimonial.rating ? 'filled' : ''} fill={value <= testimonial.rating ? 'currentColor' : 'none'} />
+              ))}
             </div>
-            <p className="review-text">"{testimonial.review_text}"</p>
-            {testimonial.result_description && (
-              <div className="result-description">
-                <strong>Result:</strong> {testimonial.result_description}
-              </div>
-            )}
-          </article>
+            <blockquote className="testimonial-quote"><p>{testimonial.review_text}</p></blockquote>
+            {testimonial.result_description && <p className="testimonial-result"><Check aria-hidden="true" /> {testimonial.result_description}</p>}
+            <figcaption className="testimonial-person">
+              <TestimonialPhoto name={testimonial.customer_name} src={testimonialPhotoSrc(testimonial.customer_image_url)} />
+              <span><strong>{testimonial.customer_name}</strong><small>Scorenow customer</small></span>
+            </figcaption>
+          </figure>
         ))}
       </div>
-
-      {loading && <p className="text-center">Loading testimonials...</p>}
-      {error && !testimonials.length && <p className="text-center error">{error}</p>}
     </section>
   )
 }
-
-// Default testimonials for fallback display
-const DEFAULT_TESTIMONIALS: Testimonial[] = [
-  {
-    id: '1',
-    customer_name: 'Rajesh Kumar',
-    rating: 5,
-    review_text:
-      'My credit score improved from 520 to 720 in just 6 months. The personalized guidance was exceptional and the team was always available to help.',
-    result_description: 'Improved score by 200 points, approved for home loan',
-  },
-  {
-    id: '2',
-    customer_name: 'Priya Sharma',
-    rating: 5,
-    review_text:
-      'I had multiple negative remarks on my report. ScoreNow helped me dispute them and get them removed. Highly recommended!',
-    result_description: '8 incorrect remarks removed, score increased by 85 points',
-  },
-  {
-    id: '3',
-    customer_name: 'Amit Patel',
-    rating: 5,
-    review_text: 'The detailed report analysis showed me exactly what was affecting my score. Now I know exactly what to work on.',
-    result_description: 'Identified root causes, built improvement plan',
-  },
-  {
-    id: '4',
-    customer_name: 'Neha Singh',
-    rating: 5,
-    review_text:
-      'Professional, knowledgeable, and supportive. They treated my credit rebuild like a personal mission. Thank you!',
-    result_description: 'Achieved excellent credit profile, ready for business loans',
-  },
-  {
-    id: '5',
-    customer_name: 'Vikram Desai',
-    rating: 5,
-    review_text:
-      'As a business owner, managing personal and commercial credit seemed overwhelming. ScoreNow made it simple and effective.',
-    result_description: 'Both profiles improved, secured business expansion financing',
-  },
-  {
-    id: '6',
-    customer_name: 'Anjali Gupta',
-    rating: 5,
-    review_text: 'Clear communication, practical advice, and consistent follow-up. They really care about your success.',
-    result_description: 'Score improved to 750+, loan approved at best rates',
-  },
-]
 
 // ============================================================================
 // 5. HEALTH ASSESSMENT REQUEST FORM

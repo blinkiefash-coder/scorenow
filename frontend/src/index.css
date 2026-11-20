@@ -1,5 +1,6 @@
 @import '@fontsource-variable/manrope';
 @import '@fontsource-variable/sora';
+@import '@fontsource-variable/figtree';
 
 :root {
   font-family: 'Manrope Variable', sans-serif;
@@ -9,8 +10,8 @@
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   --navy: #081446;
-  --blue: #0a3d9c;
-  --blue-dark: #062a75;
+  --blue: #08358a;
+  --blue-dark: #08358a;
   --sky: #eaf6ff;
   --muted: #68728c;
   --line: #dce8f5;

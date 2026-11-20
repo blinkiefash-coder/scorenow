@@ -1,4 +1,4 @@
-import { Fragment, useCallback, useEffect, useRef, useState, type FormEvent, type JSX, type MouseEvent as ReactMouseEvent } from 'react'
+import { useCallback, useEffect, useRef, useState, type FormEvent, type JSX, type MouseEvent as ReactMouseEvent } from 'react'
 import {
   AlertTriangle, ArrowLeft, ArrowRight, BadgeIndianRupee, BarChart3,
   Building2, CalendarDays, Check, ChevronDown, CircleHelp, Clock3, CreditCard, Download, ExternalLink,
@@ -8,11 +8,12 @@ import {
   ArrowUpDown, ArrowUpRight, ArrowDownLeft, Bell, Info, Target, TrendingUp, Users, Volume2, VolumeX, UserRound, WalletCards, X, Zap,
 } from 'lucide-react'
 import { PartnerManagement, PartnerMonitor, PartnerPortal } from './AdminPartners'
-import { CrmManagement } from './AdminCrm'
+import { AgentWorkQueue, CrmManagement } from './AdminCrm'
 import { AdminSiteContent } from './AdminSiteContent'
 import { AdminTestimonials } from './AdminTestimonials'
 import { AdminOpsPanel, AdminSessionExpiryBanner, CannedReplyPicker, CustomerPaymentsPanel, CustomerPrivacyPanel } from './AccountOps'
 import { AdminHealthAssessmentManagement, HealthAssessmentForm, TestimonialsSection } from './WebFeatures'
+import { company, LEGAL_LAST_UPDATED, legalDocumentForPath, legalDocuments, type LegalDocument } from './legalContent'
 import {
   DEFAULT_REPORT_PRICE, effectiveBusinessPrices, effectiveFdPlans, effectiveServicePlans, effectiveSubscriptionPlans,
   formatRupees, formatSubscriptionDuration, useSiteContent,
@@ -291,14 +292,12 @@ function Brand({ href = '#home' }: { href?: string }) {
   )
 }
 
-// Entries with an empty href are hidden until their URL is provided.
+// Footer social icons, shown in this order on a single row.
 const socialLinks = [
-  { label: 'Facebook', href: 'https://www.facebook.com/share/1MXCNZL49L/', icon: 'facebook' },
-  { label: 'X', href: 'https://x.com/Scorenow_', icon: 'x' },
+  { label: 'WhatsApp', href: 'https://wa.me/919114141011', icon: 'whatsapp' },
   { label: 'YouTube', href: 'https://youtube.com/@scorenow_india?si=foNJLnRma08ohcVV', icon: 'youtube' },
   { label: 'Instagram', href: 'https://www.instagram.com/scorenow_official?obrf=MTM3a2xmaWNtcTlqZg==', icon: 'instagram' },
-  { label: 'WhatsApp', href: '', icon: 'whatsapp' },
-  { label: 'LinkedIn', href: '', icon: 'linkedin' },
+  { label: 'Twitter (X)', href: 'https://x.com/Scorenow_', icon: 'x' },
 ]
 
 function SiteFooter() {
@@ -306,7 +305,7 @@ function SiteFooter() {
     <footer className="site-footer">
       <style>{`
         footer.site-footer {
-          background: #0a1f5c;
+          background: #08358a;
           color: #c9d3f0;
           border-top: 4px solid #f2b418;
         }
@@ -316,7 +315,7 @@ function SiteFooter() {
           margin: 0 auto;
           padding: 40px 24px 24px;
           display: grid;
-          grid-template-columns: repeat(4, 1fr) 1.3fr 1.3fr;
+          grid-template-columns: repeat(4, minmax(0, 1fr)) minmax(210px, 1.3fr) minmax(0, 1.3fr);
           gap: 24px;
         }
 
@@ -369,13 +368,16 @@ function SiteFooter() {
 
         .footer-social {
           display: flex;
+          flex-wrap: nowrap;
+          align-items: center;
           gap: 14px;
           margin-top: 10px;
         }
 
         .footer-social a {
-          width: 38px;
-          height: 38px;
+          flex: 0 0 auto;
+          width: 40px;
+          height: 40px;
           border: 1px solid #2c428a;
           border-radius: 50%;
           display: grid;
@@ -503,10 +505,10 @@ function SiteFooter() {
       `}</style>
 
       <div className="site-footer-cols">
-        <section><h4>About</h4><ul><li><a href="#contact">Contact us</a></li><li><a href="#about">About us</a></li><li><a href="#partner-opportunity">Partner with us</a></li></ul></section>
-        <section><h4>Services</h4><ul><li><a href="#insights">Check credit score</a></li><li><a href="#insights">Credit report</a></li><li><a href="#services">Score improvement</a></li><li><a href="#services">Dispute fixing</a></li></ul></section>
-        <section><h4>Help</h4><ul><li><a href="#contact">Payments</a></li><li><a href="#contact">Cancellation & refunds</a></li><li><a href="#contact">FAQ</a></li><li><a href="#contact">Report an issue</a></li></ul></section>
-        <section><h4>Policies</h4><ul><li><a href="#">Terms of use</a></li><li><a href="#">Privacy</a></li><li><a href="#">Security</a></li><li><a href="#">Grievance redressal</a></li><li><a href="#">Sitemap</a></li></ul></section>
+        <section><h4>About</h4><ul><li><a href="/#contact">Contact us</a></li><li><a href="/#about">About us</a></li><li><a href="/#partner-opportunity">Partner with us</a></li></ul></section>
+        <section><h4>Services</h4><ul><li><a href="/#insights">Check credit score</a></li><li><a href="/#insights">Credit report</a></li><li><a href="/#services">Score improvement</a></li><li><a href="/#services">Dispute fixing</a></li></ul></section>
+        <section><h4>Help</h4><ul><li><a href="/#contact">Payments</a></li><li><a href="/refund-policy">Cancellation & refunds</a></li><li><a href="/#contact">FAQ</a></li><li><a href="/grievance">Report an issue</a></li></ul></section>
+        <section><h4>Policies</h4><ul><li><a href="/terms">Terms &amp; conditions</a></li><li><a href="/privacy">Privacy policy</a></li><li><a href="/refund-policy">Cancellation &amp; refund policy</a></li><li><a href="/disclaimer">Disclaimer</a></li><li><a href="/privacy#data-security">Security</a></li><li><a href="/grievance">Grievance redressal</a></li><li><a href="/sitemap.xml">Sitemap</a></li></ul></section>
         <section className="site-footer-mail"><h4>Mail us</h4>
           <address>Tgs Consumer Services Private Limited,<br />Bapuji Nagar, Pani Tanki Lane<br />Bhubaneswar, Odisha – 751009<br />India</address>
           <h4 className="site-footer-reach">Social</h4>
@@ -521,7 +523,7 @@ function SiteFooter() {
         <div className="site-app" role="img" aria-label="Android app coming soon"><svg viewBox="0 0 24 24"><path d="M6 18c0 .55.45 1 1 1h1v3.5a1.5 1.5 0 0 0 3 0V19h2v3.5a1.5 1.5 0 0 0 3 0V19h1c.55 0 1-.45 1-1V8H6zM3.5 8A1.5 1.5 0 0 0 2 9.5v7a1.5 1.5 0 0 0 3 0v-7A1.5 1.5 0 0 0 3.5 8zm17 0A1.5 1.5 0 0 0 19 9.5v7a1.5 1.5 0 0 0 3 0v-7A1.5 1.5 0 0 0 20.5 8zm-4.97-5.84l1.3-1.3a.3.3 0 0 0-.42-.42l-1.48 1.48A5.5 5.5 0 0 0 12 1.5c-.96 0-1.86.25-2.65.72L7.87.74a.3.3 0 0 0-.42.42l1.3 1.3A5.48 5.48 0 0 0 6.5 7h11a5.48 5.48 0 0 0-1.97-4.84zM10 5H9V4h1zm5 0h-1V4h1z" fill="currentColor" /></svg><span><small>Coming soon</small><b>Android app</b></span></div>
         <div className="site-app" role="img" aria-label="iOS app coming soon"><svg viewBox="0 0 24 24"><path d="M12.152 6.896c-.948 0-2.415-1.078-3.96-1.04-2.04.027-3.91 1.183-4.961 3.014-2.117 3.675-.546 9.103 1.519 12.09 1.013 1.454 2.208 3.09 3.792 3.039 1.52-.065 2.09-.987 3.935-.987 1.831 0 2.35.987 3.96.948 1.637-.026 2.676-1.48 3.676-2.948 1.156-1.688 1.636-3.325 1.662-3.415-.039-.013-3.182-1.221-3.22-4.857-.026-3.04 2.48-4.494 2.597-4.559-1.429-2.09-3.623-2.324-4.39-2.376-2-.156-3.675 1.09-4.61 1.09zM15.53 3.83c.843-1.012 1.4-2.427 1.245-3.83-1.207.052-2.662.805-3.532 1.818-.78.896-1.454 2.338-1.273 3.714 1.338.104 2.715-.688 3.559-1.701" fill="currentColor" /></svg><span><small>Coming soon</small><b>iOS app</b></span></div>
       </div>
-      <div className="site-footer-bottom"><div><a href="#partner-opportunity">Become a partner</a><a href="#">Advertise</a><a href="#">Gift cards</a><a href="#contact">Help center</a><span>© 2026 Scorenow, a brand of Tgs Consumer Services Private Limited. All rights reserved.</span></div></div>
+      <div className="site-footer-bottom"><div><a href="/#partner-opportunity">Become a partner</a><a href="#">Advertise</a><a href="#">Gift cards</a><a href="/#contact">Help center</a><span>© 2026 Scorenow, a brand of Tgs Consumer Services Private Limited. All rights reserved.</span></div></div>
     </footer>
   )
 }
@@ -558,16 +560,55 @@ type AuthUser = { id: string; mobile: string; email: string | null; full_name: s
 const authHeaders = (user: AuthUser) => ({ Authorization: `Bearer ${user.token}` })
 
 // Keeps the signed-in user in localStorage so a refresh doesn't log them out.
+function readStoredUser(): AuthUser | null {
+  try {
+    const raw = localStorage.getItem('scorenow-user')
+    const stored = raw ? JSON.parse(raw) as Partial<AuthUser> : null
+    return stored?.id && stored.token ? stored as AuthUser : null
+  } catch {
+    return null
+  }
+}
+
 function useAuthUser() {
-  const [user, setUser] = useState<AuthUser | null>(() => {
-    try {
-      const raw = localStorage.getItem('scorenow-user')
-      const stored = raw ? JSON.parse(raw) as Partial<AuthUser> : null
-      return stored?.id && stored.token ? stored as AuthUser : null
-    } catch {
-      return null
+  const [user, setUser] = useState<AuthUser | null>(readStoredUser)
+
+  // Keep every open tab in sync when the customer signs in or out elsewhere.
+  useEffect(() => {
+    const onStorage = (event: StorageEvent) => {
+      if (event.key === null || event.key === 'scorenow-user') setUser(readStoredUser())
     }
-  })
+    window.addEventListener('storage', onStorage)
+    return () => window.removeEventListener('storage', onStorage)
+  }, [])
+
+  // Confirm the stored session is still valid; expired sessions sign out so the login popup can return.
+  const token = user?.token
+  useEffect(() => {
+    if (!token) return
+    let cancelled = false
+    fetch(`${apiUrl}/api/auth/session`, { headers: { Authorization: `Bearer ${token}` } })
+      .then(async (response) => {
+        if (cancelled) return
+        if (response.status === 401) {
+          localStorage.removeItem('scorenow-user')
+          sessionStorage.removeItem('scorenow-auth-prompted')
+          setUser(null)
+          return
+        }
+        if (!response.ok) return
+        const { user: fresh } = await response.json() as { user?: Omit<AuthUser, 'token'> }
+        if (cancelled || !fresh) return
+        setUser((current) => {
+          if (!current || current.token !== token || current.full_name === fresh.full_name) return current
+          const next = { ...current, full_name: fresh.full_name }
+          localStorage.setItem('scorenow-user', JSON.stringify(next))
+          return next
+        })
+      })
+      .catch(() => undefined)
+    return () => { cancelled = true }
+  }, [token])
 
   const login = (nextUser: AuthUser) => {
     setUser(nextUser)
@@ -578,22 +619,25 @@ function useAuthUser() {
     if (user) void fetch(`${apiUrl}/api/auth/logout`, { method: 'POST', headers: authHeaders(user) }).catch(() => undefined)
     setUser(null)
     localStorage.removeItem('scorenow-user')
+    sessionStorage.removeItem('scorenow-auth-prompted')
   }
 
   return { user, login, logout }
 }
 
-// Opens the auth popup once per browser session, shortly after the visitor starts scrolling.
+// Opens the auth popup once per browser session for signed-out visitors, shortly after they start scrolling.
 function useScrollAuthPrompt(enabled = true) {
   const [open, setOpen] = useState(false)
 
   useEffect(() => {
-    if (!enabled || sessionStorage.getItem('scorenow-auth-prompted')) return
+    if (!enabled || readStoredUser() || sessionStorage.getItem('scorenow-auth-prompted')) return
 
     const onScroll = () => {
       if (window.scrollY < 220) return
-      sessionStorage.setItem('scorenow-auth-prompted', '1')
       window.removeEventListener('scroll', onScroll)
+      // Re-check at trigger time: the visitor may have signed in (here or in another tab) since this was armed.
+      if (readStoredUser()) return
+      sessionStorage.setItem('scorenow-auth-prompted', '1')
       setOpen(true)
     }
 
@@ -608,10 +652,15 @@ type RequireLogin = (notice: string, action: (user: AuthUser) => void) => void
 
 // Runs an action immediately for signed-in users, otherwise opens the auth popup and runs it after login.
 function useLoginGate({ redirectAfterLogin, promptOnScroll = true }: { redirectAfterLogin?: string; promptOnScroll?: boolean } = {}) {
-  const [authOpen, setAuthOpen] = useScrollAuthPrompt(promptOnScroll)
   const { user, login, logout } = useAuthUser()
+  const [authOpen, setAuthOpen] = useScrollAuthPrompt(promptOnScroll && !user)
   const [authNotice, setAuthNotice] = useState('')
   const pendingActionRef = useRef<((user: AuthUser) => void) | null>(null)
+
+  // A signed-in customer should never be left looking at the login popup.
+  useEffect(() => {
+    if (user) setAuthOpen(false)
+  }, [user, setAuthOpen])
 
   const requireLogin: RequireLogin = (notice, action) => {
     if (user) {
@@ -624,6 +673,7 @@ function useLoginGate({ redirectAfterLogin, promptOnScroll = true }: { redirectA
   }
 
   const openAuth = () => {
+    if (user) return
     pendingActionRef.current = null
     setAuthNotice('')
     setAuthOpen(true)
@@ -672,17 +722,19 @@ function AuthAvatarButton({ user, onClick, onLogout }: { user: AuthUser | null; 
     )
   }
 
-  const firstName = user.full_name.trim().split(' ')[0] || 'Account'
+  const fullName = customerDisplayName(user.full_name, '')
+  const hasName = fullName !== 'there'
+  const firstName = hasName ? fullName.split(/\s+/)[0] : 'Account'
 
   return (
     <div className="auth-user-menu" ref={containerRef}>
-      <button className="auth-avatar-button is-logged-in" type="button" onClick={() => setMenuOpen((open) => !open)} aria-expanded={menuOpen} aria-label={`Account menu for ${user.full_name}`}>
+      <button className="auth-avatar-button is-logged-in" type="button" onClick={() => setMenuOpen((open) => !open)} aria-expanded={menuOpen} aria-label={`Account menu for ${hasName ? fullName : 'your account'}`}>
         <span className="avatar-icon"><UserRound /></span>
         <span className="avatar-label">{firstName}</span>
       </button>
       {menuOpen && (
         <div className="auth-user-dropdown" role="menu">
-          <strong>{user.full_name}</strong>
+          <strong>{hasName ? fullName : 'My account'}</strong>
           <small>{user.mobile ? `+91 ${user.mobile}` : user.email}</small>
           <a role="menuitem" href="/dashboard">My Dashboard</a>
           <button type="button" role="menuitem" onClick={() => { setMenuOpen(false); onLogout() }}>Log Out</button>
@@ -958,7 +1010,7 @@ function AuthModal({ open, notice, onClose, onSuccess }: { open: boolean; notice
                 <label><span>Mobile Number</span><div className="auth-phone-input"><span className="country-code">🇮🇳 +91<ChevronDown /></span><input name="mobile" type="tel" inputMode="numeric" pattern="[0-9]{10}" placeholder="Enter your mobile number" required /></div></label>
                 <label><span>Email Address</span><div className="auth-input-icon"><Mail /><input name="email" type="email" placeholder="Enter your email address" autoComplete="email" required /></div></label>
                 <label><span>Create Password</span><div className="auth-password-input"><LockKeyhole /><input name="password" type={showPassword ? 'text' : 'password'} minLength={8} maxLength={128} required placeholder="Minimum 8 characters" autoComplete="new-password" /><button type="button" onClick={() => setShowPassword((value) => !value)} aria-label={showPassword ? 'Hide password' : 'Show password'}>{showPassword ? <EyeOff /> : <Eye />}</button></div></label>
-                <label className="auth-terms"><input type="checkbox" required /><span>I agree to the <a href="#terms">Terms &amp; Conditions</a> and <a href="#privacy">Privacy Policy</a></span></label>
+                <label className="auth-terms"><input type="checkbox" required /><span>I agree to the <a href="/terms" target="_blank" rel="noreferrer">Terms &amp; Conditions</a> and <a href="/privacy" target="_blank" rel="noreferrer">Privacy Policy</a></span></label>
                 <button className="button button-primary" type="submit" disabled={authLoading}>{authLoading ? 'Sending…' : <>Create Account <ArrowRight /></>}</button>
               </form>
             )}
@@ -1427,7 +1479,7 @@ function getChatSuggestion(concern: string, scoreRange: string) {
   return 'Begin with a current credit report from a recognised bureau. Once you know your score and key factors, an expert can help prioritise the actions with the most impact.'
 }
 
-function CreditScoreEstimator() {
+function CreditScoreEstimator({ onGetReportReview }: { onGetReportReview?: (event: ReactMouseEvent<HTMLAnchorElement>) => void } = {}) {
   const [step, setStep] = useState(0)
   const [answers, setAnswers] = useState<number[]>([])
   const complete = answers.length === estimatorQuestions.length
@@ -1480,7 +1532,7 @@ function CreditScoreEstimator() {
           {step > 0 && <button className="estimator-back" type="button" onClick={goBack}><ArrowLeft /> Previous question</button>}
         </div> : <div className="estimator-result">
           <div className="estimator-score"><p>Your indicative score range</p><ScoreGauge score={estimatedScore} dark /><strong>{rangeLow}–{rangeHigh}</strong><span>{scoreLabel}</span><small>Approximate estimate only</small></div>
-          <div className="estimator-advice"><span className="estimator-complete"><Check /> Your snapshot is ready</span><h3>Your next best steps</h3><p className="estimator-encouragement"><Sparkles />{encouragement}</p><div>{focusAreas.map((area) => <article key={area.factor}><strong>{area.factor}</strong><span>{area.tip}</span></article>)}</div><div className="estimator-actions"><button className="button button-outline" type="button" onClick={restart}><RotateCcw /> Try again</button><a className="button button-primary" href="#personal-assessment">Get a report review <ArrowRight /></a></div></div>
+          <div className="estimator-advice"><span className="estimator-complete"><Check /> Your snapshot is ready</span><h3>Your next best steps</h3><p className="estimator-encouragement"><Sparkles />{encouragement}</p><div>{focusAreas.map((area) => <article key={area.factor}><strong>{area.factor}</strong><span>{area.tip}</span></article>)}</div><div className="estimator-actions"><button className="button button-outline" type="button" onClick={restart}><RotateCcw /> Try again</button><a className="button button-primary" href={onGetReportReview ? '#health-assessment' : '#personal-assessment'} onClick={onGetReportReview}>Get a report review <ArrowRight /></a></div></div>
         </div>}
         <p className="estimator-disclaimer"><ShieldCheck /> This estimate uses general educational rules, not bureau data or a lender model. It is not an official score, financial advice, or a guarantee of credit eligibility.</p>
       </div>
@@ -1736,18 +1788,21 @@ function ChatAssistant({ requireLogin, isDashboard = false }: { requireLogin: Re
           </div>
         </div>
       )}
-      {!isOpen && <div className="chat-presence">
-        <div className="chat-invite"><strong>Hi, I'm Neha</strong><span>Need help with your credit score?</span></div>
-        <button className="assistant-face" type="button" onClick={() => setIsOpen(true)} aria-label="Chat with Neha, Scorenow credit assistant" title="Chat with Neha"><img src="/neha-avatar.svg" alt="" /><i /></button>
-      </div>}
-      <button className="chat-launcher" type="button" onClick={() => setIsOpen((open) => !open)} aria-label={isOpen ? 'Close Scorenow assistant' : 'Open Scorenow assistant'} aria-expanded={isOpen}>
-        {isOpen ? <X /> : <MessageCircle />}{!isOpen && <span>Chat with us</span>}
+      <button className="chat-launcher" type="button" onClick={() => setIsOpen((open) => !open)} aria-label={isOpen ? 'Close Scorenow assistant' : 'Open Scorenow assistant'} title={isOpen ? 'Close assistant' : 'Chat with our assistant'} aria-expanded={isOpen}>
+        {isOpen ? <X /> : <MessageCircle />}
       </button>
     </aside>
   )
 }
 
 type BureauId = 'cibil' | 'equifax' | 'experian' | 'crif'
+const dashboardBureauOrder: BureauId[] = ['cibil', 'crif', 'experian', 'equifax']
+const bureauTabLabel = (bureau: BureauId) => ({
+  cibil: 'CIBIL',
+  crif: 'CRIF',
+  experian: 'EXPERIAN',
+  equifax: 'EQUIFAX',
+}[bureau])
 
 type BureauReport = {
   request_id: string
@@ -2190,7 +2245,112 @@ function CreditCardsPage() {
   )
 }
 
-function ReportDetailView({ user, requestId }: { user: AuthUser; requestId: string }) {
+const isCreditCard = (account: ReportAccount) => /credit\s*card/i.test(account.type)
+
+const dpdTone = (days: number) => (days === 0 ? 'c0' : days <= 30 ? 'c1' : days <= 60 ? 'c2' : days <= 90 ? 'c3' : 'c4')
+
+function ReportInsightSections({ detail, onOpenPredictor }: { detail: ReportDetail; onOpenPredictor: (event: ReactMouseEvent<HTMLAnchorElement>) => void }) {
+  const openCards = detail.accounts.filter((account) => isCreditCard(account) && account.status === 'active' && (account.creditLimit ?? 0) > 0)
+  const cardLimit = openCards.reduce((sum, account) => sum + (account.creditLimit ?? 0), 0)
+  const cardBalance = openCards.reduce((sum, account) => sum + Math.max(0, account.currentBalance ?? 0), 0)
+  const utilisation = cardLimit > 0 ? Math.round((cardBalance / cardLimit) * 100) : null
+
+  const asOf = detail.reportDate ? new Date(`${detail.reportDate}T00:00:00`) : new Date()
+  const openedDates = detail.accounts
+    .map((account) => account.openedOn)
+    .filter((value): value is string => Boolean(value))
+    .map((value) => new Date(`${value}T00:00:00`))
+    .filter((date) => !Number.isNaN(date.getTime()) && date <= asOf)
+  const oldest = openedDates.length ? new Date(Math.min(...openedDates.map((date) => date.getTime()))) : null
+  const ageMonths = oldest ? (asOf.getFullYear() - oldest.getFullYear()) * 12 + asOf.getMonth() - oldest.getMonth() : null
+
+  const enquiries = detail.summary.enquiriesLast6Months
+  const overdue = detail.summary.overdueAccounts
+
+  const months = [...new Set(detail.accounts.flatMap((account) => account.paymentHistory.map((entry) => entry.month)))].sort().slice(-12)
+  const dpdRows = detail.accounts
+    .map((account, index) => ({ account, index, byMonth: new Map(account.paymentHistory.map((entry) => [entry.month, entry.daysPastDue])) }))
+    .filter(({ byMonth }) => months.some((month) => byMonth.has(month)))
+  const reported = dpdRows.flatMap(({ byMonth }) => months.map((month) => byMonth.get(month)).filter((value): value is number => value !== null && value !== undefined))
+  const late = reported.filter((days) => days > 0).length
+  const over30 = reported.filter((days) => days > 30).length
+  const onTimeShare = reported.length ? Math.round(((reported.length - late) / reported.length) * 100) : null
+
+  const predictions: [string, string][] = []
+  if (overdue > 0) predictions.push(['Clear your overdue accounts', '+25 to +40'])
+  if (utilisation !== null && utilisation > 30) predictions.push(['Cut card use below 30%', '+15 to +25'])
+  if (enquiries > 0) predictions.push(['No new enquiries for 90 days', '+5 to +10'])
+  if (overdue === 0) predictions.push(['Keep paying every EMI on time', 'Protects your score'])
+  predictions.push(['Keep your oldest account open', '+5 to +15'])
+
+  return (
+    <>
+      <section className="dashboard-card sn-card" id="predictor">
+        <h3>Score predictor</h3>
+        <p className="sn-muted">See how one action could move your score. Indicative estimates based on your report — not a bureau calculation.</p>
+        <div className="sn-grid4">
+          {predictions.map(([action, impact]) => <div className="sn-stat" key={action}><small>{action}</small><b>{impact}{impact.startsWith('+') ? ' pts' : ''}</b></div>)}
+        </div>
+        <a className="sn-btn sn-btn-ghost sn-predictor-link" href="#score-predictor" onClick={onOpenPredictor}>Try the full score predictor</a>
+      </section>
+
+      <section className="dashboard-card sn-card" id="all-accounts">
+        <h3>All accounts</h3>
+        {detail.accounts.length ? <div className="sn-table"><table>
+          <thead><tr><th scope="col">Lender</th><th scope="col">Type</th><th scope="col">Balance</th><th scope="col">Status</th></tr></thead>
+          <tbody>{detail.accounts.map((account, index) => {
+            const flag = accountFlag(account)
+            return <tr key={accountKey(account, index)}><td>{account.lender}</td><td>{account.type}</td><td>{formatMoney(account.currentBalance)}</td><td><span className={`sn-tag${needsAttention(account) ? ' warn' : ''}`}>{flag.label}</span></td></tr>
+          })}</tbody>
+        </table></div> : <p className="sn-muted">No accounts were returned by the bureau.</p>}
+      </section>
+
+      <section className="sn-grid4 sn-factor-grid">
+        <div className="dashboard-card sn-card" id="utilisation">
+          <h3>Card utilisation</h3>
+          <b className="sn-figure">{utilisation === null ? '—' : `${utilisation}%`}</b>
+          {utilisation !== null && <div className="sn-bar"><i style={{ width: `${Math.min(100, utilisation)}%` }} /></div>}
+          <p className="sn-muted">{utilisation === null ? 'No open credit card with a reported limit.' : utilisation > 100 ? 'Your card balance is above its limit — paying it down will help most.' : utilisation > 30 ? 'Keep this under 30% for a score boost.' : 'Nice — you are under the 30% guideline.'}</p>
+        </div>
+        <div className="dashboard-card sn-card" id="enquiries">
+          <h3>Credit enquiries</h3>
+          <b className="sn-figure">{enquiries} <small>in 6 months</small></b>
+          <p className="sn-muted">{enquiries > 0 ? 'Avoid new applications for 90 days.' : 'No recent enquiries — keep it that way.'}</p>
+        </div>
+        <div className="dashboard-card sn-card" id="age">
+          <h3>Credit age</h3>
+          <b className="sn-figure">{ageMonths === null ? '—' : `${Math.floor(ageMonths / 12)} yrs ${ageMonths % 12} mo`}</b>
+          {ageMonths !== null && <div className="sn-bar"><i style={{ width: `${Math.min(100, Math.round((ageMonths / 120) * 100))}%` }} /></div>}
+          <p className="sn-muted">{ageMonths === null ? 'Account opening dates were not reported.' : 'Keep your oldest account open.'}</p>
+        </div>
+        <div className="dashboard-card sn-card sn-span" id="payments">
+          <h3>Payment history by DPD</h3>
+          {dpdRows.length && months.length ? <>
+            <div className="sn-dsum">
+              <div><b>{onTimeShare === null ? '—' : `${onTimeShare}%`}</b><small>paid on time</small></div>
+              <div><b>{late}</b><small>late payment{late === 1 ? '' : 's'}</small></div>
+              <div><b>{over30}</b><small>payments over 30 DPD</small></div>
+            </div>
+            <div className="sn-legend"><span><i className="c0" />0 days (on time)</span><span><i className="c1" />1–30</span><span><i className="c2" />31–60</span><span><i className="c3" />61–90</span><span><i className="c4" />90+</span><span><i className="cna" />Not reported</span></div>
+            <div className="sn-dpd"><table>
+              <thead><tr><th scope="col">Account ({formatMonth(months[0])} to {formatMonth(months[months.length - 1])})</th>{months.map((month) => <th scope="col" key={month}>{formatMonth(month).split(' ')[0]}</th>)}</tr></thead>
+              <tbody>{dpdRows.map(({ account, index, byMonth }) => (
+                <tr key={accountKey(account, index)}><th scope="row">{account.lender} <small>{account.type}</small></th>{months.map((month) => {
+                  const days = byMonth.get(month)
+                  return <td key={month}>{days === null || days === undefined
+                    ? <span className="sn-dv cna" title="Not reported">–</span>
+                    : <span className={`sn-dv ${dpdTone(days)}`} title={`${days} days past due`}>{days}</span>}</td>
+                })}</tr>
+              ))}</tbody>
+            </table></div>
+          </> : <p className="sn-muted">Your bureau report did not include month-by-month payment history.</p>}
+        </div>
+      </section>
+    </>
+  )
+}
+
+function ReportDetailView({ user, requestId, onOpenPredictor }: { user: AuthUser; requestId: string; onOpenPredictor: (event: ReactMouseEvent<HTMLAnchorElement>) => void }) {
   const [detail, setDetail] = useState<ReportDetail | null>(null)
   const [error, setError] = useState('')
   const [accountFilter, setAccountFilter] = useState<AccountFilter>('all')
@@ -2254,6 +2414,7 @@ function ReportDetailView({ user, requestId }: { user: AuthUser; requestId: stri
   return (
     <section className="report-detail">
       {detail.isDemo && <p className="dashboard-notice info">Demo report with sample data — not a real bureau report.</p>}
+      <ReportInsightSections detail={detail} onOpenPredictor={onOpenPredictor} />
       <article className="dashboard-card report-toolbar">
         <div className="report-toolbar-title">
           <span><FileCheck2 /></span>
@@ -2526,7 +2687,7 @@ function PlansPanel({ user, onLogout }: { user: AuthUser; onLogout: () => void }
         const checkout = new Razorpay({
           key: order.keyId, amount: order.amount, currency: order.currency, order_id: order.orderId,
           name: 'Scorenow', description: `${order.planName} plan`, image: '/scorenow-logo-hd.png', prefill: order.prefill,
-          theme: { color: '#087af5' },
+          theme: { color: '#08358a' },
           handler: (payment: RazorpaySuccess) => { void verify(payment, plan.name).catch((error) => setNotice({ tone: 'error', text: error instanceof Error ? error.message : 'Unable to activate your plan.' })).finally(resolve) },
           modal: { ondismiss: () => resolve() },
         })
@@ -2719,6 +2880,54 @@ const guideProductOptions = [
   },
 ]
 
+function LegalPage({ document: legal }: { document: LegalDocument }) {
+  return (
+    <div className="site-shell legal-page">
+      <header className="site-header">
+        <div className="nav-wrap">
+          <Brand href="/" />
+          <a className="guide-back-link" href="/"><ArrowLeft /> Back to home</a>
+        </div>
+      </header>
+      <main className="legal-main">
+        <div className="legal-wrap">
+          <nav className="legal-tabs" aria-label="Legal documents">
+            {Object.values(legalDocuments).map((item) => (
+              <a key={item.slug} href={item.path} aria-current={item.slug === legal.slug ? 'page' : undefined} className={item.slug === legal.slug ? 'active' : ''}>{item.title}</a>
+            ))}
+          </nav>
+          <article className="legal-article">
+            <header className="legal-title">
+              <p className="section-kicker">Legal</p>
+              <h1>{legal.title}</h1>
+              <p>{legal.summary}</p>
+              <small>Last updated: {LEGAL_LAST_UPDATED}</small>
+            </header>
+            <nav className="legal-toc" aria-label="On this page">
+              <strong>On this page</strong>
+              <ol>{legal.sections.map((section) => <li key={section.id}><a href={`#${section.id}`}>{section.heading.replace(/^\d+\.\s*/, '')}</a></li>)}</ol>
+            </nav>
+            {legal.sections.map((section) => (
+              <section key={section.id} id={section.id} className="legal-section">
+                <h2>{section.heading}</h2>
+                {section.paragraphs?.map((paragraph) => <p key={paragraph}>{paragraph}</p>)}
+                {section.bullets && <ul>{section.bullets.map((bullet) => <li key={bullet}>{bullet}</li>)}</ul>}
+              </section>
+            ))}
+            <footer className="legal-contact">
+              <strong>{company.legalName}</strong>
+              <span>CIN: {company.cin}</span>
+              <span>Registered office: {company.registeredOffice}</span>
+              <span>Email: <a href={`mailto:${company.email}`}>{company.email}</a> · Phone: <a href={company.phoneHref}>{company.phone}</a></span>
+            </footer>
+          </article>
+        </div>
+      </main>
+      <SiteFooter />
+    </div>
+  )
+}
+
 function CreditGuidePage({ slug }: { slug: string }) {
   const guideSlug = Object.keys(creditGuides).find((key) => key === slug) as CreditGuideSlug | undefined
   const guide = guideSlug ? creditGuides[guideSlug] : undefined
@@ -2812,12 +3021,47 @@ function CreditGuidePage({ slug }: { slug: string }) {
   )
 }
 
+// PAN names arrive in capitals; show them as "Satyam Kumar" and never fall back to the placeholder account name.
+const placeholderAccountNames = new Set(['scorenow user', 'score now user'])
+const toNameCase = (value: string) => value.trim().toLowerCase().replace(/(^|[\s.'-])\p{L}/gu, (match) => match.toUpperCase())
+const customerDisplayName = (verifiedName: string | null | undefined, accountName: string) => {
+  if (verifiedName?.trim() && !placeholderAccountNames.has(verifiedName.trim().toLowerCase())) return toNameCase(verifiedName)
+  if (accountName.trim() && !placeholderAccountNames.has(accountName.trim().toLowerCase())) return accountName.trim()
+  return 'there'
+}
+
+function DashboardUserChip({ user, displayName, onProfile, onLogout }: { user: AuthUser; displayName: string; onProfile: (event: ReactMouseEvent<HTMLAnchorElement>) => void; onLogout: () => void }) {
+  const [open, setOpen] = useState(false)
+  const containerRef = useRef<HTMLDivElement | null>(null)
+
+  useEffect(() => {
+    if (!open) return
+    const onDocClick = (event: MouseEvent) => {
+      if (!containerRef.current?.contains(event.target as Node)) setOpen(false)
+    }
+    document.addEventListener('mousedown', onDocClick)
+    return () => document.removeEventListener('mousedown', onDocClick)
+  }, [open])
+
+  const firstName = displayName.trim().split(/\s+/)[0] || 'Account'
+  return (
+    <div className="sn-chip-menu" ref={containerRef}>
+      <button className="sn-chip" type="button" onClick={() => setOpen((current) => !current)} aria-expanded={open} aria-haspopup="menu" aria-label={`Account menu for ${displayName}`}>{firstName.toUpperCase()}</button>
+      {open && <div className="auth-user-dropdown" role="menu">
+        <strong>{displayName}</strong>
+        <small>{user.mobile ? `+91 ${user.mobile}` : user.email}</small>
+        <a role="menuitem" href="#settings" onClick={(event) => { setOpen(false); onProfile(event) }}>My profile</a>
+        <button type="button" role="menuitem" onClick={() => { setOpen(false); onLogout() }}>Log Out</button>
+      </div>}
+    </div>
+  )
+}
+
 function DashboardPage({ user, onLogout }: { user: AuthUser; onLogout: () => void }) {
   const [status, setStatus] = useState<DashboardStatus | null>(null)
   const [options, setOptions] = useState<ReportOptions | null>(null)
   const [providerDiagnostics, setProviderDiagnostics] = useState<Partial<Record<BureauId, ProviderDiagnostics>>>({})
   const [loading, setLoading] = useState(true)
-  const [refreshing, setRefreshing] = useState(false)
   const [supportTickets, setSupportTickets] = useState<SupportTicket[]>([])
   const [supportLoading, setSupportLoading] = useState(true)
   const [supportRefresh, setSupportRefresh] = useState(0)
@@ -2832,13 +3076,17 @@ function DashboardPage({ user, onLogout }: { user: AuthUser; onLogout: () => voi
   const [downloadingReport, setDownloadingReport] = useState(false)
   const [downloadReportError, setDownloadReportError] = useState('')
   const [selectedBureau, setSelectedBureau] = useState<BureauId | null>(null)
-  type DashboardPage = 'overview' | 'loans' | 'fd' | 'cards' | 'payments' | 'plans' | 'health' | 'settings'
-  const standalonePages: Record<string, DashboardPage> = { '#loan-payment': 'loans', '#fixed-deposits': 'fd', '#credit-cards': 'cards', '#payments-invoices': 'payments', '#plans-services': 'plans', '#health-assessment': 'health', '#settings': 'settings' }
+  type DashboardPage = 'overview' | 'predictor' | 'loans' | 'fd' | 'cards' | 'payments' | 'plans' | 'health' | 'settings'
+  const standalonePages: Record<string, DashboardPage> = { '#score-predictor': 'predictor', '#loan-payment': 'loans', '#fixed-deposits': 'fd', '#credit-cards': 'cards', '#payments-invoices': 'payments', '#plans-services': 'plans', '#health-assessment': 'health', '#settings': 'settings' }
   const initialHash = standalonePages[window.location.hash] ? window.location.hash : '#dashboard-overview'
   const [activeNav, setActiveNav] = useState(initialHash)
   const [page, setPage] = useState<DashboardPage>(standalonePages[initialHash] ?? 'overview')
-  const [insightsOpen, setInsightsOpen] = useState(false)
-  const [mobileNavOpen, setMobileNavOpen] = useState(false)
+  const [theme, setTheme] = useState<'light' | 'dark'>(() => (localStorage.getItem('scorenow-dashboard-theme') === 'dark' ? 'dark' : 'light'))
+  const toggleTheme = () => setTheme((current) => {
+    const next = current === 'dark' ? 'light' : 'dark'
+    localStorage.setItem('scorenow-dashboard-theme', next)
+    return next
+  })
   const openNav = (event: ReactMouseEvent<HTMLAnchorElement>, href: string) => {
     setActiveNav(href)
     const standalone = standalonePages[href]
@@ -2851,19 +3099,25 @@ function DashboardPage({ user, onLogout }: { user: AuthUser; onLogout: () => voi
       event.preventDefault()
       window.history.replaceState(null, '', href)
       setPage('overview')
-      window.setTimeout(() => document.getElementById(href.slice(1))?.scrollIntoView(), 0)
+      // Report sections mount after the report detail loads, so retry briefly until the target exists.
+      let attempts = 0
+      const scrollWhenReady = () => {
+        const target = document.getElementById(href.slice(1))
+        if (target) target.scrollIntoView()
+        else if (attempts++ < 100) window.setTimeout(scrollWhenReady, 100)
+      }
+      window.setTimeout(scrollWhenReady, 0)
     } else if (href.startsWith('#')) {
       setPage('overview')
     }
   }
   const [notice, setNotice] = useState<{ tone: 'info' | 'success' | 'error'; text: string } | null>(null)
   const [simCheckout, setSimCheckout] = useState<SimulatedCheckoutState | null>(null)
-  const displayName = status?.profile?.name_as_per_pan?.trim() || user.full_name.trim() || 'there'
+  const displayName = customerDisplayName(status?.profile?.name_as_per_pan, user.full_name)
   const hour = new Date().getHours()
   const greeting = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening'
-  const loadStatus = async (refresh = false) => {
-    if (refresh) setRefreshing(true)
-    else setLoading(true)
+  const loadStatus = async () => {
+    setLoading(true)
     try {
       const [statusResponse, optionsResponse] = await Promise.all([
         fetch(`${apiUrl}/api/dashboard`, { headers: authHeaders(user) }),
@@ -2876,16 +3130,10 @@ function DashboardPage({ user, onLogout }: { user: AuthUser; onLogout: () => voi
       if (!statusResponse.ok) throw new Error('Unable to load dashboard')
       setStatus(await statusResponse.json() as DashboardStatus)
       if (optionsResponse.ok) setOptions(await optionsResponse.json() as ReportOptions)
-      if (refresh) setNotice({ tone: 'success', text: 'Your dashboard is up to date.' })
-    } catch (error) {
-      if (refresh) {
-        setNotice({ tone: 'error', text: error instanceof Error ? error.message : 'Unable to refresh your dashboard.' })
-      } else {
-        setStatus({ profile: null, reports: [] })
-      }
+    } catch {
+      setStatus({ profile: null, reports: [] })
     } finally {
-      if (refresh) setRefreshing(false)
-      else setLoading(false)
+      setLoading(false)
     }
   }
 
@@ -2988,24 +3236,30 @@ function DashboardPage({ user, onLogout }: { user: AuthUser; onLogout: () => voi
       setDownloadingReport(false)
     }
   }
-  const sidebarItems: { icon: typeof House; image?: string; label: string; href: string; external?: boolean }[] = [
-    { icon: FileSearch, image: '/icons-3d/image-953d8caf7b33e789.png', label: 'Credit score', href: '#dashboard-overview' },
-    { icon: FileCheck2, image: '/icons-3d/image-595dc8b28b982a37.png', label: 'Download report', href: activeReport ? '#my-report' : '#credit-reports' },
-    { icon: Lightbulb, image: '/icons-3d/image-88ec06fd2a7fc36c.png', label: 'Report insights', href: '#score-insights' },
-    { icon: TrendingUp, image: '/icons-3d/image-78da614c0f6c1161.png', label: 'Improve score', href: '#credit-learning' },
-    { icon: CreditCard, image: '/icons-3d/image-0b1794fb465020f2.png', label: 'Loan payment', href: '#loan-payment' },
-    { icon: PiggyBank, image: '/icons-3d/image-1c2db40da8b9f3b7.png', label: 'Fixed deposits', href: '#fixed-deposits' },
-    { icon: CreditCard, image: '/icons-3d/image-1d4a9bf1ec71ab79.png', label: 'Credit cards', href: '#credit-cards' },
-    { icon: WalletCards, label: 'Payments & invoices', href: '#payments-invoices' },
-    { icon: Layers, label: 'Plans & services', href: '#plans-services' },
-    { icon: Gauge, label: 'Health assessment', href: '#health-assessment' },
-    { icon: Settings, image: '/icons-3d/image-5a88f5e812fceb30.png', label: 'Settings', href: '#settings' },
-    { icon: CircleHelp, image: '/icons-3d/image-7e7a446b84557e61.png', label: 'Help & support', href: '#help-support' },
-  ]
-
-  const reportSubnav: [string, string][] = [
-    ['All accounts', activeReport ? '#credit-accounts' : '#credit-reports'],
-    ['Credit enquiries', activeReport ? '#credit-enquiries' : '#credit-reports'],
+  // Report-only sections fall back to the bureau purchase section until a report exists.
+  const reportLink = (target: string) => (activeReport ? target : '#credit-reports')
+  const navItems: { label: string; href: string; sub?: boolean }[] = [
+    { label: 'Credit score', href: '#dashboard-overview' },
+    { label: 'Score predictor', href: reportLink('#predictor') },
+    { label: 'Download report', href: reportLink('#my-report') },
+    { label: 'Report insights', href: reportLink('#all-accounts') },
+    { label: 'All accounts', href: reportLink('#all-accounts'), sub: true },
+    { label: 'Credit card utilisation', href: reportLink('#utilisation'), sub: true },
+    { label: 'Credit enquiries', href: reportLink('#enquiries'), sub: true },
+    { label: 'Payment history', href: reportLink('#payments'), sub: true },
+    { label: 'Credit age', href: reportLink('#age'), sub: true },
+    { label: 'Personal details', href: reportLink('#personal-details') },
+    { label: 'Offers', href: '#credit-cards' },
+    { label: 'My plan', href: '#my-plan' },
+    { label: 'Improve score', href: '#credit-learning' },
+    { label: 'Loan payment', href: '#loan-payment' },
+    { label: 'Fixed deposits', href: '#fixed-deposits' },
+    { label: 'Payments & invoices', href: '#payments-invoices' },
+    { label: 'Plans & services', href: '#plans-services' },
+    { label: 'Health assessment', href: '#health-assessment' },
+    { label: 'My profile', href: '#settings' },
+    { label: 'FAQs', href: '#help-support' },
+    { label: 'Contact us', href: '#help-support' },
   ]
 
   const applyReportResult = (result: DashboardStatus, bureau: BureauId) => {
@@ -3092,7 +3346,7 @@ function DashboardPage({ user, onLogout }: { user: AuthUser; onLogout: () => voi
           description: `${order.bureauName} credit report`,
           image: '/scorenow-logo-hd.png',
           prefill: order.prefill,
-          theme: { color: '#087af5' },
+          theme: { color: '#08358a' },
           handler: (payment: RazorpaySuccess) => { void verifyPayment(bureau, payment).finally(resolve) },
           modal: { ondismiss: () => resolve() },
         })
@@ -3128,17 +3382,17 @@ function DashboardPage({ user, onLogout }: { user: AuthUser; onLogout: () => voi
     }
   }
 
-  const scoreProgress = activeReport?.credit_score
-    ? Math.max(0, Math.min(1, (activeReport.credit_score - 300) / 600))
-    : 0.5
+  const scoreProgress = activeReport?.credit_score === null || activeReport?.credit_score === undefined
+    ? 0
+    : Math.max(0, Math.min(1, (activeReport.credit_score - 300) / 600))
   const gaugePoint = (progress: number) => {
     const angle = Math.PI * (1 - progress)
-    return { x: 100 + 80 * Math.cos(angle), y: 100 - 80 * Math.sin(angle) }
+    return { x: 150 + 120 * Math.cos(angle), y: 150 - 120 * Math.sin(angle) }
   }
   const gaugeArc = (from: number, to: number) => {
     const start = gaugePoint(from)
     const end = gaugePoint(to)
-    return `M ${start.x.toFixed(2)} ${start.y.toFixed(2)} A 80 80 0 0 1 ${end.x.toFixed(2)} ${end.y.toFixed(2)}`
+    return `M ${start.x.toFixed(2)} ${start.y.toFixed(2)} A 120 120 0 0 1 ${end.x.toFixed(2)} ${end.y.toFixed(2)}`
   }
   const gaugeMarker = gaugePoint(scoreProgress)
 
@@ -3155,56 +3409,25 @@ function DashboardPage({ user, onLogout }: { user: AuthUser; onLogout: () => voi
   }
 
   return (
-    <div className="dashboard-shell">
+    <div className="dashboard-shell sn-shell" data-theme={theme}>
       <a className="dashboard-skip-link" href="#dashboard-main">Skip to dashboard content</a>
-      {mobileNavOpen && <button className="dashboard-nav-backdrop" type="button" aria-label="Close menu" onClick={() => setMobileNavOpen(false)} />}
-      <aside className={`dashboard-sidebar${mobileNavOpen ? ' is-open' : ''}`} id="dashboard-sidebar">
-        <div className="dashboard-sidebar-head">
-          <Brand href="/" />
-          <button className="dashboard-nav-close" type="button" aria-label="Close menu" onClick={() => setMobileNavOpen(false)}><X /></button>
+      <header className="sn-header">
+        <a className="sn-logo-box" href="#dashboard-overview" onClick={(event) => openNav(event, '#dashboard-overview')}><img src="/scorenow-logo-hd.png" alt="Scorenow – Improve your credit score" /></a>
+        <div className="sn-user">
+          <button className="sn-theme" type="button" onClick={toggleTheme} aria-label={`Switch to ${theme === 'dark' ? 'light' : 'dark'} theme`}>Theme</button>
+          <DashboardUserChip user={user} displayName={displayName} onProfile={(event) => openNav(event, '#settings')} onLogout={onLogout} />
         </div>
-        <nav aria-label="Dashboard navigation" onClick={(event) => { if ((event.target as HTMLElement).closest('a:not(.has-subnav)')) setMobileNavOpen(false) }}>
-          {sidebarItems.map(({ icon: Icon, image, label, href, external }) => {
-            const subItems = label === 'Report insights' ? reportSubnav : []
-            const expandable = subItems.length > 0
-            const expanded = expandable && insightsOpen
-            return (
-              <Fragment key={label}>
-                <a
-                  href={href}
-                  className={`${activeNav === href || (expandable && subItems.some(([, target]) => target === activeNav)) ? 'active' : ''}${expandable ? ' has-subnav' : ''}${expanded ? ' expanded' : ''}`}
-                  aria-current={activeNav === href ? 'page' : undefined}
-                  aria-expanded={expandable ? expanded : undefined}
-                  aria-controls={expandable ? 'report-insights-subnav' : undefined}
-                  onClick={(event) => { if (expandable) setInsightsOpen(!insightsOpen); openNav(event, href) }}
-                >{image ? <img className="nav-3d-icon" src={image} alt="" /> : <Icon />}<span>{label}</span>{expandable ? <ChevronDown className="subnav-chevron" /> : !external && <ArrowRight />}</a>
-                {expandable && <div className={`dashboard-sidebar-subnav-wrap${expanded ? ' open' : ''}`} id="report-insights-subnav">
-                  <div className="dashboard-sidebar-subnav" aria-label="Report sections">
-                    {subItems.map(([section, target]) => <a href={target} key={section} tabIndex={expanded ? 0 : -1} className={activeNav === target ? 'active' : ''} onClick={(event) => openNav(event, target)}>{section}</a>)}
-                  </div>
-                </div>}
-              </Fragment>
-            )
-          })}
+      </header>
+
+      <div className="sn-wrap">
+        <nav className="sn-nav" aria-label="Dashboard">
+          {navItems.map(({ label, href, sub }) => (
+            <a key={label} href={href} className={`${sub ? 'sub' : ''}${activeNav === href && !sub ? ' active' : ''}`} aria-current={activeNav === href ? 'page' : undefined} onClick={(event) => openNav(event, href)}>{label}</a>
+          ))}
         </nav>
-      </aside>
 
-      <main className="dashboard-main" id="dashboard-main">
-        <header className="dashboard-topbar">
-          <button className="dashboard-menu-button" type="button" aria-label="Open menu" aria-expanded={mobileNavOpen} aria-controls="dashboard-sidebar" onClick={() => setMobileNavOpen(true)}><Menu /></button>
-          <div className="dashboard-page-heading"><span>Scorenow <b>/</b> {page === 'fd' ? 'Investment products' : page === 'cards' ? 'Credit cards' : page === 'plans' ? 'Plans & services' : 'Credit workspace'}</span><strong>{{ loans: 'Loan payment', fd: 'Fixed deposits', cards: 'Credit Cards', payments: 'Payments & invoices', plans: 'Plans & services', health: 'Health assessment', settings: 'Settings', overview: 'Your dashboard' }[page]}</strong></div>
-          <div className="dashboard-top-actions">
-            <span className="dashboard-updated">{activeReport ? <>Last updated <strong>{formatDate(activeReport.report_date)}</strong></> : 'Your credit workspace'}</span>
-            <button className="dashboard-refresh-button" type="button" onClick={() => void loadStatus(true)} disabled={refreshing}>
-              <Spinner size={18} active={refreshing} />{refreshing ? 'Refreshing…' : 'Refresh dashboard'}
-            </button>
-            <a className="dashboard-score-cta" href="#credit-reports" onClick={(event) => openNav(event, '#credit-reports')}>Get a credit report <ArrowRight /></a>
-            <AuthAvatarButton user={user} onClick={() => undefined} onLogout={onLogout} />
-          </div>
-        </header>
-
-        <div className="dashboard-content">
-          {page === 'loans' ? <LoanPaymentPage user={user} report={activeReport} onGetReport={() => setPage('overview')} /> : page === 'fd' ? <FixedDepositsPage /> : page === 'cards' ? <CreditCardsPage /> : page === 'payments' ? <section className="dashboard-card" id="payments-invoices">
+        <main className="sn-main" id="dashboard-main">
+          {page === 'predictor' ? <div className="dashboard-score-predictor"><CreditScoreEstimator onGetReportReview={(event) => openNav(event, '#health-assessment')} /></div> : page === 'loans' ? <LoanPaymentPage user={user} report={activeReport} onGetReport={() => setPage('overview')} /> : page === 'fd' ? <FixedDepositsPage /> : page === 'cards' ? <CreditCardsPage /> : page === 'payments' ? <section className="dashboard-card" id="payments-invoices">
             <div className="dashboard-card-heading"><strong>Payments and invoices</strong><small>Your past orders and receipts</small></div>
             <CustomerPaymentsPanel token={user.token} onBrowsePlans={() => { setActiveNav('#plans-services'); window.history.replaceState(null, '', '#plans-services'); setPage('plans'); window.scrollTo({ top: 0 }) }} />
           </section> : page === 'plans' ? <PlansServicesPage /> : page === 'health' ? <section className="dashboard-card" id="health-assessment">
@@ -3224,42 +3447,50 @@ function DashboardPage({ user, onLogout }: { user: AuthUser; onLogout: () => voi
             </div>
             <button type="button" className="button button-outline account-logout" onClick={onLogout}>Log out <ArrowRight /></button>
           </article> : <>
-          <div className="dashboard-welcome">
+          {!activeReport && <div className="dashboard-welcome">
             <div><span className="dashboard-kicker">YOUR CREDIT WORKSPACE</span><h1>{greeting}, {displayName}! <span>👋</span></h1><p>{completedReports.length ? 'Your credit picture, with Scorenow here to help you understand what comes next.' : 'Start with a report. We’ll help you understand it and guide you through what to do next.'}</p></div>
-          </div>
+          </div>}
 
           {notice && <p className={`dashboard-notice ${notice.tone}`} role="status">{notice.text}</p>}
 
           <section className="dashboard-grid dashboard-overview-grid" id="dashboard-overview">
             {activeReport
               ? <article className="dashboard-card sc-card">
-                  <div className="sc-head">
-                    <strong><img className="dash-3d-icon" src="/icons-3d/image-f1bb395a241f532b.png" alt="" />Your Credit Score</strong>
-                    <span className="sc-date"><Clock3 /> Updated {formatDate(activeReport.report_date)}{activeReport.is_demo ? ' · Sample' : ''}</span>
+                  <div className="sc-tabs" role="tablist" aria-label="Choose a credit bureau">
+                    {dashboardBureauOrder.map((bureau) => {
+                      const report = reportFor(bureau)
+                      const completed = report?.status === 'completed'
+                      return <button key={bureau} type="button" role="tab" aria-selected={bureau === activeBureau} aria-disabled={!completed} disabled={!completed} title={completed ? bureauTabLabel(bureau) : 'Get this bureau report below'} className={bureau === activeBureau ? 'active' : ''} onClick={() => setSelectedBureau(bureau)}>{bureauTabLabel(bureau)}</button>
+                    })}
                   </div>
-                  {completedReports.length > 1 && <div className="sc-tabs" role="tablist" aria-label="Choose a credit bureau">
-                    {completedReports.map((report) => (
-                      <button key={report.bureau} type="button" role="tab" aria-selected={report.bureau === activeBureau} className={report.bureau === activeBureau ? 'active' : ''} onClick={() => setSelectedBureau(report.bureau)}>
-                        {bureauName(report.bureau)}
-                      </button>
-                    ))}
-                  </div>}
+                  <div className="sc-head">
+                    <h2 className="sr-only">Your Credit Score</h2>
+                    <strong className="sc-greeting">{greeting}, {displayName}! Your credit score as of {formatDate(activeReport.report_date)}{activeReport.is_demo ? ' · Sample' : ''}</strong>
+                    <span className="sc-date">{bureauTabLabel(activeReport.bureau)} report</span>
+                  </div>
                   <div className="sc-body">
                     <div className="sc-gauge-container">
                       <div className="sc-gauge" role="img" aria-label={`Credit score ${activeReport.credit_score ?? 'unavailable'} out of 900`}>
-                        <svg viewBox="0 0 200 112" aria-hidden="true">
+                        <svg viewBox="0 0 300 175" aria-hidden="true">
+                          <defs>
+                            <linearGradient id={`dashboard-score-gradient-${activeReport.request_id}`} x1="0" x2="1">
+                              <stop offset="0" stopColor="#ef4444" />
+                              <stop offset=".5" stopColor="#f59e0b" />
+                              <stop offset="1" stopColor="#22c55e" />
+                            </linearGradient>
+                          </defs>
                           <path d={gaugeArc(0, 1)} className="sc-gauge-base" />
-                          {scoreBands.map((band) => <path key={band.label} d={gaugeArc((band.min - 300) / 600, (band.max - 300) / 600)} stroke={band.color} />)}
-                          <circle cx={gaugeMarker.x} cy={gaugeMarker.y} r="7" className="sc-gauge-dot" />
+                          <path d={gaugeArc(0, 1)} className="sc-gauge-progress" pathLength={100} strokeDasharray={`${scoreProgress * 100} 100`} stroke={`url(#dashboard-score-gradient-${activeReport.request_id})`} />
+                          {activeReport.credit_score !== null && <circle cx={gaugeMarker.x} cy={gaugeMarker.y} r="9" className="sc-gauge-dot" />}
                         </svg>
                         <div className="sc-gauge-value">
                           <strong>{activeReport.credit_score ?? '—'}</strong>
                           {activeReport.credit_score
-                            ? <span className={`sc-band sc-band-${scoreBandInfo(activeReport.credit_score).tone}`}>{scoreBand(activeReport.credit_score)} <Info /></span>
-                            : <span className="sc-band sc-band-neutral">No score <Info /></span>}
+                            ? <span className={`sc-band sc-band-${scoreBandInfo(activeReport.credit_score).tone}`}>{scoreBand(activeReport.credit_score)}</span>
+                            : <span className="sc-band sc-band-neutral">No score</span>}
                         </div>
-                        <span className="sc-gauge-min">300</span><span className="sc-gauge-max">900</span>
                       </div>
+                      <div className="sc-gauge-ends"><span>300</span><span>900</span></div>
                     </div>
                     <div className="sc-copy">
                       <strong>{activeReport.overdue_accounts
@@ -3270,10 +3501,13 @@ function DashboardPage({ user, onLogout }: { user: AuthUser; onLogout: () => voi
                       <p>{activeReport.overdue_accounts
                         ? 'Review your account details and payment history to see what may need action.'
                         : `Explore your ${bureauName(activeReport.bureau)} report and account details.`}</p>
-                      <button className="sc-download" type="button" onClick={() => void downloadActiveReport()} disabled={downloadingReport}>
-                        <Download /> {downloadingReport ? 'Preparing report…' : 'Download my report'}
-                      </button>
-                      <a className="sc-link" href="#my-report">Understand my report <ArrowRight /></a>
+                      <div className="sc-copy-actions">
+                        <button className="sc-download" type="button" onClick={() => void downloadActiveReport()} disabled={downloadingReport}>
+                          <Download /> {downloadingReport ? 'Preparing report…' : 'Download report'}
+                        </button>
+                        <a className="sc-link" href="#predictor" onClick={(event) => openNav(event, '#predictor')}>Score predictor <ArrowRight /></a>
+                      </div>
+                      <a className="sc-report-link" href="#my-report">Understand my report</a>
                       {downloadReportError && <p className="dashboard-notice error score-download-error" role="alert">{downloadReportError}</p>}
                     </div>
                   </div>
@@ -3281,55 +3515,69 @@ function DashboardPage({ user, onLogout }: { user: AuthUser; onLogout: () => voi
               : <article className="dashboard-card empty-report-card">
                   <div className="empty-dashboard-state"><FileSearch /><strong>Your credit picture starts here</strong><span>Choose a bureau to securely request your report. We'll help you understand the information and decide what to focus on.</span></div>
                 </article>}
-            {activeReport && <article className="dashboard-card quick-overview" aria-label="Credit report highlights">
-              <div className="dashboard-card-heading"><strong>Quick Overview</strong></div>
-              <div className="quick-overview-grid">
-                <div><span className="dashboard-metric-icon blue"><WalletCards /></span><strong>{activeReport.active_accounts ?? '—'}</strong><small>Active Accounts</small></div>
-                <div><span className={`dashboard-metric-icon ${activeReport.overdue_accounts ? 'red' : 'green'}`}><AlertTriangle /></span><strong>{activeReport.overdue_accounts ?? '—'}</strong><small>Overdue Accounts</small></div>
-                <div><span className="dashboard-metric-icon blue"><Search /></span><strong>{activeReport.enquiries_last_6_months ?? '—'}</strong><small>Recent Enquiries</small></div>
-                <div><span className="dashboard-metric-icon gold"><BadgeIndianRupee /></span><strong>{activeReport.total_outstanding === null ? '—' : formatMoney(Number(activeReport.total_outstanding))}</strong><small>Outstanding</small></div>
-              </div>
-              {reportInsights.length > 0 && <div className="qo-insights">
-                <strong><Lightbulb /> Key insights</strong>
-                <ul>
-                  {reportInsights.slice(0, 3).map(({ tone, text }) => (
-                    <li key={text} className={`qo-${tone}`}>{tone === 'warn' ? <AlertTriangle /> : tone === 'good' ? <Check /> : <Info />}<span>{text}</span></li>
-                  ))}
-                </ul>
-              </div>}
-            </article>}
           </section>
 
           <section className="dashboard-card bureau-comparison" id="bureau-comparison">
             <div className="dashboard-card-heading">
-              <strong><BarChart3 /> Compare your credit reports</strong>
-              <small>Scores shown only for reports you’ve received</small>
+              <strong><BarChart3 /> Compare your credit report across 4 bureaus</strong>
             </div>
+            <div className="bureau-comparison-banner">All your bureau reports, side by side</div>
             <div className="bureau-comparison-scroll">
               <table>
-                <thead><tr><th scope="col">Credit bureau</th>{bureauCatalog.map((bureau) => <th scope="col" key={bureau.id}><span>{bureau.name}</span></th>)}</tr></thead>
+                <thead><tr><th scope="col"><span>Bureau</span><small>Last refresh date</small></th>{dashboardBureauOrder.map((bureau) => {
+                  const report = reportFor(bureau)
+                  return <th scope="col" key={bureau}><span>{bureauTabLabel(bureau)}</span><small>{report?.status === 'completed' ? formatDate(report.report_date) : '—'}</small></th>
+                })}</tr></thead>
                 <tbody>
-                  <tr><th scope="row">Latest score</th>{bureauCatalog.map((bureau) => {
-                    const report = reportFor(bureau.id)
-                    return <td key={bureau.id}>{report?.status === 'completed' ? <button type="button" onClick={() => { setSelectedBureau(bureau.id); document.getElementById('dashboard-overview')?.scrollIntoView({ behavior: 'smooth', block: 'start' }) }}>{report.credit_score ?? '—'}</button> : <span>{report?.status === 'processing' ? 'Updating…' : '—'}</span>}</td>
+                  <tr><th scope="row">Latest score</th>{dashboardBureauOrder.map((bureau) => {
+                    const report = reportFor(bureau)
+                    return <td key={bureau}>{report?.status === 'completed' ? <button type="button" onClick={() => { setSelectedBureau(bureau); document.getElementById('dashboard-overview')?.scrollIntoView({ behavior: 'smooth', block: 'start' }) }}>{report.credit_score ?? '—'}</button> : <span>{report?.status === 'processing' ? 'Updating…' : '—'}</span>}</td>
                   })}</tr>
-                  <tr><th scope="row">Report date</th>{bureauCatalog.map((bureau) => {
-                    const report = reportFor(bureau.id)
-                    return <td key={bureau.id}>{report?.status === 'completed' ? formatDate(report.report_date) : '—'}</td>
+                  <tr><th scope="row">Accounts</th>{dashboardBureauOrder.map((bureau) => {
+                    const report = reportFor(bureau)
+                    return <td key={bureau}>{report?.status === 'completed' ? report.total_accounts ?? '—' : '—'}</td>
                   })}</tr>
-                  <tr><th scope="row">Accounts</th>{bureauCatalog.map((bureau) => {
-                    const report = reportFor(bureau.id)
-                    return <td key={bureau.id}>{report?.status === 'completed' ? report.total_accounts ?? '—' : '—'}</td>
-                  })}</tr>
-                  <tr><th scope="row">Report status</th>{bureauCatalog.map((bureau) => {
-                    const report = reportFor(bureau.id)
-                    return <td key={bureau.id}><span className={`comparison-status ${report?.status === 'completed' ? 'ready' : report?.status === 'processing' ? 'pending' : report?.status === 'failed' ? 'failed' : ''}`}>{report?.status === 'completed' ? 'Ready' : report?.status === 'processing' ? 'Processing' : report?.status === 'failed' ? 'Unavailable' : 'Not requested'}</span></td>
+                  <tr><th scope="row">Report status</th>{dashboardBureauOrder.map((bureau) => {
+                    const report = reportFor(bureau)
+                    return <td key={bureau}><span className={`comparison-status ${report?.status === 'completed' ? 'ready' : report?.status === 'processing' ? 'pending' : report?.status === 'failed' ? 'failed' : ''}`}>{report?.status === 'completed' ? 'Ready' : report?.status === 'processing' ? 'Processing' : report?.status === 'failed' ? 'Unavailable' : 'Not requested'}</span></td>
                   })}</tr>
                 </tbody>
               </table>
             </div>
             <a className="bureau-comparison-link" href="#credit-reports">Manage credit reports <ArrowRight /></a>
           </section>
+
+          <section className="sn-pro" aria-label="Scorenow Pro">
+            <div className="sn-pro-label">Scorenow<br />Pro</div>
+            <div>
+              <h3>Monitor your credit like a pro</h3>
+              <ul><li>Download detailed credit report</li><li>Get latest score every day</li></ul>
+            </div>
+            <div className="sn-pro-go">
+              <a className="sn-btn sn-btn-purple" href="#my-plan">Unlock Pro</a>
+              <small>See plans and pricing</small>
+            </div>
+          </section>
+
+          {activeReport && <div id="my-report" className="dashboard-report-anchor"><ReportDetailView key={activeReport.request_id} user={user} requestId={activeReport.request_id} onOpenPredictor={(event) => openNav(event, '#score-predictor')} /></div>}
+
+          {activeReport && <section className="dashboard-card quick-overview" id="score-insights" aria-label="Credit report highlights">
+            <div className="dashboard-card-heading"><strong>Quick Overview</strong></div>
+            <div className="quick-overview-grid">
+              <div><span className="dashboard-metric-icon blue"><WalletCards /></span><strong>{activeReport.active_accounts ?? '—'}</strong><small>Active Accounts</small></div>
+              <div><span className={`dashboard-metric-icon ${activeReport.overdue_accounts ? 'red' : 'green'}`}><AlertTriangle /></span><strong>{activeReport.overdue_accounts ?? '—'}</strong><small>Overdue Accounts</small></div>
+              <div><span className="dashboard-metric-icon blue"><Search /></span><strong>{activeReport.enquiries_last_6_months ?? '—'}</strong><small>Recent Enquiries</small></div>
+              <div><span className="dashboard-metric-icon gold"><BadgeIndianRupee /></span><strong>{activeReport.total_outstanding === null ? '—' : formatMoney(Number(activeReport.total_outstanding))}</strong><small>Outstanding</small></div>
+            </div>
+            {reportInsights.length > 0 && <div className="qo-insights">
+              <strong><Lightbulb /> Key insights</strong>
+              <ul>
+                {reportInsights.slice(0, 3).map(({ tone, text }) => (
+                  <li key={text} className={`qo-${tone}`}>{tone === 'warn' ? <AlertTriangle /> : tone === 'good' ? <Check /> : <Info />}<span>{text}</span></li>
+                ))}
+              </ul>
+            </div>}
+          </section>}
 
           <PlansPanel user={user} onLogout={onLogout} />
 
@@ -3374,7 +3622,6 @@ function DashboardPage({ user, onLogout }: { user: AuthUser; onLogout: () => voi
             {options && !options.paymentsEnabled && <p className="bureau-note">Online payments are being set up. Please check back shortly.</p>}
           </section>
 
-          {activeReport && <div id="my-report" className="dashboard-report-anchor"><ReportDetailView key={activeReport.request_id} user={user} requestId={activeReport.request_id} /></div>}
 
           <section className="dashboard-card learning-card" id="credit-learning">
             <div className="learning-heading">
@@ -3537,8 +3784,8 @@ function DashboardPage({ user, onLogout }: { user: AuthUser; onLogout: () => voi
             </div>
           </section>
           </>}
-        </div>
-      </main>
+        </main>
+      </div>
       {simCheckout && <SimulatedCheckout
         checkout={simCheckout}
         onDismiss={() => { simCheckout.done(); setSimCheckout(null) }}
@@ -4024,8 +4271,8 @@ type AdminAnalytics = {
   bureaus: { bureau: string; paid_orders: number; revenue: number; completed: number; failed: number }[]
 }
 
-type AdminSectionId = 'overview' | 'customers' | 'reports' | 'analytics' | 'tickets' | 'journey' | 'team' | 'failed' | 'health' | 'audit' | 'partners' | 'portal' | 'monitor' | 'crm' | 'content' | 'testimonials' | 'assessments' | 'ops' | 'neha'
-const defaultAdminSection = (role?: AdminRole): AdminSectionId => role === 'support' ? 'customers' : role === 'analyst' ? 'analytics' : role === 'partner' || role === 'agent' ? 'portal' : 'overview'
+type AdminSectionId = 'overview' | 'customers' | 'reports' | 'analytics' | 'tickets' | 'journey' | 'team' | 'failed' | 'health' | 'audit' | 'partners' | 'portal' | 'applications' | 'earnings' | 'monitor' | 'crm' | 'work' | 'content' | 'testimonials' | 'assessments' | 'ops' | 'neha'
+const defaultAdminSection = (role?: AdminRole): AdminSectionId => role === 'support' ? 'customers' : role === 'analyst' ? 'analytics' : role === 'agent' ? 'work' : role === 'partner' ? 'portal' : 'overview'
 type PartnerAccountOption = { email: string; full_name: string; role: AdminRole; status: string }
 
 type AdminAttention = {
@@ -4867,20 +5114,23 @@ function AdminPage() {
     { id: 'reports', label: 'Credit score checker', icon: FileSearch, roles: ['owner', 'manager'] },
     { id: 'analytics', label: 'Analytics', icon: BarChart3, roles: ['owner', 'manager', 'analyst'] },
     { id: 'tickets', label: 'Helpline tickets', icon: MessageCircle, roles: ['owner', 'manager', 'support'], badge: attention?.open_tickets },
-    { id: 'neha', label: 'Neha Assistant', icon: MessageCircle, roles: ['owner', 'manager', 'support', 'partner', 'agent'] },
+    { id: 'neha', label: 'Neha Assistant', icon: MessageCircle, roles: ['owner', 'manager', 'support', 'agent'] },
     { id: 'journey', label: 'Signup journey', icon: TrendingUp, roles: ['owner', 'manager', 'analyst'] },
     { id: 'failed', label: 'Failed operations', icon: AlertTriangle, roles: ['owner', 'manager'], badge: failedOpsCount },
     { id: 'health', label: 'System health', icon: Gauge, roles: ['owner', 'manager'] },
     { id: 'audit', label: 'Audit log', icon: ShieldCheck, roles: ['owner', 'manager'] },
     { id: 'team', label: 'Manage admins', icon: LockKeyhole, roles: ['owner'] },
     { id: 'crm', label: 'CRM', icon: Users, roles: ['owner', 'manager', 'support'] },
+    { id: 'work', label: 'My verification tasks', icon: FileCheck2, roles: ['agent'] },
     { id: 'content', label: 'Site content', icon: Settings, roles: ['owner', 'manager'] },
     { id: 'testimonials', label: 'Testimonials', icon: Star, roles: ['owner'] },
     { id: 'partners', label: 'Partners & agents', icon: Handshake, roles: ['owner'] },
     { id: 'monitor', label: 'Partner monitor', icon: ShieldCheck, roles: ['owner', 'manager'] },
     { id: 'assessments', label: 'Health assessments', icon: ShieldCheck, roles: ['owner', 'manager', 'support'] },
     { id: 'ops', label: 'Operations', icon: Settings, roles: ['owner', 'manager', 'support', 'analyst'] },
-    { id: 'portal', label: 'My referrals', icon: Handshake, roles: ['partner', 'agent'] },
+    { id: 'portal', label: adminRole === 'partner' ? 'Refer a customer' : 'My referrals', icon: Handshake, roles: ['partner', 'agent'] },
+    { id: 'applications', label: 'Application progress', icon: Clock3, roles: ['partner'] },
+    { id: 'earnings', label: 'Earnings', icon: BadgeIndianRupee, roles: ['partner'] },
   ]
   const visibleAdminSections = adminSections.filter((section) => section.roles.includes(adminRole) || (isPartnerRole && partnerPages.includes(section.id)))
   const changeAdminSection = (section: AdminSectionId) => {
@@ -4901,7 +5151,7 @@ function AdminPage() {
   const sectionHasData: Record<AdminSectionId, boolean> = {
     overview: Boolean(activity), reports: Boolean(report), customers: customers.length > 0, analytics: Boolean(analytics),
     journey: Boolean(analytics) && journeyCustomers.length > 0, tickets: tickets.length > 0, team: team.length > 0 || Boolean(primaryAdmin), neha: nehaConversations.length > 0,
-    failed: Boolean(failedOps), health: Boolean(health), audit: Boolean(auditLog), partners: true, portal: true, monitor: true, crm: true, content: true, testimonials: true, assessments: true, ops: true,
+    failed: Boolean(failedOps), health: Boolean(health), audit: Boolean(auditLog), partners: true, portal: true, applications: true, earnings: true, monitor: true, crm: true, work: true, content: true, testimonials: true, assessments: true, ops: true,
   }
   const sectionIsLoading = activeSection === 'overview' ? activityLoading : activeSection === 'reports' ? loading : sectionLoading
   const canManageCustomers = adminRole === 'owner' || adminRole === 'manager'
@@ -5326,9 +5576,12 @@ function AdminPage() {
             </article>
           )}
         </>
+        : activeSection === 'work' ? <AgentWorkQueue token={token} />
         : activeSection === 'crm' ? <CrmManagement token={token} role={adminRole} refreshKey={sectionRefresh} />        : activeSection === 'content' ? <AdminSiteContent token={token} refreshKey={sectionRefresh} />        : activeSection === 'testimonials' ? <AdminTestimonials token={token} refreshKey={sectionRefresh} />        : activeSection === 'partners' ? <PartnerManagement token={token} refreshKey={sectionRefresh} />
         : activeSection === 'monitor' ? <PartnerMonitor token={token} enabled={adminRole === 'owner' || adminRole === 'manager' || partnerPages.includes('monitor')} />
-        : activeSection === 'portal' ? <PartnerPortal token={token} role={adminRole === 'agent' ? 'agent' : 'partner'} refreshKey={sectionRefresh} />
+        : activeSection === 'portal' ? <PartnerPortal token={token} role={adminRole === 'agent' ? 'agent' : 'partner'} page={adminRole === 'partner' ? 'refer' : 'all'} refreshKey={sectionRefresh} />
+        : activeSection === 'applications' ? <PartnerPortal token={token} role="partner" page="applications" refreshKey={sectionRefresh} />
+        : activeSection === 'earnings' ? <PartnerPortal token={token} role="partner" page="earnings" refreshKey={sectionRefresh} />
         : <>
           <div className="admin-heading"><span>ACCESS CONTROL</span><h1>Manage admins</h1><p>Invite trusted teammates with role-based access. Invitations expire after 48 hours and each admin chooses a private password and PIN.</p></div>          <article className="dashboard-card admin-management-card">
             <div className="dashboard-card-heading"><strong>Add an admin or partner</strong><small>Set email, password and PIN now so they can sign in right away, or leave password and PIN empty to send an invite link</small></div>
@@ -5416,11 +5669,14 @@ function App() {
   const pathname = window.location.pathname.replace(/\/$/, '')
   const guideSlug = pathname.startsWith('/guides/') ? pathname.slice('/guides/'.length) : ''
   const currentGuide = creditGuides[guideSlug as CreditGuideSlug]
+  const legalDocument = legalDocumentForPath(pathname)
   useEffect(() => {
     const isBusinessPage = pathname === '/business'
     const isCreditScorePage = pathname === '/creditscore'
     const isAdminPage = pathname === '/admin'
-    const title = currentGuide
+    const title = legalDocument
+      ? `${legalDocument.title} | Scorenow`
+      : currentGuide
       ? `${currentGuide.title} | Scorenow`
       : isCreditScorePage
       ? 'Credit Score Report Request | Scorenow'
@@ -5429,7 +5685,9 @@ function App() {
         : isBusinessPage
         ? 'Business Credit Report & CMR Guidance | Scorenow'
         : 'Scorenow | Check & Improve Your Credit Score in India'
-    const description = currentGuide
+    const description = legalDocument
+      ? `${legalDocument.summary} ${company.legalName}.`
+      : currentGuide
       ? currentGuide.description
       : isBusinessPage
       ? 'Understand your commercial credit report, identify CMR issues, and get practical business credit guidance from Scorenow.'
@@ -5455,11 +5713,12 @@ function App() {
     updateMeta('meta[name="twitter:title"]', 'content', title)
     updateMeta('meta[name="twitter:description"]', 'content', description)
     document.querySelector<HTMLLinkElement>('link[rel="canonical"]')?.setAttribute('href', canonicalUrl)
-  }, [pathname, currentGuide])
+  }, [pathname, currentGuide, legalDocument])
 
   if (pathname === '/creditscore') return <CreditScorePage />
   if (pathname === '/dashboard') return <DashboardRoute />
   if (pathname === '/admin') return <AdminPage />
+  if (legalDocument) return <LegalPage document={legalDocument} />
   if (pathname.startsWith('/guides/')) return <CreditGuidePage slug={guideSlug} />
   return pathname === '/business' ? <BusinessPage /> : <HomePage />
 }

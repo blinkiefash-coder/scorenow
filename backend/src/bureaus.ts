@@ -150,35 +150,50 @@ export const scoreBand = (score: number | null) => {
 
 const MAX_PDF_BYTES = 20 * 1024 * 1024;
 
-// The bureau PDF is a pre-signed S3 link that expires (24h), so it must be stored on completion.
-export const livePdfUrl = (raw: unknown): string | null => {
-  const data = (raw as { data?: { data?: unknown } } | null)?.data?.data;
-  if (!data) return null;
-  
-  // Try different field names used by different bureaus
-  const pdfUrl = (data as any)?.pdf_report_url || (data as any)?.htmlUrl;
-  
-  if (typeof pdfUrl !== "string") return null;
+const liveDocumentUrl = (value: unknown) => {
+  if (typeof value !== "string") return null;
   try {
-    const url = new URL(pdfUrl);
+    const url = new URL(value);
     const signedAt = url.searchParams.get("X-Amz-Date");
     const expiresIn = Number(url.searchParams.get("X-Amz-Expires"));
     if (signedAt && expiresIn) {
       const iso = signedAt.replace(/^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})Z$/, "$1-$2-$3T$4:$5:$6Z");
       if (Date.parse(iso) + expiresIn * 1000 < Date.now()) return null;
     }
-    return pdfUrl;
+    return value;
   } catch {
     return null;
   }
 };
 
-export const downloadReportPdf = async (url: string | null): Promise<Buffer | null> => {
+const reportData = (raw: unknown): Record<string, unknown> | null => {
+  const data = (raw as { data?: { data?: unknown } } | null)?.data?.data;
+  return data && typeof data === "object" ? data as Record<string, unknown> : null;
+};
+
+// The signed provider PDF URL expires, so callers should save its contents on completion.
+export const reportPdfUrl = (raw: unknown): string | null =>
+  liveDocumentUrl(reportData(raw)?.pdf_report_url);
+
+export const livePdfUrl = (raw: unknown): string | null => {
+  const data = reportData(raw);
+  return liveDocumentUrl(data?.pdf_report_url) ?? liveDocumentUrl(data?.htmlUrl);
+};
+
+export const downloadReportPdf = async (url: string | null, bureau?: Bureau): Promise<Buffer | null> => {
   if (!url) return null;
   const parsed = new URL(url);
-  if (parsed.protocol !== "https:" || !/\.amazonaws\.com$/i.test(parsed.hostname)) return null;
+  const allowedCibilHost = bureau === "cibil" &&
+    (parsed.hostname === "cibil.co.in" || parsed.hostname.endsWith(".cibil.co.in"));
+  if (parsed.protocol !== "https:" || (!/\.amazonaws\.com$/i.test(parsed.hostname) && !allowedCibilHost)) {
+    console.error(`Unsupported bureau PDF host: ${parsed.hostname}`);
+    return null;
+  }
   try {
-    const response = await fetch(parsed, { signal: AbortSignal.timeout(30000) });
+    const response = await fetch(parsed, {
+      signal: AbortSignal.timeout(30000),
+      redirect: allowedCibilHost ? "error" : "follow",
+    });
     if (!response.ok) {
       console.error(`Bureau PDF link returned HTTP ${response.status}; it may have expired.`);
       return null;

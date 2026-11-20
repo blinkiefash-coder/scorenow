@@ -4,7 +4,7 @@ import { subscribeAdminStream } from './adminLive'
 const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:3000'
 
 type ActivityRow = { id: string; actor_email: string; actor_role: string; event: string; target_email: string | null; details: Record<string, unknown> | null; created_at: string }
-type PortalData = { customers: PortalCustomer[]; earnings: { pending_paise: string; paid_paise: string }; commissions: CommissionRow[]; activity: ActivityRow[] }
+type PortalData = { customers: PortalCustomer[]; earnings: { pending_paise: string; paid_paise: string }; commissions: CommissionRow[] }
 type MonitorData = { partners: PartnerAccount[]; activity: ActivityRow[] }
 
 const ACTIVITY_LABELS: Record<string, string> = {
@@ -44,7 +44,13 @@ function useLiveSnapshot<T>(url: string, token: string, enabled: boolean) {
   return { data, error }
 }
 
-type PortalCustomer = { id: string; full_name: string; assigned_at: string; latest_report_status: string | null; paid: boolean; owner_email?: string }
+type PortalCustomer = {
+  id: string; full_name: string; assigned_at: string; application_status: string | null; customer_remark: string | null
+  application_timeline: { status: string | null; remark: string | null; created_at: string }[] | null
+}
+type AssignedCustomer = {
+  id: string; full_name: string; assigned_at: string; latest_report_status: string | null; paid: boolean; owner_email?: string
+}
 type CommissionRow = { id: string; amount_paise: number | string; status: 'pending' | 'paid'; note: string | null; created_at: string; paid_at: string | null; razorpay_payout_id?: string | null }
 type OwnerCommission = CommissionRow & { payee_email: string }
 type PartnerAccount = {
@@ -139,13 +145,62 @@ function PayoutDetailsForm({ token }: { token: string }) {
   </article>
 }
 
-export function PartnerPortal({ token, role, refreshKey }: { token: string; role: 'partner' | 'agent'; refreshKey: number }) {
+type PartnerPortalPage = 'refer' | 'applications' | 'earnings' | 'all'
+
+export function PartnerPortal({
+  token, role, refreshKey, page = 'all',
+}: { token: string; role: 'partner' | 'agent'; refreshKey: number; page?: PartnerPortalPage }) {
   const [manualData, setManualData] = useState<PortalData | null>(null)
   const [manualError, setManualError] = useState('')
+  const [creating, setCreating] = useState(false)
+  const [createError, setCreateError] = useState('')
+  const [applicationError, setApplicationError] = useState('')
+  const [resubmitRemark, setResubmitRemark] = useState<Record<string, string>>({})
+  const [busyApplicationId, setBusyApplicationId] = useState('')
   const live = useLiveSnapshot<PortalData>(`${apiUrl}/api/admin/portal/stream`, token, true)
   const data = live.data ?? manualData
   const error = live.data ? '' : (manualError || live.error)
   const label = role === 'partner' ? 'Partner' : 'Agent'
+  const statusLabel = (status: string | null) => status
+    ? status.replaceAll('_', ' ').replace(/\b\w/g, (letter) => letter.toUpperCase())
+    : 'Not submitted'
+
+  const createApplication = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    const form = event.currentTarget
+    setCreating(true)
+    setCreateError('')
+    try {
+      const response = await fetch(`${apiUrl}/api/admin/crm/applications`, {
+        method: 'POST', headers: authHeaders(token), body: new FormData(form),
+      })
+      if (!response.ok) throw new Error(await readError(response, 'Unable to submit this application.'))
+      form.reset()
+      setCreating(false)
+      setManualError('')
+    } catch (error) {
+      setCreateError(errorText(error, 'Unable to submit this application.'))
+      setCreating(false)
+    }
+  }
+
+  const resubmitApplication = async (customerId: string, form: HTMLFormElement) => {
+    const body = new FormData(form)
+    setBusyApplicationId(customerId)
+    setApplicationError('')
+    try {
+      const response = await fetch(`${apiUrl}/api/admin/crm/applications/${customerId}/resubmit`, {
+        method: 'POST', headers: authHeaders(token), body,
+      })
+      if (!response.ok) throw new Error(await readError(response, 'Unable to resubmit this application.'))
+      setResubmitRemark((current) => ({ ...current, [customerId]: '' }))
+      form.reset()
+    } catch (error) {
+      setApplicationError(errorText(error, 'Unable to resubmit this application.'))
+    } finally {
+      setBusyApplicationId('')
+    }
+  }
 
   // A manual refresh (for example after an assignment change) re-reads the portal immediately.
   useEffect(() => {
@@ -161,41 +216,91 @@ export function PartnerPortal({ token, role, refreshKey }: { token: string; role
     return () => { cancelled = true }
   }, [token, refreshKey])
 
-  const heading = <div className="admin-heading"><span>{label.toUpperCase()} PORTAL</span><h1>My customers</h1><p>Customers referred to you and the status of their credit report requests. Contact details are not shown here.</p></div>
+  const headingCopy = page === 'refer'
+    ? { eyebrow: 'REFERRALS', title: 'Refer a customer', description: "Submit a customer's credit application and required documents." }
+    : page === 'applications'
+      ? { eyebrow: 'APPLICATION TRACKING', title: 'Application progress', description: 'Follow customer-facing status updates and correction requests.' }
+      : page === 'earnings'
+        ? { eyebrow: 'PARTNER EARNINGS', title: 'Earnings', description: 'Review your commissions and manage payout details.' }
+        : { eyebrow: `${label.toUpperCase()} PORTAL`, title: 'My applications', description: "Follow each customer's application status and customer-facing updates." }
+  const heading = <div className="admin-heading"><span>{headingCopy.eyebrow}</span><h1>{headingCopy.title}</h1><p>{headingCopy.description}</p></div>
   if (!data) return <>{heading}{error ? <p className="dashboard-notice error" role="alert">{error}</p> : <p className="admin-activity-empty">Loading…</p>}</>
 
-  const completedReports = data.customers.filter((customer) => customer.latest_report_status === 'completed').length
+  const completedApplications = data.customers.filter((customer) => customer.application_status === 'approved').length
+  const showReferrals = role === 'partner' && (page === 'refer' || page === 'all')
+  const showApplications = page === 'applications' || page === 'all'
+  const showEarnings = page === 'earnings' || page === 'all'
   return <>
     {heading}
     {error && <p className="dashboard-notice error" role="alert">{error}</p>}
-    <section className="admin-activity" aria-label="Partner summary">
-      <article className="dashboard-card"><strong>{data.customers.length}</strong><small>Customers</small></article>
-      <article className="dashboard-card"><strong>{completedReports}</strong><small>Reports completed</small></article>
-      <article className="dashboard-card"><strong>{formatRupees(data.earnings.pending_paise)}</strong><small>Commission pending</small></article>
-      <article className="dashboard-card"><strong>{formatRupees(data.earnings.paid_paise)}</strong><small>Commission paid</small></article>
-    </section>
-    <article className="dashboard-card admin-activity-card">
-      <div className="dashboard-card-heading"><strong>Referred customers</strong><small>{data.customers.length} customers</small></div>
+    {showApplications && applicationError && <p className="dashboard-notice error" role="alert">{applicationError}</p>}
+    {showReferrals && <article className="dashboard-card admin-management-card">
+      <div className="dashboard-card-heading"><strong>Start a credit application</strong><small>Submit one application with the customer's details and required documents.</small></div>
+      {createError && <p className="dashboard-notice error" role="alert">{createError}</p>}
+      <form className="admin-management-form" onSubmit={(event) => void createApplication(event)}>
+        <label>Full name<input name="fullName" minLength={2} maxLength={120} required /></label>
+        <label>Mobile<input name="mobile" inputMode="numeric" pattern="[0-9]{10}" maxLength={10} required /></label>
+        <label>Email<input name="email" type="email" maxLength={254} required /></label>
+        <label>PAN<input name="pan" pattern="[A-Za-z]{5}[0-9]{4}[A-Za-z]" maxLength={10} required /></label>
+        <label>Date of birth<input name="dateOfBirth" type="date" required /></label>
+        <label>Gender<select name="gender" defaultValue="" required><option value="" disabled>Select</option><option value="female">Female</option><option value="male">Male</option><option value="other">Other</option></select></label>
+        <label>Address<input name="addressLine1" maxLength={300} required /></label>
+        <label>City<input name="city" maxLength={100} required /></label>
+        <label>State<input name="state" maxLength={100} required /></label>
+        <label>PIN code<input name="pincode" inputMode="numeric" pattern="[0-9]{6}" maxLength={6} required /></label>
+        <label>PAN document<input name="panDocument" type="file" accept=".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png" required /></label>
+        <label>Aadhaar document<input name="aadhaarDocument" type="file" accept=".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png" required /></label>
+        <label>Other documents (optional)<input name="otherDocuments" type="file" accept=".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png" multiple /></label>
+        <label>Customer-facing note<input name="customerRemark" maxLength={500} placeholder="Optional update the customer may see" /></label>
+        <label className="admin-consent"><input name="customerConsent" type="checkbox" required /><span>I confirm the customer has consented to this application and document processing.</span></label>
+        <button className="button button-primary" type="submit" disabled={creating}>{creating ? 'Submitting…' : 'Submit application'}</button>
+      </form>
+      <small className="partner-referral-help">Uploaded identity documents are available only to authorised admins. Track submitted applications under Application progress.</small>
+    </article>}
+    {showApplications && <>
+      <section className="admin-activity" aria-label="Application summary">
+        <article className="dashboard-card"><strong>{data.customers.length}</strong><small>Referred customers</small></article>
+        <article className="dashboard-card"><strong>{completedApplications}</strong><small>Applications approved</small></article>
+      </section>
+      <article className="dashboard-card admin-activity-card">
+      <div className="dashboard-card-heading"><strong>My applications</strong><small>{data.customers.length} customers</small></div>
       {data.customers.length
-        ? <div className="admin-table-wrap"><table className="admin-activity-table"><thead><tr><th>Customer</th><th>Referred on</th><th>Payment</th><th>Report</th></tr></thead><tbody>
+        ? <div className="admin-table-wrap"><table className="admin-activity-table"><thead><tr><th>Customer</th><th>Submitted</th><th>Customer-facing status</th><th>Customer-facing remark / progress</th></tr></thead><tbody>
             {data.customers.map((customer) => <tr key={customer.id}>
               <td><strong>{customer.full_name}</strong></td>
               <td>{formatDate(customer.assigned_at)}</td>
-              <td><span className={`admin-status ${customer.paid ? 'completed' : 'pending'}`}>{customer.paid ? 'paid' : 'not paid'}</span></td>
-              <td><span className={`admin-status ${reportStatusClass(customer.latest_report_status)}`}>{reportStatusLabel(customer.latest_report_status)}</span></td>
+              <td><span className={`admin-status ${customer.application_status === 'approved' ? 'completed' : customer.application_status === 'rejected' ? 'failed' : 'pending'}`}>{statusLabel(customer.application_status)}</span></td>
+              <td>
+                {customer.customer_remark || '—'}
+                {customer.application_timeline?.length ? <details><summary>Progress timeline</summary><ul className="admin-activity-list">
+                  {customer.application_timeline.map((item, index) => <li key={`${customer.id}-${index}`}>
+                    <strong>{statusLabel(item.status)}</strong> · {formatDate(item.created_at)}{item.remark ? ` · ${item.remark}` : ''}
+                  </li>)}
+                </ul></details> : null}
+                {customer.application_status === 'correction_required' && role === 'partner' && <form className="admin-inline-form" onSubmit={(event) => { event.preventDefault(); void resubmitApplication(customer.id, event.currentTarget) }}>
+                  <input name="customerRemark" value={resubmitRemark[customer.id] || ''} onChange={(event) => setResubmitRemark((current) => ({ ...current, [customer.id]: event.target.value }))} maxLength={500} placeholder="Customer-facing correction update" aria-label="Correction update" />
+                  <input name="panDocument" type="file" accept=".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png" aria-label="Corrected PAN document" />
+                  <input name="aadhaarDocument" type="file" accept=".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png" aria-label="Corrected Aadhaar document" />
+                  <input name="otherDocuments" type="file" accept=".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png" multiple aria-label="Additional correction documents" />
+                  <button className="button button-outline" type="submit" disabled={busyApplicationId === customer.id}>Resubmit</button>
+                </form>}
+              </td>
             </tr>)}
           </tbody></table></div>
         : <p className="admin-activity-empty">No customers have been referred to you yet.</p>}
-    </article>
-    <article className="dashboard-card admin-activity-card">
-      <div className="dashboard-card-heading"><strong>My commissions</strong><small>Your own earnings only</small></div>
-      <CommissionTable rows={data.commissions} showPayee={false} busy={false} />
-    </article>
-    <article className="dashboard-card admin-activity-card">
-      <div className="dashboard-card-heading"><strong>My activity</strong><small>Live · sign-ins, assignments and commissions</small></div>
-      <ActivityFeed rows={data.activity} showActor={false} />
-    </article>
-    <PayoutDetailsForm token={token} />
+      </article>
+    </>}
+    {showEarnings && <>
+      <section className="admin-activity" aria-label="Earnings summary">
+        <article className="dashboard-card"><strong>{formatRupees(data.earnings.pending_paise)}</strong><small>Commission pending</small></article>
+        <article className="dashboard-card"><strong>{formatRupees(data.earnings.paid_paise)}</strong><small>Commission paid</small></article>
+      </section>
+      <article className="dashboard-card admin-activity-card">
+        <div className="dashboard-card-heading"><strong>My commissions</strong><small>Your own earnings only</small></div>
+        <CommissionTable rows={data.commissions} showPayee={false} busy={false} />
+      </article>
+      <PayoutDetailsForm token={token} />
+    </>}
   </>
 }
 
@@ -309,7 +414,7 @@ export function PartnerManagement({ token, refreshKey }: { token: string; refres
   const [notice, setNotice] = useState<Notice | null>(null)
   const [busy, setBusy] = useState(false)
   const [reloadKey, setReloadKey] = useState(0)
-  const [detail, setDetail] = useState<{ email: string; role: 'partner' | 'agent'; customers: PortalCustomer[] } | null>(null)
+  const [detail, setDetail] = useState<{ email: string; role: 'partner' | 'agent'; customers: AssignedCustomer[] } | null>(null)
   const [searchText, setSearchText] = useState('')
   const [searchResults, setSearchResults] = useState<SearchCustomer[]>([])
   const [assignTo, setAssignTo] = useState('')
@@ -339,7 +444,7 @@ export function PartnerManagement({ token, refreshKey }: { token: string; refres
   const loadDetail = async (email: string, role: 'partner' | 'agent') => {
     const response = await fetch(`${apiUrl}/api/admin/partners/${encodeURIComponent(email)}/customers?role=${role}`, { headers: authHeaders(token) })
     if (!response.ok) throw new Error(await readError(response, 'Unable to load customers.'))
-    const result = await response.json() as { customers: PortalCustomer[] }
+    const result = await response.json() as { customers: AssignedCustomer[] }
     setDetail({ email, role, customers: result.customers })
   }
 

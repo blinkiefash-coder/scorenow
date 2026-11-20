@@ -1,10 +1,9 @@
-import { downloadReportPdf, livePdfUrl, type Bureau } from "./bureaus.js";
-import { tryGenerateCibilPdf } from "./cibilPdf.js";
+import { downloadReportPdf, livePdfUrl, reportPdfUrl, type Bureau } from "./bureaus.js";
 
 const MAX_HTML_BYTES = 15 * 1024 * 1024;
 const INLINE_HTML_KEYS = ["html", "htmlContent", "html_content", "report_html", "reportHtml"];
 
-export type BureauDocument = { pdf: Buffer | null; html: string | null };
+export type BureauDocument = { pdf: Buffer | null; html: string | null; pdfSource?: "bureau" };
 
 const isPublicHttps = (value: string) => {
   try {
@@ -90,16 +89,15 @@ export const captureBureauDocument = async (
   saveHtml?: (html: string) => Promise<void>,
 ): Promise<BureauDocument> => {
   // The bureau PDF link's signing credentials can expire within hours, so it is fetched right away too.
-  const pdfUrl = livePdfUrl(raw);
+  const pdfUrl = bureau === "cibil" ? reportPdfUrl(raw) : livePdfUrl(raw);
   const [linked, bureauPdf] = await Promise.all([
-    extractBureauLinkDocument(raw),
-    pdfUrl && pdfUrl !== htmlUrlOf(raw) ? downloadReportPdf(pdfUrl) : Promise.resolve(null),
+    bureau === "cibil" ? Promise.resolve({ pdf: null, html: null }) : extractBureauLinkDocument(raw),
+    pdfUrl && (bureau === "cibil" || pdfUrl !== htmlUrlOf(raw)) ? downloadReportPdf(pdfUrl, bureau) : Promise.resolve(null),
   ]);
   const html = linked.html;
   // Persist before the slow PDF render so a render failure cannot lose the only copy.
   if (html && saveHtml) await saveHtml(html).catch((error) => console.error("Bureau HTML save failed", error));
-  const cibilPdf = bureau === "cibil" ? await tryGenerateCibilPdf(raw) : null;
-  const pdf = cibilPdf ?? bureauPdf ?? linked.pdf ?? (html ? await htmlToPdf(html) : null);
+  const pdf = bureau === "cibil" ? bureauPdf : bureauPdf ?? linked.pdf ?? (html ? await htmlToPdf(html) : null);
   if (!pdf) console.warn(`No original PDF captured for ${bureau ?? "bureau"} report`);
-  return { pdf, html };
+  return { pdf, html, ...(bureau === "cibil" && pdf ? { pdfSource: "bureau" as const } : {}) };
 };

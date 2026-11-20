@@ -104,3 +104,6 @@ export function useSiteContent(): SiteContent | null {
   }, [])
   return content
 }
+
+// Uploaded testimonial photos are served by the API as relative paths.
+export const testimonialPhotoSrc = (url: string | null | undefined) => (url ? (url.startsWith('/') ? `${apiUrl}${url}` : url) : null)

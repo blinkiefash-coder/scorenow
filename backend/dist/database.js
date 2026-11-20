@@ -63,8 +63,10 @@ export const initializeDatabase = async () => {
     await pool.query(`ALTER TABLE credit_reports ADD COLUMN IF NOT EXISTS normalized_report JSONB`);
     await pool.query(`ALTER TABLE credit_report_requests ADD COLUMN IF NOT EXISTS provider_response JSONB`);
     await pool.query(`ALTER TABLE credit_reports ADD COLUMN IF NOT EXISTS report_pdf BYTEA`);
+    await pool.query(`ALTER TABLE credit_reports ADD COLUMN IF NOT EXISTS report_pdf_source TEXT`);
     await pool.query(`ALTER TABLE credit_reports ADD COLUMN IF NOT EXISTS report_html TEXT`);
     await pool.query(`ALTER TABLE admin_report_audit ADD COLUMN IF NOT EXISTS report_pdf BYTEA`);
+    await pool.query(`ALTER TABLE admin_report_audit ADD COLUMN IF NOT EXISTS report_pdf_source TEXT`);
     await pool.query(`ALTER TABLE admin_report_audit ADD COLUMN IF NOT EXISTS report_html TEXT`);
     await pool.query(`
     CREATE TABLE IF NOT EXISTS admin_sessions (
@@ -126,7 +128,7 @@ export const initializeDatabase = async () => {
     await pool.query(`ALTER TABLE admin_accounts ADD COLUMN IF NOT EXISTS parent_email TEXT`);
     await pool.query(`ALTER TABLE admin_accounts ADD COLUMN IF NOT EXISTS is_primary BOOLEAN NOT NULL DEFAULT FALSE`);
     await pool.query(`ALTER TABLE admin_accounts DROP CONSTRAINT IF EXISTS admin_accounts_role_check`);
-    await pool.query(`ALTER TABLE admin_accounts ADD CONSTRAINT admin_accounts_role_check CHECK (role IN ('manager', 'support', 'analyst', 'partner', 'agent'))`);
+    await pool.query(`ALTER TABLE admin_accounts ADD CONSTRAINT admin_accounts_role_check CHECK (role IN ('owner', 'manager', 'support', 'analyst', 'partner', 'agent'))`);
     await pool.query(`
     CREATE TABLE IF NOT EXISTS customer_assignments (
       user_id UUID PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
@@ -146,10 +148,27 @@ export const initializeDatabase = async () => {
       note TEXT,
       created_by TEXT NOT NULL,
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-      paid_at TIMESTAMPTZ
+      paid_at TIMESTAMPTZ,
+      source TEXT NOT NULL DEFAULT 'manual'
     )
   `);
+    await pool.query(`ALTER TABLE partner_commissions ADD COLUMN IF NOT EXISTS source TEXT NOT NULL DEFAULT 'manual'`);
+    await pool.query(`
+    DO $$ BEGIN
+      IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint
+        WHERE conname = 'partner_commissions_source_check' AND conrelid = 'partner_commissions'::regclass
+      ) THEN
+        ALTER TABLE partner_commissions ADD CONSTRAINT partner_commissions_source_check
+        CHECK (source IN ('manual', 'case_closure'));
+      END IF;
+    END $$
+  `);
     await pool.query(`CREATE INDEX IF NOT EXISTS partner_commissions_payee_idx ON partner_commissions (payee_email)`);
+    await pool.query(`
+    CREATE UNIQUE INDEX IF NOT EXISTS partner_commissions_case_closure_user_idx
+    ON partner_commissions (user_id) WHERE source = 'case_closure' AND user_id IS NOT NULL
+  `);
     await pool.query(`ALTER TABLE partner_commissions ADD COLUMN IF NOT EXISTS razorpay_payout_id TEXT`);
     await pool.query(`
     CREATE TABLE IF NOT EXISTS partner_payout_profiles (
@@ -237,10 +256,22 @@ export const initializeDatabase = async () => {
       user_id UUID PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
       stage TEXT NOT NULL DEFAULT 'new' CHECK (stage IN ('new', 'contacted', 'interested', 'paid', 'closed')),
       tags TEXT[] NOT NULL DEFAULT '{}',
+      application_status TEXT,
+      assigned_admin_email TEXT,
+      customer_remark TEXT,
+      application_submitted_at TIMESTAMPTZ,
+      customer_consent_at TIMESTAMPTZ,
+      customer_consent_by TEXT,
       updated_by TEXT,
       updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )
   `);
+    await pool.query(`ALTER TABLE crm_customer_profiles ADD COLUMN IF NOT EXISTS application_status TEXT`);
+    await pool.query(`ALTER TABLE crm_customer_profiles ADD COLUMN IF NOT EXISTS assigned_admin_email TEXT`);
+    await pool.query(`ALTER TABLE crm_customer_profiles ADD COLUMN IF NOT EXISTS customer_remark TEXT`);
+    await pool.query(`ALTER TABLE crm_customer_profiles ADD COLUMN IF NOT EXISTS application_submitted_at TIMESTAMPTZ`);
+    await pool.query(`ALTER TABLE crm_customer_profiles ADD COLUMN IF NOT EXISTS customer_consent_at TIMESTAMPTZ`);
+    await pool.query(`ALTER TABLE crm_customer_profiles ADD COLUMN IF NOT EXISTS customer_consent_by TEXT`);
     await pool.query(`
     CREATE TABLE IF NOT EXISTS crm_activities (
       id BIGSERIAL PRIMARY KEY,
@@ -260,12 +291,49 @@ export const initializeDatabase = async () => {
       due_at TIMESTAMPTZ,
       assignee_email TEXT,
       status TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'done')),
+      task_kind TEXT NOT NULL DEFAULT 'follow_up',
+      review_status TEXT NOT NULL DEFAULT 'not_required',
+      review_remark TEXT,
+      result TEXT,
       created_by TEXT NOT NULL,
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       completed_at TIMESTAMPTZ
     )
   `);
+    await pool.query(`ALTER TABLE crm_tasks ADD COLUMN IF NOT EXISTS task_kind TEXT NOT NULL DEFAULT 'follow_up'`);
+    await pool.query(`ALTER TABLE crm_tasks ADD COLUMN IF NOT EXISTS review_status TEXT NOT NULL DEFAULT 'not_required'`);
+    await pool.query(`ALTER TABLE crm_tasks ADD COLUMN IF NOT EXISTS review_remark TEXT`);
+    await pool.query(`ALTER TABLE crm_tasks ADD COLUMN IF NOT EXISTS result TEXT`);
     await pool.query(`CREATE INDEX IF NOT EXISTS crm_tasks_open_due_idx ON crm_tasks (status, due_at)`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS crm_tasks_assignee_idx ON crm_tasks (assignee_email, review_status)`);
+    await pool.query(`
+    CREATE TABLE IF NOT EXISTS crm_application_events (
+      id BIGSERIAL PRIMARY KEY,
+      user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      event_type TEXT NOT NULL,
+      application_status TEXT,
+      visibility TEXT NOT NULL CHECK (visibility IN ('customer', 'internal')),
+      remark TEXT,
+      actor_email TEXT NOT NULL,
+      actor_role TEXT NOT NULL,
+      details JSONB NOT NULL DEFAULT '{}'::jsonb,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+    await pool.query(`CREATE INDEX IF NOT EXISTS crm_application_events_user_idx ON crm_application_events (user_id, created_at DESC)`);
+    await pool.query(`
+    CREATE TABLE IF NOT EXISTS crm_application_documents (
+      id BIGSERIAL PRIMARY KEY,
+      user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      document_type TEXT NOT NULL CHECK (document_type IN ('pan', 'aadhaar', 'other')),
+      file_name TEXT NOT NULL,
+      mime_type TEXT NOT NULL,
+      content BYTEA NOT NULL,
+      uploaded_by TEXT NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+    await pool.query(`CREATE INDEX IF NOT EXISTS crm_application_documents_user_idx ON crm_application_documents (user_id, created_at DESC)`);
     await pool.query(`
     CREATE TABLE IF NOT EXISTS health_assessment_requests (
       id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -361,6 +429,22 @@ export const initializeDatabase = async () => {
     )
   `);
     await pool.query(`CREATE INDEX IF NOT EXISTS testimonials_published_idx ON testimonials (published, published_at DESC)`);
+    await pool.query(`ALTER TABLE testimonials ADD COLUMN IF NOT EXISTS photo_data BYTEA`);
+    await pool.query(`ALTER TABLE testimonials ADD COLUMN IF NOT EXISTS photo_mime TEXT`);
+    await pool.query(`ALTER TABLE testimonials ADD COLUMN IF NOT EXISTS consent_obtained BOOLEAN NOT NULL DEFAULT FALSE`);
+    await pool.query(`ALTER TABLE testimonials ADD COLUMN IF NOT EXISTS consent_note TEXT`);
+    await pool.query(`ALTER TABLE testimonials ADD COLUMN IF NOT EXISTS consent_recorded_at TIMESTAMPTZ`);
+    await pool.query(`ALTER TABLE testimonials ADD COLUMN IF NOT EXISTS consent_recorded_by TEXT`);
+    await pool.query(`ALTER TABLE testimonials ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()`);
+    // Entries published before consent tracking existed are withdrawn until consent is recorded.
+    await pool.query(`UPDATE testimonials SET published = FALSE, published_at = NULL WHERE published AND NOT consent_obtained`);
+    await pool.query(`
+    DO $$ BEGIN
+      IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'testimonials_publish_requires_consent') THEN
+        ALTER TABLE testimonials ADD CONSTRAINT testimonials_publish_requires_consent CHECK (NOT published OR consent_obtained);
+      END IF;
+    END $$
+  `);
     await pool.query(`
     CREATE TABLE IF NOT EXISTS neha_messages (
       id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -429,11 +513,17 @@ export const createSession = async ({ userId, ipAddress, userAgent }) => {
 export const findSessionUser = async (token) => {
     if (!/^[0-9a-f]{64}$/.test(token))
         return null;
-    const { rows } = await pool.query(`SELECT u.id, u.mobile, u.email, u.full_name
+    const { rows } = await pool.query(`SELECT u.id, u.mobile, u.email, COALESCE(NULLIF(TRIM(k.name_as_per_pan), ''), u.full_name) AS full_name
      FROM user_sessions s JOIN users u ON u.id = s.user_id
+     LEFT JOIN kyc_profiles k ON k.user_id = u.id
      WHERE s.token_hash = $1 AND s.revoked_at IS NULL AND s.expires_at > NOW()
        AND u.status = 'active' AND u.role = 'customer'`, [hashToken(token)]);
     return rows[0] ?? null;
+};
+// Customer-facing name: the PAN-verified KYC name when available, otherwise the account name.
+export const withVerifiedName = async (user) => {
+    const { rows } = await pool.query(`SELECT name_as_per_pan FROM kyc_profiles WHERE user_id = $1 AND NULLIF(TRIM(name_as_per_pan), '') IS NOT NULL`, [user.id]);
+    return rows[0] ? { ...user, full_name: rows[0].name_as_per_pan.trim() } : user;
 };
 export const revokeSession = async (token) => {
     await pool.query(`UPDATE user_sessions SET revoked_at = NOW() WHERE token_hash = $1 AND revoked_at IS NULL`, [hashToken(token)]);
@@ -617,12 +707,18 @@ const portalOwnerScope = (role) => role === "partner"
 export const getPortalCustomers = async (email, role) => {
     const { rows } = await pool.query(`
     SELECT u.id, ${CUSTOMER_DISPLAY_NAME} AS full_name, ca.owner_email, ca.created_at AS assigned_at, u.created_at,
+      p.application_status, p.customer_remark,
+      (SELECT json_agg(json_build_object(
+          'status', e.application_status, 'remark', e.remark, 'created_at', e.created_at
+        ) ORDER BY e.created_at ASC)
+       FROM crm_application_events e WHERE e.user_id = u.id AND e.visibility = 'customer') AS application_timeline,
       (SELECT r.status FROM credit_report_requests r WHERE r.user_id = u.id AND r.payment_id IS NOT NULL
        ORDER BY r.requested_at DESC LIMIT 1) AS latest_report_status,
       EXISTS (SELECT 1 FROM payments p WHERE p.user_id = u.id AND p.status = 'paid') AS paid
     FROM customer_assignments ca
     JOIN users u ON u.id = ca.user_id
     LEFT JOIN kyc_profiles k ON k.user_id = u.id
+    LEFT JOIN crm_customer_profiles p ON p.user_id = u.id
     WHERE ${portalOwnerScope(role)}
     ORDER BY ca.created_at DESC
     LIMIT 200
@@ -688,15 +784,49 @@ export const markCommissionsPaidWithPayout = async (ids, payoutId) => {
      WHERE id = ANY($1::uuid[]) AND status = 'pending'`, [ids, payoutId]);
 };
 export const assignCustomerToOwner = async ({ userId, ownerEmail, assignedBy }) => {
-    const { rowCount } = await pool.query(`INSERT INTO customer_assignments (user_id, owner_email, assigned_by)
-     SELECT u.id, a.email, $3 FROM users u, admin_accounts a
-     WHERE u.id = $1 AND u.role = 'customer' AND a.email = $2 AND a.role IN ('partner', 'agent') AND a.status = 'active'
-     ON CONFLICT (user_id) DO UPDATE SET owner_email = EXCLUDED.owner_email, assigned_by = EXCLUDED.assigned_by, created_at = NOW()`, [userId, ownerEmail.toLowerCase(), assignedBy]);
-    return (rowCount ?? 0) > 0;
+    const client = await pool.connect();
+    try {
+        await client.query("BEGIN");
+        const customer = await client.query(`SELECT id FROM users WHERE id = $1 AND role = 'customer' FOR UPDATE`, [userId]);
+        if (!customer.rows[0]) {
+            await client.query("ROLLBACK");
+            return false;
+        }
+        const { rowCount } = await client.query(`INSERT INTO customer_assignments (user_id, owner_email, assigned_by)
+       SELECT $1, a.email, $3 FROM admin_accounts a
+       WHERE a.email = $2 AND a.role IN ('partner', 'agent') AND a.status = 'active'
+       ON CONFLICT (user_id) DO UPDATE SET owner_email = EXCLUDED.owner_email, assigned_by = EXCLUDED.assigned_by, created_at = NOW()`, [userId, ownerEmail.toLowerCase(), assignedBy]);
+        await client.query("COMMIT");
+        return (rowCount ?? 0) > 0;
+    }
+    catch (error) {
+        await client.query("ROLLBACK");
+        throw error;
+    }
+    finally {
+        client.release();
+    }
 };
 export const unassignCustomer = async (userId) => {
-    const { rowCount } = await pool.query(`DELETE FROM customer_assignments WHERE user_id = $1`, [userId]);
-    return (rowCount ?? 0) > 0;
+    const client = await pool.connect();
+    try {
+        await client.query("BEGIN");
+        const customer = await client.query(`SELECT id FROM users WHERE id = $1 FOR UPDATE`, [userId]);
+        if (!customer.rows[0]) {
+            await client.query("ROLLBACK");
+            return false;
+        }
+        const { rowCount } = await client.query(`DELETE FROM customer_assignments WHERE user_id = $1`, [userId]);
+        await client.query("COMMIT");
+        return (rowCount ?? 0) > 0;
+    }
+    catch (error) {
+        await client.query("ROLLBACK");
+        throw error;
+    }
+    finally {
+        client.release();
+    }
 };
 export const createAdminReportAudit = async ({ adminId, bureau, panLast4, mobileLast4, consentIpAddress, applicant, }) => {
     const { rows } = await pool.query(`INSERT INTO admin_report_audit
@@ -714,7 +844,7 @@ export const completeAdminReportAudit = async ({ auditId, status, providerTransa
         normalizedReport == null ? null : JSON.stringify(normalizedReport)]);
 };
 export const getAdminReportDocument = async (auditId) => {
-    const { rows } = await pool.query(`SELECT id, bureau, to_char(COALESCE(completed_at, created_at), 'YYYY-MM-DD') AS report_date, normalized_report, report_pdf, report_html,
+    const { rows } = await pool.query(`SELECT id, bureau, to_char(COALESCE(completed_at, created_at), 'YYYY-MM-DD') AS report_date, normalized_report, report_pdf, report_pdf_source, report_html,
             CASE WHEN report_pdf IS NULL OR bureau = 'cibil' THEN provider_response END AS provider_response
      FROM admin_report_audit
      WHERE id = $1 AND status = 'completed' AND normalized_report IS NOT NULL`, [auditId]);
@@ -725,6 +855,7 @@ export const getAdminReportDocument = async (auditId) => {
         reportDate: row.report_date,
         report: row.normalized_report,
         pdf: row.report_pdf,
+        pdfSource: row.report_pdf_source,
         html: row.report_html,
         raw: row.provider_response,
     } : null;
@@ -1335,6 +1466,19 @@ const encryptPan = (pan) => {
     const encrypted = Buffer.concat([cipher.update(pan, "utf8"), cipher.final()]);
     return Buffer.concat([iv, cipher.getAuthTag(), encrypted]);
 };
+const encryptKycDocument = (content) => {
+    const iv = randomBytes(12);
+    const cipher = createCipheriv("aes-256-gcm", kycKey(), iv);
+    const encrypted = Buffer.concat([cipher.update(content), cipher.final()]);
+    return Buffer.concat([iv, cipher.getAuthTag(), encrypted]);
+};
+const decryptKycDocument = (payload) => {
+    if (payload.length < 28)
+        throw new Error("Stored application document is invalid.");
+    const decipher = createDecipheriv("aes-256-gcm", kycKey(), payload.subarray(0, 12));
+    decipher.setAuthTag(payload.subarray(12, 28));
+    return Buffer.concat([decipher.update(payload.subarray(28)), decipher.final()]);
+};
 const decryptPan = (payload) => {
     const decipher = createDecipheriv("aes-256-gcm", kycKey(), payload.subarray(0, 12));
     decipher.setAuthTag(payload.subarray(12, 28));
@@ -1560,7 +1704,7 @@ export const getReportDetail = async (userId, requestId) => {
     };
 };
 export const getReportPdf = async (userId, requestId) => {
-    const { rows } = await pool.query(`SELECT c.request_id, c.user_id, c.bureau, to_char(c.report_date, 'YYYY-MM-DD') AS report_date, c.report_pdf, c.report_html,
+    const { rows } = await pool.query(`SELECT c.request_id, c.user_id, c.bureau, to_char(c.report_date, 'YYYY-MM-DD') AS report_date, c.report_pdf, c.report_pdf_source, c.report_html,
             c.raw_report, c.normalized_report
      FROM credit_reports c JOIN credit_report_requests r ON r.id = c.request_id
      WHERE c.request_id::text = $1 AND ($2::text IS NULL OR c.user_id::text = $2) AND ${VISIBLE_REQUEST}`, [requestId, userId]);
@@ -1578,19 +1722,22 @@ export const getReportPdf = async (userId, requestId) => {
         bureau: row.bureau,
         reportDate: row.report_date,
         pdf: row.report_pdf,
+        pdfSource: row.report_pdf_source,
         html: row.report_html,
         raw: row.report_pdf && row.bureau !== "cibil" ? null : row.raw_report,
         report,
     };
 };
-export const saveReportPdf = async (requestId, pdf) => {
-    await pool.query(`UPDATE credit_reports SET report_pdf = $2 WHERE request_id = $1`, [requestId, pdf]);
+export const saveReportPdf = async (requestId, pdf, pdfSource) => {
+    await pool.query(`UPDATE credit_reports SET report_pdf = $2, report_pdf_source = COALESCE($3, report_pdf_source) WHERE request_id = $1`, [requestId, pdf, pdfSource ?? null]);
 };
 export const saveReportDocument = async (requestId, document) => {
-    await pool.query(`UPDATE credit_reports SET report_pdf = COALESCE($2, report_pdf), report_html = COALESCE($3, report_html) WHERE request_id = $1`, [requestId, document.pdf, document.html]);
+    await pool.query(`UPDATE credit_reports SET report_pdf = COALESCE($2, report_pdf), report_pdf_source = COALESCE($4, report_pdf_source),
+       report_html = COALESCE($3, report_html) WHERE request_id = $1`, [requestId, document.pdf, document.html, document.pdfSource ?? null]);
 };
 export const saveAdminReportDocument = async (auditId, document) => {
-    await pool.query(`UPDATE admin_report_audit SET report_pdf = COALESCE($2, report_pdf), report_html = COALESCE($3, report_html) WHERE id = $1`, [auditId, document.pdf, document.html]);
+    await pool.query(`UPDATE admin_report_audit SET report_pdf = COALESCE($2, report_pdf), report_pdf_source = COALESCE($4, report_pdf_source),
+       report_html = COALESCE($3, report_html) WHERE id = $1`, [auditId, document.pdf, document.html, document.pdfSource ?? null]);
 };
 export const saveKycProfile = async ({ userId, nameAsPerPan, pan, dateOfBirth, gender, addressLine1, city, state, pincode, }) => {
     const normalizedPan = pan.toUpperCase().replace(/\s/g, "");
@@ -1836,6 +1983,12 @@ export const getUserSubscriptions = async (userId) => {
 };
 export const CRM_STAGES = ["new", "contacted", "interested", "paid", "closed"];
 export const CRM_ACTIVITY_KINDS = ["note", "call", "whatsapp", "email"];
+export const CRM_APPLICATION_STATUSES = [
+    "submitted", "under_review", "correction_required", "approved_for_processing", "verification_assigned",
+    "verification_in_progress", "verification_completed", "final_review", "approved", "rejected",
+];
+export class CrmApplicationConflict extends Error {
+}
 const crmCustomerFrom = `
   FROM users u
   LEFT JOIN kyc_profiles k ON k.user_id = u.id
@@ -1881,9 +2034,25 @@ export const getCrmPipeline = async () => {
         counts[row.stage] = Number(row.count);
     return counts;
 };
-export const getCrmTimeline = async (userId) => {
+export const getCrmTimeline = async (userId, includeCommission = false) => {
     const [profile, activities, payments, reports, tasks] = await Promise.all([
-        pool.query(`SELECT stage, tags, updated_by, updated_at FROM crm_customer_profiles WHERE user_id = $1`, [userId]),
+        pool.query(`SELECT COALESCE(p.stage, 'new') AS stage, COALESCE(p.tags, '{}') AS tags, p.updated_by, p.updated_at,
+              CASE WHEN assigned.role = 'partner' THEN assigned.email
+                   WHEN assigned.role = 'agent' AND parent.role = 'partner' THEN parent.email END AS partner_email,
+              closed_commission.amount_paise AS commission_amount_paise,
+              closed_commission.created_at AS commission_awarded_at,
+              closed_commission.status AS commission_status
+       FROM users u
+       LEFT JOIN crm_customer_profiles p ON p.user_id = u.id
+       LEFT JOIN customer_assignments ca ON ca.user_id = u.id
+       LEFT JOIN admin_accounts assigned ON assigned.email = ca.owner_email
+       LEFT JOIN admin_accounts parent ON parent.email = assigned.parent_email
+       LEFT JOIN LATERAL (
+         SELECT amount_paise, created_at, status FROM partner_commissions
+         WHERE user_id = u.id AND source = 'case_closure'
+         ORDER BY created_at DESC LIMIT 1
+       ) closed_commission ON $2::boolean
+       WHERE u.id = $1`, [userId, includeCommission]),
         pool.query(`SELECT id, kind, body, created_by, created_at FROM crm_activities WHERE user_id = $1 ORDER BY created_at DESC LIMIT 100`, [userId]),
         pool.query(`SELECT id, plan_name, amount, status, failure_reason, created_at FROM payments WHERE user_id = $1 ORDER BY created_at DESC LIMIT 20`, [userId]),
         pool.query(`SELECT id, bureau, status, requested_at FROM credit_report_requests
@@ -1892,7 +2061,10 @@ export const getCrmTimeline = async (userId) => {
        FROM crm_tasks WHERE user_id = $1 ORDER BY status ASC, due_at ASC NULLS LAST, created_at DESC LIMIT 100`, [userId]),
     ]);
     return {
-        profile: profile.rows[0] ?? { stage: "new", tags: [], updated_by: null, updated_at: null },
+        profile: profile.rows[0] ?? {
+            stage: "new", tags: [], updated_by: null, updated_at: null,
+            partner_email: null, commission_amount_paise: null, commission_awarded_at: null, commission_status: null,
+        },
         activities: activities.rows,
         payments: payments.rows,
         reports: reports.rows,
@@ -1908,6 +2080,59 @@ export const updateCrmProfile = async (userId, changes, adminId) => {
        updated_by = $4,
        updated_at = NOW()`, [userId, changes.stage ?? null, changes.tags ?? null, adminId]);
 };
+export const closeCrmCustomerCase = async ({ userId, adminId, commissionAmountPaise, tags, }) => {
+    const client = await pool.connect();
+    try {
+        await client.query("BEGIN");
+        const user = await client.query(`SELECT id, full_name FROM users WHERE id = $1 FOR UPDATE`, [userId]);
+        if (!user.rows[0]) {
+            await client.query("ROLLBACK");
+            return null;
+        }
+        const assignment = await client.query(`SELECT owner_email FROM customer_assignments WHERE user_id = $1 FOR UPDATE`, [userId]);
+        let partnerEmail = null;
+        if (assignment.rows[0]) {
+            const partner = await client.query(`SELECT CASE WHEN assigned.role = 'partner' THEN assigned.email
+                     WHEN assigned.role = 'agent' AND parent.role = 'partner' THEN parent.email END AS email
+         FROM admin_accounts assigned
+         LEFT JOIN admin_accounts parent ON parent.email = assigned.parent_email
+         WHERE assigned.email = $1`, [assignment.rows[0].owner_email]);
+            partnerEmail = partner.rows[0]?.email ?? null;
+        }
+        if (partnerEmail && commissionAmountPaise === null) {
+            throw new CrmApplicationConflict("Set the partner commission amount before closing this case.");
+        }
+        if (!partnerEmail && commissionAmountPaise !== null) {
+            throw new CrmApplicationConflict("This customer is not assigned to a partner.");
+        }
+        if (partnerEmail) {
+            const existing = await client.query(`SELECT id FROM partner_commissions WHERE user_id = $1 AND source = 'case_closure' FOR UPDATE`, [userId]);
+            if (existing.rows[0])
+                throw new CrmApplicationConflict("A closure commission has already been awarded for this case.");
+        }
+        await client.query(`INSERT INTO crm_customer_profiles (user_id, stage, tags, updated_by, updated_at)
+       VALUES ($1, 'closed', COALESCE($3::text[], '{}'), $2, NOW())
+       ON CONFLICT (user_id) DO UPDATE SET
+         stage = 'closed', tags = COALESCE($3::text[], crm_customer_profiles.tags),
+         updated_by = $2, updated_at = NOW()`, [userId, adminId.toLowerCase(), tags ?? null]);
+        let commissionId = null;
+        if (partnerEmail && commissionAmountPaise !== null) {
+            const commission = await client.query(`INSERT INTO partner_commissions (payee_email, user_id, amount_paise, note, created_by, source)
+         VALUES ($1, $2, $3, $4, $5, 'case_closure')
+         RETURNING id`, [partnerEmail, userId, commissionAmountPaise, `Closed-case commission - ${user.rows[0].full_name.slice(0, 200)}`, adminId.toLowerCase()]);
+            commissionId = commission.rows[0].id;
+        }
+        await client.query("COMMIT");
+        return { partnerEmail, amountPaise: commissionAmountPaise, commissionId };
+    }
+    catch (error) {
+        await client.query("ROLLBACK");
+        throw error;
+    }
+    finally {
+        client.release();
+    }
+};
 export const addCrmActivity = async ({ userId, kind, body, createdBy, }) => {
     const { rows } = await pool.query(`INSERT INTO crm_activities (user_id, kind, body, created_by) VALUES ($1, $2, $3, $4)
      RETURNING id, kind, body, created_by, created_at`, [userId, kind, body, createdBy]);
@@ -1918,6 +2143,374 @@ export const createCrmTask = async ({ userId, title, dueAt, assigneeEmail, creat
      VALUES ($1, $2, $3, $4, $5)
      RETURNING id, title, due_at, assignee_email, status, created_by, created_at, completed_at`, [userId, title, dueAt, assigneeEmail, createdBy]);
     return rows[0];
+};
+export const createCrmApplication = async ({ partnerEmail, fullName, mobile, email, pan, dateOfBirth, gender, addressLine1, city, state, pincode, customerRemark, documents, }) => {
+    const client = await pool.connect();
+    try {
+        await client.query("BEGIN");
+        const partner = await client.query(`SELECT email FROM admin_accounts WHERE email = $1 AND role = 'partner' AND status = 'active' FOR SHARE`, [partnerEmail.toLowerCase()]);
+        if (!partner.rows[0])
+            throw new CrmApplicationConflict("An active partner account is required to submit an application.");
+        const matches = await client.query(`SELECT id, mobile, email, role, status FROM users
+       WHERE mobile = $1 OR LOWER(email) = $2
+       ORDER BY CASE WHEN mobile = $1 THEN 0 ELSE 1 END
+       FOR UPDATE`, [mobile, email.toLowerCase()]);
+        if (matches.rows.length > 1) {
+            throw new CrmApplicationConflict("The mobile number and email belong to different customer accounts.");
+        }
+        let userId;
+        if (matches.rows[0]) {
+            const existing = matches.rows[0];
+            if (existing.role !== "customer" || existing.status !== "active" ||
+                existing.mobile !== mobile || (existing.email && existing.email.toLowerCase() !== email.toLowerCase())) {
+                throw new CrmApplicationConflict("A customer account already exists with different contact details.");
+            }
+            userId = existing.id;
+            const assignment = await client.query(`SELECT owner_email FROM customer_assignments WHERE user_id = $1 FOR UPDATE`, [userId]);
+            if (assignment.rows[0] && assignment.rows[0].owner_email !== partnerEmail.toLowerCase()) {
+                throw new CrmApplicationConflict("This customer is already assigned to another partner.");
+            }
+            const application = await client.query(`SELECT application_status FROM crm_customer_profiles WHERE user_id = $1 FOR UPDATE`, [userId]);
+            if (application.rows[0]?.application_status) {
+                throw new CrmApplicationConflict("An application already exists for this customer.");
+            }
+            if (!existing.email) {
+                await client.query(`UPDATE users SET email = $2, full_name = $3, updated_at = NOW() WHERE id = $1`, [userId, email.toLowerCase(), fullName]);
+            }
+        }
+        else {
+            const created = await client.query(`INSERT INTO users (mobile, email, full_name, mobile_verified)
+         VALUES ($1, $2, $3, FALSE) RETURNING id`, [mobile, email.toLowerCase(), fullName]);
+            userId = created.rows[0].id;
+        }
+        const normalizedPan = pan.toUpperCase().replace(/\s/g, "");
+        const panHash = createHash("sha256").update(normalizedPan).digest("hex");
+        const normalizedGender = ["female", "male", "other"].includes(gender.toLowerCase()) ? gender.toLowerCase() : null;
+        await client.query(`INSERT INTO kyc_profiles
+        (user_id, name_as_per_pan, pan_encrypted, pan_hash, pan_last4, date_of_birth, gender, address_line1, city, state, pincode, kyc_status, verification_provider)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 'pending', 'application')
+       ON CONFLICT (user_id) DO UPDATE SET
+         name_as_per_pan = EXCLUDED.name_as_per_pan, pan_encrypted = EXCLUDED.pan_encrypted, pan_hash = EXCLUDED.pan_hash,
+         pan_last4 = EXCLUDED.pan_last4, date_of_birth = EXCLUDED.date_of_birth, gender = EXCLUDED.gender,
+         address_line1 = EXCLUDED.address_line1, city = EXCLUDED.city, state = EXCLUDED.state, pincode = EXCLUDED.pincode,
+         updated_at = NOW()`, [userId, fullName, encryptPan(normalizedPan), panHash, normalizedPan.slice(-4), dateOfBirth, normalizedGender, addressLine1, city, state, pincode]);
+        await client.query(`INSERT INTO customer_assignments (user_id, owner_email, assigned_by)
+       VALUES ($1, $2, $2)
+       ON CONFLICT (user_id) DO UPDATE SET owner_email = EXCLUDED.owner_email, assigned_by = EXCLUDED.assigned_by, created_at = NOW()`, [userId, partnerEmail.toLowerCase()]);
+        const savedProfile = await client.query(`INSERT INTO crm_customer_profiles
+        (user_id, application_status, customer_remark, application_submitted_at, customer_consent_at, customer_consent_by, updated_by, updated_at)
+       VALUES ($1, 'submitted', $2, NOW(), NOW(), $3, $3, NOW())
+       ON CONFLICT (user_id) DO UPDATE SET
+         application_status = 'submitted', customer_remark = EXCLUDED.customer_remark,
+         assigned_admin_email = NULL, application_submitted_at = NOW(), customer_consent_at = NOW(),
+         customer_consent_by = EXCLUDED.customer_consent_by, updated_by = EXCLUDED.updated_by, updated_at = NOW()
+       WHERE crm_customer_profiles.application_status IS NULL
+       RETURNING user_id`, [userId, customerRemark, partnerEmail.toLowerCase()]);
+        if (!savedProfile.rows[0])
+            throw new CrmApplicationConflict("An application already exists for this customer.");
+        for (const document of documents) {
+            await client.query(`INSERT INTO crm_application_documents (user_id, document_type, file_name, mime_type, content, uploaded_by)
+         VALUES ($1, $2, $3, $4, $5, $6)`, [userId, document.documentType, document.fileName, document.mimeType, encryptKycDocument(document.content), partnerEmail.toLowerCase()]);
+        }
+        await client.query(`INSERT INTO crm_application_events (user_id, event_type, application_status, visibility, remark, actor_email, actor_role)
+       VALUES ($1, 'submitted', 'submitted', 'customer', $2, $3, 'partner')`, [userId, customerRemark || "Application submitted for review.", partnerEmail.toLowerCase()]);
+        await client.query("COMMIT");
+        return { userId, applicationStatus: "submitted" };
+    }
+    catch (error) {
+        await client.query("ROLLBACK");
+        throw error;
+    }
+    finally {
+        client.release();
+    }
+};
+export const listCrmApplications = async (email, role) => {
+    const { rows } = await pool.query(`SELECT u.id, ${CUSTOMER_DISPLAY_NAME} AS full_name, u.email, u.mobile,
+            p.application_status, p.customer_remark, p.assigned_admin_email, p.application_submitted_at,
+            ca.owner_email AS partner_email, p.updated_at,
+            (SELECT COUNT(*) FROM crm_tasks t WHERE t.user_id = u.id AND t.task_kind = 'verification'
+              AND t.review_status <> 'approved') AS open_verifications
+     FROM crm_customer_profiles p
+     JOIN users u ON u.id = p.user_id
+     LEFT JOIN kyc_profiles k ON k.user_id = u.id
+     LEFT JOIN customer_assignments ca ON ca.user_id = u.id
+     WHERE p.application_status IS NOT NULL AND ($1 = 'owner' OR p.assigned_admin_email = $2)
+     ORDER BY p.updated_at DESC`, [role, email.toLowerCase()]);
+    return rows;
+};
+export const getCrmApplicationDetail = async (userId, email, role) => {
+    const { rows } = await pool.query(`SELECT u.id, ${CUSTOMER_DISPLAY_NAME} AS full_name, u.email, u.mobile,
+            to_char(k.date_of_birth, 'YYYY-MM-DD') AS date_of_birth, k.gender, k.pan_last4,
+            k.address_line1, k.city, k.state, k.pincode,
+            p.application_status, p.customer_remark, p.assigned_admin_email, p.application_submitted_at,
+            ca.owner_email AS partner_email
+     FROM crm_customer_profiles p
+     JOIN users u ON u.id = p.user_id
+     LEFT JOIN kyc_profiles k ON k.user_id = u.id
+     LEFT JOIN customer_assignments ca ON ca.user_id = u.id
+     WHERE u.id = $1 AND p.application_status IS NOT NULL AND ($2 = 'owner' OR p.assigned_admin_email = $3)`, [userId, role, email.toLowerCase()]);
+    if (!rows[0])
+        return null;
+    const [tasks, events, documents] = await Promise.all([
+        pool.query(`SELECT id, title, due_at, assignee_email, status, task_kind, review_status, review_remark, result, created_by, created_at, completed_at
+       FROM crm_tasks WHERE user_id = $1 ORDER BY created_at DESC LIMIT 100`, [userId]),
+        pool.query(`SELECT id, event_type, application_status, visibility, remark, actor_email, actor_role, details, created_at
+       FROM crm_application_events WHERE user_id = $1 ORDER BY created_at DESC LIMIT 100`, [userId]),
+        listCrmApplicationDocuments(userId),
+    ]);
+    return { application: rows[0], tasks: tasks.rows, events: events.rows, documents };
+};
+export const listCrmApplicationDocuments = async (userId) => {
+    const { rows } = await pool.query(`SELECT id, document_type, file_name, mime_type, octet_length(content) AS size, uploaded_by, created_at
+     FROM crm_application_documents WHERE user_id = $1 ORDER BY created_at DESC`, [userId]);
+    return rows;
+};
+export const getCrmApplicationDocument = async (userId, documentId, email, role) => {
+    const { rows } = await pool.query(`SELECT d.file_name, d.mime_type, d.content FROM crm_application_documents d
+     JOIN crm_customer_profiles p ON p.user_id = d.user_id
+     WHERE d.user_id = $1 AND d.id = $2 AND p.application_status IS NOT NULL
+       AND ($3 = 'owner' OR p.assigned_admin_email = $4)`, [userId, documentId, role, email.toLowerCase()]);
+    const document = rows[0];
+    return document ? { ...document, content: decryptKycDocument(document.content) } : null;
+};
+export const listCrmApplicationAssignees = async () => {
+    const { rows } = await pool.query(`SELECT email, full_name, role FROM admin_accounts
+     WHERE role IN ('manager', 'agent') AND status = 'active' ORDER BY role, full_name`);
+    return {
+        admins: rows.filter((row) => row.role === "manager"),
+        agents: rows.filter((row) => row.role === "agent"),
+    };
+};
+export const transitionCrmApplication = async ({ userId, email, role, status, allowedStatuses, eventType, visibility, remark, assignedAdminEmail, }) => {
+    const client = await pool.connect();
+    try {
+        await client.query("BEGIN");
+        const { rows } = await client.query(`SELECT p.application_status, p.assigned_admin_email, p.customer_remark, ca.owner_email
+       FROM crm_customer_profiles p LEFT JOIN customer_assignments ca ON ca.user_id = p.user_id
+       WHERE p.user_id = $1 AND p.application_status IS NOT NULL FOR UPDATE OF p`, [userId]);
+        const current = rows[0];
+        if (!current || (role === "manager" && current.assigned_admin_email !== email.toLowerCase())) {
+            await client.query("ROLLBACK");
+            return null;
+        }
+        if (!allowedStatuses.includes(current.application_status)) {
+            throw new CrmApplicationConflict("The application changed stage. Refresh and try again.");
+        }
+        if (eventType === "send_to_superadmin") {
+            const tasks = await client.query(`SELECT COUNT(*) AS total,
+                COUNT(*) FILTER (WHERE review_status <> 'approved') AS incomplete
+         FROM crm_tasks WHERE user_id = $1 AND task_kind = 'verification'`, [userId]);
+            if (Number(tasks.rows[0]?.total) === 0 || Number(tasks.rows[0]?.incomplete) > 0) {
+                throw new CrmApplicationConflict("Complete and approve all verification tasks before final review.");
+            }
+        }
+        let nextAdmin = assignedAdminEmail === undefined ? current.assigned_admin_email : assignedAdminEmail?.toLowerCase() ?? null;
+        if (assignedAdminEmail) {
+            const admin = await client.query(`SELECT email FROM admin_accounts WHERE email = $1 AND role = 'manager' AND status = 'active'`, [assignedAdminEmail.toLowerCase()]);
+            if (!admin.rows[0])
+                throw new CrmApplicationConflict("Choose an active admin account.");
+        }
+        if (status === "final_review")
+            nextAdmin = null;
+        const nextRemark = remark === undefined ? current.customer_remark : remark || null;
+        await client.query(`UPDATE crm_customer_profiles SET application_status = $2, assigned_admin_email = $3,
+         customer_remark = $4, updated_by = $5, updated_at = NOW() WHERE user_id = $1`, [userId, status, nextAdmin, nextRemark, email.toLowerCase()]);
+        await client.query(`INSERT INTO crm_application_events (user_id, event_type, application_status, visibility, remark, actor_email, actor_role)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)`, [userId, eventType, status, visibility, nextRemark, email.toLowerCase(), role]);
+        await client.query("COMMIT");
+        return { ownerEmail: current.owner_email, applicationStatus: status, assignedAdminEmail: nextAdmin };
+    }
+    catch (error) {
+        await client.query("ROLLBACK");
+        throw error;
+    }
+    finally {
+        client.release();
+    }
+};
+export const resubmitCrmApplication = async (userId, partnerEmail, remark, documents = []) => {
+    const client = await pool.connect();
+    try {
+        await client.query("BEGIN");
+        const { rows } = await client.query(`UPDATE crm_customer_profiles p SET application_status =
+           CASE WHEN p.assigned_admin_email IS NULL THEN 'submitted' ELSE 'under_review' END,
+        customer_remark = COALESCE($3, 'Application corrections submitted for review.'),
+        updated_by = $2, updated_at = NOW()
+       FROM customer_assignments ca
+       WHERE p.user_id = $1 AND ca.user_id = p.user_id AND ca.owner_email = $2
+         AND p.application_status = 'correction_required'
+       RETURNING p.user_id, p.assigned_admin_email, p.application_status`, [userId, partnerEmail.toLowerCase(), remark]);
+        if (!rows[0]) {
+            await client.query("ROLLBACK");
+            return null;
+        }
+        await client.query(`INSERT INTO crm_application_events (user_id, event_type, application_status, visibility, remark, actor_email, actor_role)
+       VALUES ($1, 'resubmitted', $2, 'customer', $3, $4, 'partner')`, [userId, rows[0].application_status, remark || "Application corrections submitted for review.", partnerEmail.toLowerCase()]);
+        for (const document of documents) {
+            await client.query(`INSERT INTO crm_application_documents (user_id, document_type, file_name, mime_type, content, uploaded_by)
+         VALUES ($1, $2, $3, $4, $5, $6)`, [userId, document.documentType, document.fileName, document.mimeType, encryptKycDocument(document.content), partnerEmail.toLowerCase()]);
+        }
+        await client.query("COMMIT");
+        return rows[0];
+    }
+    catch (error) {
+        await client.query("ROLLBACK");
+        throw error;
+    }
+    finally {
+        client.release();
+    }
+};
+export const createCrmVerificationTask = async ({ userId, managerEmail, agentEmail, title, dueAt, }) => {
+    const client = await pool.connect();
+    try {
+        await client.query("BEGIN");
+        const application = await client.query(`SELECT ca.owner_email, p.application_status FROM crm_customer_profiles p LEFT JOIN customer_assignments ca ON ca.user_id = p.user_id
+       WHERE p.user_id = $1 AND p.application_status IS NOT NULL AND p.assigned_admin_email = $2
+       FOR UPDATE OF p`, [userId, managerEmail.toLowerCase()]);
+        if (!application.rows[0]) {
+            await client.query("ROLLBACK");
+            return null;
+        }
+        if (!["approved_for_processing", "verification_assigned", "verification_in_progress", "verification_completed"].includes(application.rows[0].application_status)) {
+            throw new CrmApplicationConflict("This application is not ready for verification assignment.");
+        }
+        const agent = await client.query(`SELECT email FROM admin_accounts WHERE email = $1 AND role = 'agent' AND status = 'active'`, [agentEmail.toLowerCase()]);
+        if (!agent.rows[0])
+            throw new CrmApplicationConflict("Choose an active agent account.");
+        const task = await client.query(`INSERT INTO crm_tasks (user_id, title, due_at, assignee_email, task_kind, review_status, created_by)
+       VALUES ($1, $2, $3, $4, 'verification', 'assigned', $5) RETURNING id`, [userId, title, dueAt, agentEmail.toLowerCase(), managerEmail.toLowerCase()]);
+        await client.query(`UPDATE crm_customer_profiles SET application_status = 'verification_assigned',
+         customer_remark = 'Required verification work has been assigned.',
+         updated_by = $2, updated_at = NOW()
+       WHERE user_id = $1`, [userId, managerEmail.toLowerCase()]);
+        await client.query(`INSERT INTO crm_application_events (user_id, event_type, application_status, visibility, actor_email, actor_role, details)
+       VALUES ($1, 'verification_assigned', 'verification_assigned', 'internal', $2, 'manager', $3)`, [userId, managerEmail.toLowerCase(), JSON.stringify({ taskId: task.rows[0].id })]);
+        await client.query(`INSERT INTO crm_application_events (user_id, event_type, application_status, visibility, remark, actor_email, actor_role)
+       VALUES ($1, 'verification_assigned', 'verification_assigned', 'customer',
+         'Required verification work has been assigned.', $2, 'manager')`, [userId, managerEmail.toLowerCase()]);
+        await client.query("COMMIT");
+        return { id: task.rows[0].id, ownerEmail: application.rows[0].owner_email, agentEmail: agentEmail.toLowerCase() };
+    }
+    catch (error) {
+        await client.query("ROLLBACK");
+        throw error;
+    }
+    finally {
+        client.release();
+    }
+};
+export const listMyCrmVerificationTasks = async (agentEmail) => {
+    const { rows } = await pool.query(`SELECT t.id, t.user_id, ${CUSTOMER_DISPLAY_NAME} AS customer_name, t.title, t.due_at,
+            t.review_status, t.review_remark, t.result, t.created_at
+     FROM crm_tasks t JOIN users u ON u.id = t.user_id
+     LEFT JOIN kyc_profiles k ON k.user_id = u.id
+     WHERE t.task_kind = 'verification' AND t.assignee_email = $1 AND t.review_status <> 'approved'
+     ORDER BY t.due_at ASC NULLS LAST, t.created_at ASC LIMIT 200`, [agentEmail.toLowerCase()]);
+    return rows;
+};
+export const updateMyCrmVerificationTask = async ({ taskId, agentEmail, action, result, }) => {
+    const client = await pool.connect();
+    try {
+        await client.query("BEGIN");
+        const task = await client.query(`SELECT t.user_id, t.review_status, ca.owner_email, p.assigned_admin_email
+       FROM crm_tasks t JOIN crm_customer_profiles p ON p.user_id = t.user_id
+       LEFT JOIN customer_assignments ca ON ca.user_id = t.user_id
+       WHERE t.id = $1 AND t.task_kind = 'verification' AND t.assignee_email = $2 FOR UPDATE OF t`, [taskId, agentEmail.toLowerCase()]);
+        const current = task.rows[0];
+        if (!current) {
+            await client.query("ROLLBACK");
+            return null;
+        }
+        const allowed = action === "start"
+            ? ["assigned", "returned"].includes(current.review_status)
+            : ["assigned", "in_progress", "returned"].includes(current.review_status);
+        if (!allowed)
+            throw new CrmApplicationConflict("This task is not ready for that action.");
+        const status = action === "start" ? "in_progress" : "submitted";
+        await client.query(`UPDATE crm_tasks SET review_status = $2, result = COALESCE($3, result) WHERE id = $1`, [taskId, status, result ?? null]);
+        if (action === "start") {
+            const started = await client.query(`UPDATE crm_customer_profiles SET application_status = 'verification_in_progress',
+           customer_remark = 'Verification work is in progress.',
+           updated_by = $2, updated_at = NOW()
+         WHERE user_id = $1 AND application_status = 'verification_assigned'
+         RETURNING user_id`, [current.user_id, agentEmail.toLowerCase()]);
+            if (started.rows[0]) {
+                await client.query(`INSERT INTO crm_application_events (user_id, event_type, application_status, visibility, remark, actor_email, actor_role)
+           VALUES ($1, 'verification_started', 'verification_in_progress', 'customer',
+             'Verification work is in progress.', $2, 'system')`, [current.user_id, agentEmail.toLowerCase()]);
+            }
+        }
+        await client.query(`INSERT INTO crm_application_events (user_id, event_type, application_status, visibility, actor_email, actor_role, details)
+       VALUES ($1, $2, NULL, 'internal', $3, 'agent', $4)`, [current.user_id, action === "start" ? "verification_started" : "verification_submitted",
+            agentEmail.toLowerCase(), JSON.stringify({ taskId })]);
+        await client.query("COMMIT");
+        return {
+            userId: current.user_id, ownerEmail: current.owner_email,
+            assignedAdminEmail: current.assigned_admin_email, status,
+        };
+    }
+    catch (error) {
+        await client.query("ROLLBACK");
+        throw error;
+    }
+    finally {
+        client.release();
+    }
+};
+export const reviewCrmVerificationTask = async ({ taskId, email, role, action, remark, }) => {
+    const client = await pool.connect();
+    try {
+        await client.query("BEGIN");
+        const { rows } = await client.query(`SELECT t.user_id, t.review_status, t.assignee_email, p.assigned_admin_email, ca.owner_email
+       FROM crm_tasks t JOIN crm_customer_profiles p ON p.user_id = t.user_id
+       LEFT JOIN customer_assignments ca ON ca.user_id = t.user_id
+       WHERE t.id = $1 AND t.task_kind = 'verification' FOR UPDATE OF t, p`, [taskId]);
+        const task = rows[0];
+        if (!task || (role === "manager" && task.assigned_admin_email !== email.toLowerCase())) {
+            await client.query("ROLLBACK");
+            return null;
+        }
+        if (task.review_status !== "submitted")
+            throw new CrmApplicationConflict("Only submitted verification work can be reviewed.");
+        const approved = action === "approve";
+        await client.query(`UPDATE crm_tasks SET review_status = $2, status = $3, review_remark = $4,
+         completed_at = CASE WHEN $3 = 'done' THEN NOW() ELSE NULL END WHERE id = $1`, [taskId, approved ? "approved" : "returned", approved ? "done" : "open", remark]);
+        let applicationStatus = "verification_in_progress";
+        if (approved) {
+            const remaining = await client.query(`SELECT COUNT(*) AS count FROM crm_tasks
+         WHERE user_id = $1 AND task_kind = 'verification' AND review_status <> 'approved'`, [task.user_id]);
+            if (Number(remaining.rows[0]?.count) === 0) {
+                applicationStatus = "verification_completed";
+                await client.query(`UPDATE crm_customer_profiles SET application_status = $2,
+             customer_remark = 'All required verifications are complete. The application is ready for final review.',
+             updated_by = $3, updated_at = NOW()
+           WHERE user_id = $1`, [task.user_id, applicationStatus, email.toLowerCase()]);
+            }
+        }
+        const customerRemark = applicationStatus === "verification_completed"
+            ? "All required verifications are complete. The application is ready for final review."
+            : remark;
+        await client.query(`INSERT INTO crm_application_events (user_id, event_type, application_status, visibility, remark, actor_email, actor_role, details)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`, [task.user_id, approved ? "verification_approved" : "verification_returned",
+            approved && applicationStatus === "verification_completed" ? applicationStatus : null,
+            approved && applicationStatus === "verification_completed" ? "customer" : "internal",
+            approved && applicationStatus === "verification_completed" ? customerRemark : remark,
+            email.toLowerCase(), role, JSON.stringify({ taskId })]);
+        await client.query("COMMIT");
+        return {
+            userId: task.user_id, ownerEmail: task.owner_email,
+            assignedAdminEmail: task.assigned_admin_email, agentEmail: task.assignee_email, applicationStatus,
+        };
+    }
+    catch (error) {
+        await client.query("ROLLBACK");
+        throw error;
+    }
+    finally {
+        client.release();
+    }
 };
 export const setCrmTaskStatus = async (taskId, status) => {
     const { rows } = await pool.query(`UPDATE crm_tasks SET status = $2::text, completed_at = CASE WHEN $2::text = 'done' THEN NOW() ELSE NULL END
@@ -1984,42 +2577,73 @@ export const updateHealthAssessmentStatus = async (requestId, status, reviewedBy
     return rows[0] ?? null;
 };
 // Testimonials
+// The public photo URL points at our own photo endpoint when an image was uploaded; otherwise the stored link is used.
+const TESTIMONIAL_COLUMNS = `id, customer_name, rating, review_text, result_description, published, submitted_at, published_at, updated_at,
+  consent_obtained, consent_note, consent_recorded_at, consent_recorded_by,
+  CASE WHEN photo_data IS NOT NULL THEN '/api/testimonials/' || id || '/photo?v=' || EXTRACT(EPOCH FROM updated_at)::bigint
+       ELSE customer_image_url END AS customer_image_url,
+  (photo_data IS NOT NULL) AS has_uploaded_photo`;
 export const submitTestimonial = async ({ customerName, customerImageUrl, rating, reviewText, resultDescription, }) => {
     const { rows } = await pool.query(`INSERT INTO testimonials (customer_name, customer_image_url, rating, review_text, result_description)
      VALUES ($1, $2, $3, $4, $5)
-     RETURNING id, customer_name, customer_image_url, rating, review_text, result_description, published, submitted_at, published_at`, [customerName, customerImageUrl ?? null, rating, reviewText, resultDescription ?? null]);
+     RETURNING ${TESTIMONIAL_COLUMNS}`, [customerName, customerImageUrl ?? null, rating, reviewText, resultDescription ?? null]);
     return rows[0];
 };
+// Public listings only ever include entries that are both published and consented.
 export const listTestimonials = async (publishedOnly = true) => {
-    const { rows } = await pool.query(`SELECT id, customer_name, customer_image_url, rating, review_text, result_description, published, submitted_at, published_at
+    const { rows } = await pool.query(`SELECT ${TESTIMONIAL_COLUMNS}
      FROM testimonials
-     ${publishedOnly ? 'WHERE published = true' : ''}
+     ${publishedOnly ? 'WHERE published = true AND consent_obtained = true' : ''}
      ORDER BY published_at DESC NULLS LAST, submitted_at DESC
      LIMIT 100`);
     return rows;
 };
-export const createTestimonial = async ({ customerName, customerImageUrl, rating, reviewText, resultDescription, published, }) => {
-    const { rows } = await pool.query(`INSERT INTO testimonials (customer_name, customer_image_url, rating, review_text, result_description, published, published_at)
-     VALUES ($1, $2, $3, $4, $5, $6, CASE WHEN $6 THEN NOW() ELSE NULL END)
-     RETURNING id, customer_name, customer_image_url, rating, review_text, result_description, published, submitted_at, published_at`, [customerName, customerImageUrl ?? null, rating, reviewText, resultDescription ?? null, published]);
+// Public callers only receive photos for published, consented entries; admins can preview drafts.
+export const getTestimonialPhoto = async (testimonialId, publicOnly = true) => {
+    const { rows } = await pool.query(`SELECT photo_data, photo_mime FROM testimonials
+     WHERE id = $1 AND photo_data IS NOT NULL ${publicOnly ? 'AND published = true AND consent_obtained = true' : ''}`, [testimonialId]);
+    return rows[0] ?? null;
+};
+export const createTestimonial = async (input, adminId) => {
+    const published = input.published && input.consentObtained;
+    const { rows } = await pool.query(`INSERT INTO testimonials (customer_name, customer_image_url, rating, review_text, result_description,
+       photo_data, photo_mime, consent_obtained, consent_note, consent_recorded_at, consent_recorded_by, published, published_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, CASE WHEN $8 THEN NOW() END, CASE WHEN $8 THEN $10::text END, $11, CASE WHEN $11 THEN NOW() END)
+     RETURNING ${TESTIMONIAL_COLUMNS}`, [input.customerName, input.customerImageUrl ?? null, input.rating, input.reviewText, input.resultDescription ?? null,
+        input.photo?.data ?? null, input.photo?.mime ?? null, input.consentObtained, input.consentNote ?? null, adminId, published]);
     return rows[0];
 };
+export const updateTestimonial = async (testimonialId, input, adminId) => {
+    const published = input.published && input.consentObtained;
+    const { rows } = await pool.query(`UPDATE testimonials SET
+       customer_name = $2, rating = $3, review_text = $4, result_description = $5, customer_image_url = $6,
+       photo_data = CASE WHEN $7::bytea IS NOT NULL THEN $7::bytea WHEN $9 THEN NULL ELSE photo_data END,
+       photo_mime = CASE WHEN $7::bytea IS NOT NULL THEN $8 WHEN $9 THEN NULL ELSE photo_mime END,
+       consent_recorded_at = CASE WHEN $10 AND NOT consent_obtained THEN NOW() WHEN NOT $10 THEN NULL ELSE consent_recorded_at END,
+       consent_recorded_by = CASE WHEN $10 AND NOT consent_obtained THEN $12::text WHEN NOT $10 THEN NULL ELSE consent_recorded_by END,
+       consent_obtained = $10, consent_note = $11,
+       published_at = CASE WHEN $13 AND NOT published THEN NOW() WHEN NOT $13 THEN NULL ELSE published_at END,
+       published = $13,
+       updated_at = NOW()
+     WHERE id = $1
+     RETURNING ${TESTIMONIAL_COLUMNS}`, [testimonialId, input.customerName, input.rating, input.reviewText, input.resultDescription ?? null, input.customerImageUrl ?? null,
+        input.photo?.data ?? null, input.photo?.mime ?? null, Boolean(input.removePhoto), input.consentObtained, input.consentNote ?? null, adminId, published]);
+    return rows[0] ?? null;
+};
+// Publishing is refused (returns "no-consent") until customer consent has been recorded.
 export const setTestimonialPublished = async (testimonialId, published) => {
     const { rows } = await pool.query(`UPDATE testimonials
-     SET published = $2, published_at = CASE WHEN $2 THEN NOW() ELSE NULL END
-     WHERE id = $1
-     RETURNING id, customer_name, customer_image_url, rating, review_text, result_description, published, submitted_at, published_at`, [testimonialId, published]);
-    return rows[0] ?? null;
-};
-export const publishTestimonial = async (testimonialId) => {
-    const { rows } = await pool.query(`UPDATE testimonials
-     SET published = true, published_at = NOW()
-     WHERE id = $1
-     RETURNING id, customer_name, customer_image_url, rating, review_text, result_description, published, submitted_at, published_at`, [testimonialId]);
-    return rows[0] ?? null;
+     SET published = $2, published_at = CASE WHEN $2 THEN NOW() ELSE NULL END, updated_at = NOW()
+     WHERE id = $1 AND (NOT $2 OR consent_obtained)
+     RETURNING ${TESTIMONIAL_COLUMNS}`, [testimonialId, published]);
+    if (rows[0])
+        return rows[0];
+    const exists = await pool.query(`SELECT 1 FROM testimonials WHERE id = $1`, [testimonialId]);
+    return exists.rows[0] ? 'no-consent' : null;
 };
 export const deleteTestimonial = async (testimonialId) => {
-    await pool.query(`DELETE FROM testimonials WHERE id = $1`, [testimonialId]);
+    const { rowCount } = await pool.query(`DELETE FROM testimonials WHERE id = $1`, [testimonialId]);
+    return (rowCount ?? 0) > 0;
 };
 // Neha Assistant - Shared Messaging Functions
 export const createNehaConversation = async (customerId) => {

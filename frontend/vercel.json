@@ -7,7 +7,17 @@
     { "source": "/dashboard", "destination": "/" },
     { "source": "/dashboard/", "destination": "/" },
     { "source": "/admin", "destination": "/" },
-    { "source": "/admin/", "destination": "/" }
+    { "source": "/admin/", "destination": "/" },
+    { "source": "/terms", "destination": "/" },
+    { "source": "/terms/", "destination": "/" },
+    { "source": "/privacy", "destination": "/" },
+    { "source": "/privacy/", "destination": "/" },
+    { "source": "/refund-policy", "destination": "/" },
+    { "source": "/refund-policy/", "destination": "/" },
+    { "source": "/disclaimer", "destination": "/" },
+    { "source": "/disclaimer/", "destination": "/" },
+    { "source": "/grievance", "destination": "/" },
+    { "source": "/grievance/", "destination": "/" }
   ],
   "headers": [
     {

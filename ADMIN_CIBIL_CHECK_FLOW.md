@@ -314,15 +314,16 @@ interface NormalizedReport {
 **Function:** `captureBureauDocument()`
 
 **Process:**
-1. If CIBIL provides HTML report: Save HTML
-2. Extract PDF report URL from CIBIL response
-3. Generate PDF if not available
-4. Save both HTML and PDF to database
+1. Extract `pdf_report_url` from the CIBIL response and download the original PDF immediately.
+2. Save the original bureau PDF in `report_pdf` so later downloads do not depend on the expiring link.
+3. Admin and customer PDF endpoints serve that saved CIBIL PDF; they do not generate a replacement CIBIL PDF.
+4. If the original PDF could not be captured, the download endpoint returns an error instead of a ScoreNow-generated CIBIL summary.
 
 **Storage:**
 - Table: `admin_report_audit` columns
   - `report_html`: HTML version stored
   - `report_pdf`: Binary PDF stored
+  - `report_pdf_source`: Marks the stored PDF as bureau-provided so legacy generated files are not treated as originals
 
 ### 2.6 Admin Report Audit Completion
 
@@ -777,7 +778,7 @@ X-Report-Source: bureau
 
 **Endpoint:** `GET /api/admin/reports/{auditId}/pdf`
 
-**Returns:** Original CIBIL PDF or ScoreNow summary
+**Returns:** The original CIBIL PDF
 
 ---
 
