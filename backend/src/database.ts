@@ -139,6 +139,35 @@ export const initializeDatabase = async () => {
   await pool.query(`ALTER TABLE admin_accounts ADD COLUMN IF NOT EXISTS is_primary BOOLEAN NOT NULL DEFAULT FALSE`);
   await pool.query(`ALTER TABLE admin_accounts DROP CONSTRAINT IF EXISTS admin_accounts_role_check`);
   await pool.query(`ALTER TABLE admin_accounts ADD CONSTRAINT admin_accounts_role_check CHECK (role IN ('owner', 'manager', 'support', 'analyst', 'partner', 'agent'))`);
+  // NULL permissions means the role's default access; a list narrows (or, for partners, grants) specific abilities.
+  await pool.query(`ALTER TABLE admin_accounts ADD COLUMN IF NOT EXISTS permissions TEXT[]`);
+  await pool.query(`ALTER TABLE admin_accounts ADD COLUMN IF NOT EXISTS customer_scope TEXT NOT NULL DEFAULT 'all'`);
+  await pool.query(`ALTER TABLE admin_accounts DROP CONSTRAINT IF EXISTS admin_accounts_customer_scope_check`);
+  await pool.query(`ALTER TABLE admin_accounts ADD CONSTRAINT admin_accounts_customer_scope_check CHECK (customer_scope IN ('all', 'assigned'))`);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS staff_customer_assignments (
+      user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      admin_email TEXT NOT NULL,
+      assigned_by TEXT NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      PRIMARY KEY (user_id, admin_email)
+    )
+  `);
+  await pool.query(`CREATE INDEX IF NOT EXISTS staff_customer_assignments_admin_idx ON staff_customer_assignments (admin_email)`);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS customer_interactions (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      actor_email TEXT NOT NULL,
+      actor_role TEXT NOT NULL,
+      channel TEXT NOT NULL CHECK (channel IN ('call', 'whatsapp', 'email', 'visit', 'note')),
+      outcome TEXT NOT NULL CHECK (outcome IN ('contacted', 'not_reachable', 'interested', 'not_interested', 'follow_up', 'documents_pending', 'converted')),
+      note TEXT NOT NULL,
+      next_follow_up_at TIMESTAMPTZ,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+  await pool.query(`CREATE INDEX IF NOT EXISTS customer_interactions_user_idx ON customer_interactions (user_id, created_at DESC)`);
   await pool.query(`
     CREATE TABLE IF NOT EXISTS customer_assignments (
       user_id UUID PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
@@ -592,8 +621,8 @@ export const createAdminSession = async ({ adminId, role = "owner", ipAddress, u
 
 export const findAdminSession = async (token: string) => {
   if (!/^[0-9a-f]{64}$/.test(token)) return null;
-  const { rows } = await pool.query<{ admin_id: string; role: AdminRole; expires_at: Date }>(
-    `SELECT s.admin_id, COALESCE(a.role, s.role) AS role, s.expires_at
+  const { rows } = await pool.query<{ admin_id: string; role: AdminRole; expires_at: Date; permissions: string[] | null; customer_scope: "all" | "assigned" }>(
+    `SELECT s.admin_id, COALESCE(a.role, s.role) AS role, s.expires_at, a.permissions, COALESCE(a.customer_scope, 'all') AS customer_scope
      FROM admin_sessions s
      LEFT JOIN admin_accounts a ON a.email = s.admin_id AND a.status = 'active'
      WHERE s.token_hash = $1 AND s.revoked_at IS NULL AND s.expires_at > NOW()
@@ -692,8 +721,9 @@ export const acceptAdminInvitation = async ({ token, password, pin }: { token: s
 export const listAdminAccounts = async () => {
   const { rows } = await pool.query<{
     email: string; full_name: string; role: Exclude<AdminRole, "owner">; status: string; created_at: string;
+    parent_email: string | null; permissions: string[] | null; customer_scope: CustomerScope;
   }>(
-    `SELECT email, full_name, role, status, created_at FROM admin_accounts WHERE is_primary = FALSE ORDER BY created_at DESC LIMIT 200`,
+    `SELECT email, full_name, role, status, created_at, parent_email, permissions, customer_scope FROM admin_accounts WHERE is_primary = FALSE ORDER BY created_at DESC LIMIT 200`,
   );
   return rows;
 };
@@ -762,6 +792,157 @@ export const setAdminAccountStatus = async (email: string, status: "active" | "d
 };
 
 export type PartnerRole = Extract<AdminRole, "partner" | "agent">;
+
+export type CustomerScope = "all" | "assigned";
+
+// Owner-only change of a non-primary account's role, permissions, customer scope and (for agents) parent partner.
+export const updateAdminAccess = async (email: string, access: {
+  role: Exclude<AdminRole, "owner">; permissions: string[] | null; customerScope: CustomerScope; parentEmail: string | null;
+}) => {
+  const { rows } = await pool.query<{ email: string; role: AdminRole }>(
+    `UPDATE admin_accounts SET role = $2, permissions = $3, customer_scope = $4, parent_email = $5, updated_at = NOW()
+     WHERE email = $1 AND is_primary = FALSE
+       AND ($5::text IS NULL OR EXISTS (SELECT 1 FROM admin_accounts p WHERE p.email = $5 AND p.role = 'partner'))
+     RETURNING email, role`,
+    [email.toLowerCase(), access.role, access.permissions, access.customerScope, access.parentEmail],
+  );
+  return rows[0] ?? null;
+};
+
+export const getAdminAccount = async (email: string) => {
+  const { rows } = await pool.query<{
+    email: string; full_name: string; role: AdminRole; status: string; parent_email: string | null;
+    permissions: string[] | null; customer_scope: CustomerScope; is_primary: boolean;
+  }>(
+    `SELECT email, full_name, role, status, parent_email, permissions, customer_scope, is_primary FROM admin_accounts WHERE email = $1`,
+    [email.toLowerCase()],
+  );
+  return rows[0] ?? null;
+};
+
+// Account emails whose customers this login may see; null means every customer.
+export const customerScopeOwners = async (adminEmail: string, role: AdminRole, customerScope: CustomerScope): Promise<string[] | null> => {
+  const email = adminEmail.toLowerCase();
+  if (role === "owner") return null;
+  if (role === "partner") {
+    const { rows } = await pool.query<{ email: string }>(
+      `SELECT email FROM admin_accounts WHERE parent_email = $1 AND role = 'agent'`, [email],
+    );
+    return [email, ...rows.map((row) => row.email)];
+  }
+  if (role === "agent") return [email];
+  return customerScope === "assigned" ? [email] : null;
+};
+
+// SQL condition limiting users (alias u) to the scope owners passed as parameter $index.
+export const customerScopeCondition = (index: number) =>
+  `(u.id IN (SELECT user_id FROM customer_assignments WHERE owner_email = ANY($${index}::text[]))
+    OR u.id IN (SELECT user_id FROM staff_customer_assignments WHERE admin_email = ANY($${index}::text[])))`;
+
+export const isCustomerInScope = async (userId: string, owners: string[] | null) => {
+  if (!owners) return true;
+  const { rows } = await pool.query(`SELECT 1 FROM users u WHERE u.id = $1 AND ${customerScopeCondition(2)}`, [userId, owners]);
+  return rows.length > 0;
+};
+
+export const assignCustomerToStaff = async ({ userId, adminEmail, assignedBy }: { userId: string; adminEmail: string; assignedBy: string }) => {
+  const { rowCount } = await pool.query(
+    `INSERT INTO staff_customer_assignments (user_id, admin_email, assigned_by)
+     SELECT u.id, a.email, $3 FROM users u, admin_accounts a
+     WHERE u.id = $1 AND u.role = 'customer' AND a.email = $2 AND a.role IN ('manager', 'support', 'analyst') AND a.status = 'active'
+     ON CONFLICT (user_id, admin_email) DO NOTHING`,
+    [userId, adminEmail.toLowerCase(), assignedBy],
+  );
+  return (rowCount ?? 0) > 0;
+};
+
+export const unassignCustomerFromStaff = async (userId: string, adminEmail: string) => {
+  const { rowCount } = await pool.query(
+    `DELETE FROM staff_customer_assignments WHERE user_id = $1 AND admin_email = $2`, [userId, adminEmail.toLowerCase()],
+  );
+  return (rowCount ?? 0) > 0;
+};
+
+export const listStaffAssignments = async (userId: string) => {
+  const { rows } = await pool.query<{ admin_email: string; full_name: string | null; role: string | null; created_at: string }>(
+    `SELECT s.admin_email, a.full_name, a.role, s.created_at FROM staff_customer_assignments s
+     LEFT JOIN admin_accounts a ON a.email = s.admin_email WHERE s.user_id = $1 ORDER BY s.created_at`,
+    [userId],
+  );
+  return rows;
+};
+
+// Partner-side agent management: every query is pinned to the partner's own agents.
+export const listPartnerAgents = async (partnerEmail: string) => {
+  const { rows } = await pool.query<{
+    email: string; full_name: string; status: string; created_at: string; assigned_customers: string;
+    interactions_30d: string; last_interaction: string | null;
+  }>(
+    `SELECT a.email, a.full_name, a.status, a.created_at,
+       (SELECT COUNT(*) FROM customer_assignments ca WHERE ca.owner_email = a.email) AS assigned_customers,
+       (SELECT COUNT(*) FROM customer_interactions ci WHERE ci.actor_email = a.email AND ci.created_at > NOW() - INTERVAL '30 days') AS interactions_30d,
+       (SELECT MAX(ci.created_at) FROM customer_interactions ci WHERE ci.actor_email = a.email) AS last_interaction
+     FROM admin_accounts a WHERE a.parent_email = $1 AND a.role = 'agent' ORDER BY a.created_at DESC`,
+    [partnerEmail.toLowerCase()],
+  );
+  return rows.map((row) => ({ ...row, assigned_customers: Number(row.assigned_customers), interactions_30d: Number(row.interactions_30d) }));
+};
+
+export const setPartnerAgentStatus = async (partnerEmail: string, agentEmail: string, status: "active" | "disabled") => {
+  const { rowCount } = await pool.query(
+    `UPDATE admin_accounts SET status = $3, updated_at = NOW()
+     WHERE email = $2 AND parent_email = $1 AND role = 'agent' AND status IN ('active', 'disabled')`,
+    [partnerEmail.toLowerCase(), agentEmail.toLowerCase(), status],
+  );
+  if (rowCount) await pool.query(`UPDATE admin_sessions SET revoked_at = NOW() WHERE admin_id = $1 AND revoked_at IS NULL`, [agentEmail.toLowerCase()]);
+  return (rowCount ?? 0) > 0;
+};
+
+// Moves one of the partner's customers to one of the partner's active agents, or back to the partner (agentEmail null).
+export const assignPartnerCustomer = async ({ partnerEmail, userId, agentEmail }: { partnerEmail: string; userId: string; agentEmail: string | null }) => {
+  const partner = partnerEmail.toLowerCase();
+  const target = agentEmail ? agentEmail.toLowerCase() : partner;
+  const { rowCount } = await pool.query(
+    `UPDATE customer_assignments ca SET owner_email = $3, assigned_by = $1, created_at = NOW()
+     WHERE ca.user_id = $2
+       AND (ca.owner_email = $1 OR ca.owner_email IN (SELECT email FROM admin_accounts WHERE parent_email = $1 AND role = 'agent'))
+       AND ($3 = $1 OR EXISTS (SELECT 1 FROM admin_accounts a WHERE a.email = $3 AND a.parent_email = $1 AND a.role = 'agent' AND a.status = 'active'))`,
+    [partner, userId, target],
+  );
+  return (rowCount ?? 0) > 0;
+};
+
+export const INTERACTION_CHANNELS = ["call", "whatsapp", "email", "visit", "note"] as const;
+export const INTERACTION_OUTCOMES = ["contacted", "not_reachable", "interested", "not_interested", "follow_up", "documents_pending", "converted"] as const;
+
+export const addCustomerInteraction = async (input: {
+  userId: string; actorEmail: string; actorRole: AdminRole; channel: (typeof INTERACTION_CHANNELS)[number];
+  outcome: (typeof INTERACTION_OUTCOMES)[number]; note: string; nextFollowUpAt: string | null;
+}) => {
+  const { rows } = await pool.query(
+    `INSERT INTO customer_interactions (user_id, actor_email, actor_role, channel, outcome, note, next_follow_up_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7)
+     RETURNING id, user_id, actor_email, actor_role, channel, outcome, note, next_follow_up_at, created_at`,
+    [input.userId, input.actorEmail.toLowerCase(), input.actorRole, input.channel, input.outcome, input.note, input.nextFollowUpAt],
+  );
+  return rows[0];
+};
+
+// Interactions for customers inside the caller's scope; optionally one customer.
+export const listCustomerInteractions = async (owners: string[] | null, userId: string | null) => {
+  const values: unknown[] = [];
+  const conditions = ["TRUE"];
+  if (owners) { values.push(owners); conditions.push(customerScopeCondition(values.length)); }
+  if (userId) { values.push(userId); conditions.push(`u.id = $${values.length}`); }
+  const { rows } = await pool.query(
+    `SELECT ci.id, ci.user_id, COALESCE(NULLIF(TRIM(k.name_as_per_pan), ''), u.full_name) AS customer_name,
+            ci.actor_email, ci.actor_role, ci.channel, ci.outcome, ci.note, ci.next_follow_up_at, ci.created_at
+     FROM customer_interactions ci JOIN users u ON u.id = ci.user_id LEFT JOIN kyc_profiles k ON k.user_id = u.id
+     WHERE ${conditions.join(" AND ")} ORDER BY ci.created_at DESC LIMIT 200`,
+    values,
+  );
+  return rows;
+};
 
 // Activity is best-effort: a failed audit write must never fail the business action that triggered it.
 export const recordPartnerActivity = async ({ actorEmail, actorRole, event, targetEmail = null, details = {} }: {
@@ -1239,7 +1420,7 @@ export const getAdminActivity = async (requestedPage = 1, filters: AdminActivity
   };
 };
 
-export const getAdminCustomers = async (search: string, requestedPage = 1, maskContact = false) => {
+export const getAdminCustomers = async (search: string, requestedPage = 1, maskContact = false, scopeOwners: string[] | null = null) => {
   const pageSize = 50;
   const page = Math.max(1, Math.floor(requestedPage));
   const normalizedSearch = search.trim();
@@ -1248,11 +1429,13 @@ export const getAdminCustomers = async (search: string, requestedPage = 1, maskC
     : null;
   const panHash = panSearch ? createHash("sha256").update(panSearch).digest("hex") : null;
   const pattern = `%${normalizedSearch}%`;
-  const filter = normalizedSearch
+  const searchFilter = normalizedSearch
     ? `(${CUSTOMER_DISPLAY_NAME} ILIKE $1 OR u.mobile ILIKE $2 OR COALESCE(u.email, '') ILIKE $1
         OR ($3::text IS NOT NULL AND k.pan_hash = $3))`
     : "TRUE";
-  const values = normalizedSearch ? [pattern, pattern, panHash] : [];
+  const baseValues: unknown[] = normalizedSearch ? [pattern, pattern, panHash] : [];
+  const values = scopeOwners ? [...baseValues, scopeOwners] : baseValues;
+  const filter = scopeOwners ? `${searchFilter} AND ${customerScopeCondition(values.length)}` : searchFilter;
   const [customers, count, manualChecks] = await Promise.all([
     pool.query<{
       id: string; full_name: string; mobile: string; email: string | null; status: string;
@@ -1281,14 +1464,14 @@ export const getAdminCustomers = async (search: string, requestedPage = 1, maskC
        WHERE ${filter}
        GROUP BY u.id, k.user_id, k.pan_last4, k.kyc_status, k.name_as_per_pan
        ORDER BY u.created_at DESC
-       LIMIT $${normalizedSearch ? "4" : "1"} OFFSET $${normalizedSearch ? "5" : "2"}`,
-      normalizedSearch ? [...values, pageSize, (page - 1) * pageSize] : [pageSize, (page - 1) * pageSize],
+       LIMIT $${values.length + 1} OFFSET $${values.length + 2}`,
+      [...values, pageSize, (page - 1) * pageSize],
     ),
     pool.query<{ count: string }>(
       `SELECT COUNT(DISTINCT u.id) AS count FROM users u LEFT JOIN kyc_profiles k ON k.user_id = u.id WHERE ${filter}`,
       values,
     ),
-    panSearch
+    panSearch && !scopeOwners
       ? pool.query<{
         id: string; full_name: string | null; bureau: Bureau; status: string;
         credit_score: number | null; failure_reason: string | null; mobile_last4: string;
@@ -2857,10 +3040,14 @@ const crmCustomerFrom = `
   LEFT JOIN crm_customer_profiles p ON p.user_id = u.id`;
 
 export const listCrmCustomers = async ({
-  q, stage, tag, page, pageSize,
-}: { q: string; stage: CrmStage | null; tag: string | null; page: number; pageSize: number }) => {
+  q, stage, tag, page, pageSize, scopeOwners = null,
+}: { q: string; stage: CrmStage | null; tag: string | null; page: number; pageSize: number; scopeOwners?: string[] | null }) => {
   const values: unknown[] = [];
   const conditions = ["TRUE"];
+  if (scopeOwners) {
+    values.push(scopeOwners);
+    conditions.push(customerScopeCondition(values.length));
+  }
   if (q) {
     values.push(`%${q}%`);
     conditions.push(`(${CUSTOMER_DISPLAY_NAME} ILIKE $${values.length} OR u.email ILIKE $${values.length} OR u.mobile LIKE $${values.length})`);

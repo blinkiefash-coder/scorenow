@@ -11,6 +11,8 @@ import { PartnerManagement, PartnerMonitor, PartnerPortal } from './AdminPartner
 import { AgentWorkQueue, CrmManagement } from './AdminCrm'
 import { AdminSiteContent } from './AdminSiteContent'
 import { AdminTestimonials } from './AdminTestimonials'
+import { AccessEditor, FollowUpsPanel, PartnerAgentsPanel, StaffAssignmentPanel, type TeamMember } from './AdminAccess'
+import { accessSummary, roleLabel } from './adminAccessShared'
 import { AdminOpsPanel, AdminSessionExpiryBanner, CannedReplyPicker, CustomerPaymentsPanel, CustomerPrivacyPanel } from './AccountOps'
 import { AdminHealthAssessmentManagement, HealthAssessmentForm, TestimonialsSection } from './WebFeatures'
 import { company, LEGAL_LAST_UPDATED, legalDocumentForPath, legalDocuments, type LegalDocument } from './legalContent'
@@ -4271,8 +4273,17 @@ type AdminAnalytics = {
   bureaus: { bureau: string; paid_orders: number; revenue: number; completed: number; failed: number }[]
 }
 
-type AdminSectionId = 'overview' | 'customers' | 'reports' | 'analytics' | 'tickets' | 'journey' | 'team' | 'failed' | 'health' | 'audit' | 'partners' | 'portal' | 'applications' | 'earnings' | 'monitor' | 'crm' | 'work' | 'content' | 'testimonials' | 'assessments' | 'ops' | 'neha'
+type AdminSectionId = 'overview' | 'customers' | 'reports' | 'analytics' | 'tickets' | 'journey' | 'team' | 'failed' | 'health' | 'audit' | 'partners' | 'portal' | 'applications' | 'earnings' | 'monitor' | 'crm' | 'work' | 'content' | 'testimonials' | 'assessments' | 'ops' | 'neha' | 'agents' | 'followups'
 const defaultAdminSection = (role?: AdminRole): AdminSectionId => role === 'support' ? 'customers' : role === 'analyst' ? 'analytics' : role === 'agent' ? 'work' : role === 'partner' ? 'portal' : 'overview'
+// Falls back to the first page a narrowed staff account can still open.
+const firstAllowedSection = (role: AdminRole | undefined, modules: string[] | null): AdminSectionId => {
+  const preferred = defaultAdminSection(role)
+  if (!modules) return preferred
+  const byModule: [AdminSectionId, string][] = [['overview', 'overview'], ['customers', 'customers'], ['crm', 'crm'], ['tickets', 'tickets'], ['analytics', 'analytics'], ['reports', 'reports'], ['assessments', 'assessments'], ['ops', 'ops'], ['monitor', 'monitor'], ['content', 'content'], ['audit', 'audit'], ['health', 'health'], ['failed', 'failed']]
+  const preferredModule = byModule.find(([section]) => section === preferred)?.[1]
+  if (preferredModule && modules.includes(preferredModule)) return preferred
+  return byModule.find(([, module]) => modules.includes(module))?.[0] ?? 'neha'
+}
 type PartnerAccountOption = { email: string; full_name: string; role: AdminRole; status: string }
 
 type AdminAttention = {
@@ -4364,7 +4375,7 @@ function AdminTrendChart({ trend }: { trend: AdminAnalytics['trend'] }) {
   )
 }
 
-type AdminTeamMember = { email: string; full_name: string; role: string; status: string; created_at: string }
+type AdminTeamMember = TeamMember
 
 type AdminCustomerInvitation = { id: string; full_name: string; mobile: string; email: string | null; status: string; created_at: string }
 
@@ -4380,6 +4391,9 @@ function AdminPage() {
   const [partnerPages, setPartnerPages] = useState<string[]>([])
   const [inviteRole, setInviteRole] = useState<AdminRole>('support')
   const isPartnerRole = adminRole === 'partner' || adminRole === 'agent'
+  // Module list from the server for Admin/Support/Analyst accounts; null means no per-account narrowing applies.
+  const [adminModules, setAdminModules] = useState<string[] | null>(null)
+  const [accessTarget, setAccessTarget] = useState<AdminTeamMember | null>(null)
   const [activeSection, setActiveSection] = useState<AdminSectionId>('overview')
   const [authState, setAuthState] = useState<'checking' | 'signed-out' | 'signed-in'>(token ? 'checking' : 'signed-out')
   const [loginError, setLoginError] = useState('')
@@ -4461,12 +4475,13 @@ function AdminPage() {
     let cancelled = false
     fetch(`${apiUrl}/api/admin/session`, { headers: { Authorization: `Bearer ${token}` } })
       .then(async (response) => {
-        const result = await response.json() as { adminId?: string; role?: AdminRole }
+        const result = await response.json() as { adminId?: string; role?: AdminRole; modules?: string[] | null }
         if (!response.ok) throw new Error('Admin session expired. Sign in again.')
         if (!cancelled) {
           setAdminId(result.adminId || 'Admin')
           setAdminRole(result.role || 'owner')
-          setActiveSection(defaultAdminSection(result.role))
+          setAdminModules(result.modules ?? null)
+          setActiveSection(firstAllowedSection(result.role, result.modules ?? null))
           setAuthState('signed-in')
         }
       })
@@ -5131,8 +5146,17 @@ function AdminPage() {
     { id: 'portal', label: adminRole === 'partner' ? 'Refer a customer' : 'My referrals', icon: Handshake, roles: ['partner', 'agent'] },
     { id: 'applications', label: 'Application progress', icon: Clock3, roles: ['partner'] },
     { id: 'earnings', label: 'Earnings', icon: BadgeIndianRupee, roles: ['partner'] },
+    { id: 'agents', label: 'My agents', icon: Users, roles: ['partner'] },
+    { id: 'followups', label: 'Follow-ups', icon: CalendarDays, roles: ['partner', 'agent'] },
   ]
-  const visibleAdminSections = adminSections.filter((section) => section.roles.includes(adminRole) || (isPartnerRole && partnerPages.includes(section.id)))
+  // Sections that need a module the Super Admin has not granted this account are hidden; the API enforces the same rule.
+  const sectionModules: Partial<Record<AdminSectionId, string[]>> = {
+    overview: ['overview'], customers: ['customers'], reports: ['reports'], analytics: ['analytics'], tickets: ['tickets'],
+    journey: ['customers', 'analytics'], failed: ['failed'], health: ['health'], audit: ['audit'], crm: ['crm'],
+    content: ['content'], monitor: ['monitor'], assessments: ['assessments'], ops: ['ops'],
+  }
+  const sectionAllowedByModules = (id: AdminSectionId) => !adminModules || (sectionModules[id] ?? []).every((module) => adminModules.includes(module))
+  const visibleAdminSections = adminSections.filter((section) => (section.roles.includes(adminRole) && sectionAllowedByModules(section.id)) || (isPartnerRole && partnerPages.includes(section.id)))
   const changeAdminSection = (section: AdminSectionId) => {
     setSectionError('')
     setActionNotice(null)
@@ -5151,7 +5175,7 @@ function AdminPage() {
   const sectionHasData: Record<AdminSectionId, boolean> = {
     overview: Boolean(activity), reports: Boolean(report), customers: customers.length > 0, analytics: Boolean(analytics),
     journey: Boolean(analytics) && journeyCustomers.length > 0, tickets: tickets.length > 0, team: team.length > 0 || Boolean(primaryAdmin), neha: nehaConversations.length > 0,
-    failed: Boolean(failedOps), health: Boolean(health), audit: Boolean(auditLog), partners: true, portal: true, applications: true, earnings: true, monitor: true, crm: true, work: true, content: true, testimonials: true, assessments: true, ops: true,
+    failed: Boolean(failedOps), health: Boolean(health), audit: Boolean(auditLog), partners: true, portal: true, applications: true, earnings: true, monitor: true, crm: true, work: true, content: true, agents: true, followups: true, testimonials: true, assessments: true, ops: true,
   }
   const sectionIsLoading = activeSection === 'overview' ? activityLoading : activeSection === 'reports' ? loading : sectionLoading
   const canManageCustomers = adminRole === 'owner' || adminRole === 'manager'
@@ -5579,6 +5603,8 @@ function AdminPage() {
         : activeSection === 'work' ? <AgentWorkQueue token={token} />
         : activeSection === 'crm' ? <CrmManagement token={token} role={adminRole} refreshKey={sectionRefresh} />        : activeSection === 'content' ? <AdminSiteContent token={token} refreshKey={sectionRefresh} />        : activeSection === 'testimonials' ? <AdminTestimonials token={token} refreshKey={sectionRefresh} />        : activeSection === 'partners' ? <PartnerManagement token={token} refreshKey={sectionRefresh} />
         : activeSection === 'monitor' ? <PartnerMonitor token={token} enabled={adminRole === 'owner' || adminRole === 'manager' || partnerPages.includes('monitor')} />
+        : activeSection === 'agents' ? <PartnerAgentsPanel token={token} refreshKey={sectionRefresh} />
+        : activeSection === 'followups' ? <FollowUpsPanel token={token} refreshKey={sectionRefresh} role={adminRole === 'agent' ? 'agent' : 'partner'} />
         : activeSection === 'portal' ? <PartnerPortal token={token} role={adminRole === 'agent' ? 'agent' : 'partner'} page={adminRole === 'partner' ? 'refer' : 'all'} refreshKey={sectionRefresh} />
         : activeSection === 'applications' ? <PartnerPortal token={token} role="partner" page="applications" refreshKey={sectionRefresh} />
         : activeSection === 'earnings' ? <PartnerPortal token={token} role="partner" page="earnings" refreshKey={sectionRefresh} />
@@ -5599,6 +5625,7 @@ function AdminPage() {
           </article>
           <article className="dashboard-card admin-activity-card">
             <div className="dashboard-card-heading"><strong>Admin accounts</strong><small>{team.length + (primaryAdmin ? 1 : 0)} accounts</small></div>
+            {accessTarget && <AccessEditor token={token} member={accessTarget} partners={team.filter((member) => member.role === 'partner' && member.status === 'active')} onClose={() => setAccessTarget(null)} onSaved={() => { setAccessTarget(null); setActionNotice({ tone: 'info', text: 'Access updated. The change applies to their next request.' }); setSectionLoading(true); setSectionRefresh((refresh) => refresh + 1) }} />}
             {credentialTarget && <form className="admin-management-form admin-credentials-form" onSubmit={(event) => void updateTeamCredentials(event)}>
               <p><strong>Edit credentials for {credentialTarget.email}</strong><small> Existing passwords and PINs cannot be shown. Enter new values, or leave a field empty to keep it. Saving signs this admin out.</small></p>
               <label>Email<input name="email" type="email" defaultValue={credentialTarget.email} /></label>
@@ -5611,7 +5638,7 @@ function AdminPage() {
             </form>}
             <div className="admin-table-wrap"><table className="admin-activity-table"><thead><tr><th>Admin</th><th>Role</th><th>Status</th><th>Added</th><th>Manage</th></tr></thead><tbody>
               {primaryAdmin && <tr><td><strong>{primaryAdmin}</strong><small>Primary admin</small></td><td>Owner</td><td><span className="admin-status completed">active</span></td><td>—</td><td><button className="button button-outline admin-small-button" type="button" disabled={sectionLoading} onClick={() => setCredentialTarget({ email: primaryAdmin, isPrimary: true })}>Edit credentials</button></td></tr>}
-              {team.map((member) => <tr key={member.email}><td><strong>{member.full_name}</strong><small>{member.email}</small></td><td>{member.role}</td><td><span className={`admin-status ${member.status === 'active' ? 'completed' : member.status === 'disabled' ? 'failed' : 'pending'}`}>{member.status}</span></td><td>{formatAdminTimestamp(member.created_at)}</td><td>{member.status !== 'invited' && <><button className="button button-outline admin-small-button" type="button" disabled={sectionLoading} onClick={() => setCredentialTarget({ email: member.email, isPrimary: false })}>Edit credentials</button> <button className="button button-outline admin-small-button" type="button" disabled={sectionLoading || member.email === adminId} onClick={() => void setTeamMemberStatus(member)}>{member.status === 'disabled' ? 'Enable' : 'Disable'}</button></>}</td></tr>)}
+              {team.map((member) => <tr key={member.email}><td><strong>{member.full_name}</strong><small>{member.email}</small></td><td>{roleLabel(member.role)}<small>{accessSummary(member)}</small></td><td><span className={`admin-status ${member.status === 'active' ? 'completed' : member.status === 'disabled' ? 'failed' : 'pending'}`}>{member.status}</span></td><td>{formatAdminTimestamp(member.created_at)}</td><td>{member.status !== 'invited' && <><button className="button button-outline admin-small-button" type="button" disabled={sectionLoading} onClick={() => setAccessTarget(member)}>Access</button> <button className="button button-outline admin-small-button" type="button" disabled={sectionLoading} onClick={() => setCredentialTarget({ email: member.email, isPrimary: false })}>Edit credentials</button> <button className="button button-outline admin-small-button" type="button" disabled={sectionLoading || member.email === adminId} onClick={() => void setTeamMemberStatus(member)}>{member.status === 'disabled' ? 'Enable' : 'Disable'}</button></>}</td></tr>)}
             </tbody></table></div>
           </article>
         </>}
@@ -5620,6 +5647,7 @@ function AdminPage() {
           <aside className="admin-drawer" role="dialog" aria-modal="true" aria-label="Customer details" onClick={(event) => event.stopPropagation()}>
             <header><div><span>CUSTOMER</span><h2>{customerDetail?.customer.full_name ?? 'Loading…'}</h2>{customerDetail && <small>Joined {formatAdminTimestamp(customerDetail.customer.created_at)}</small>}</div><button type="button" className="admin-icon-button" aria-label="Close customer details" onClick={() => setCustomerDetailId('')}><X /></button></header>
             {customerDetailError ? <p className="dashboard-notice error" role="alert">{customerDetailError}</p> : !customerDetail ? <p className="admin-activity-empty"><Spinner size={16} /> Loading customer…</p> : <>
+              {adminRole === 'owner' && <StaffAssignmentPanel key={customerDetail.customer.id} token={token} customerId={customerDetail.customer.id} />}
               <dl className="admin-detail-grid">
                 <div><dt>Mobile</dt><dd>{customerDetail.customer.mobile}{customerDetail.customer.mobile_verified && <span className="admin-verified">verified</span>}</dd></div>
                 <div><dt>Email</dt><dd>{customerDetail.customer.email || '—'}{customerDetail.customer.email && customerDetail.customer.email_verified && <span className="admin-verified">verified</span>}</dd></div>
