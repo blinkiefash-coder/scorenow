@@ -181,9 +181,8 @@ const workingDays = (from: string, to: string, holidays: Set<string>) => {
   return count;
 };
 
-// Internal staff are employees; partners and agents created by a partner belong to that partner, not the company.
-const EMPLOYEE_SQL = `a.role IN ('manager', 'support', 'analyst', 'agent')
-  AND NOT EXISTS (SELECT 1 FROM admin_accounts p WHERE LOWER(p.email) = LOWER(a.parent_email) AND p.role = 'partner')`;
+// Every staff login is an employee, including agents working under a partner; partners themselves are not.
+const EMPLOYEE_SQL = `a.role IN ('manager', 'support', 'analyst', 'agent')`;
 
 export const isHrEmployee = async (email: string) =>
   (await pool.query(`SELECT 1 FROM admin_accounts a WHERE LOWER(a.email) = LOWER($1) AND ${EMPLOYEE_SQL}`, [email])).rows.length > 0;
