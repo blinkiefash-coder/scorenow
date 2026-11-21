@@ -3,7 +3,7 @@ import { Pool } from "pg";
 import { scoreBand } from "./bureaus.js";
 import { normalizeReport, PARSER_VERSION } from "./reportParser.js";
 import { PARTNER_ACTIVITY_CHANNEL, partnerEvents } from "./realtime.js";
-const pool = new Pool({
+export const pool = new Pool({
     connectionString: process.env.DATABASE_URL,
 });
 export const initializeDatabase = async () => {
@@ -36,6 +36,7 @@ export const initializeDatabase = async () => {
     await pool.query(`ALTER TABLE otp_verifications ADD COLUMN IF NOT EXISTS email TEXT`);
     await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS password_salt TEXT`);
     await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS password_hash TEXT`);
+    await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS must_reset_password BOOLEAN NOT NULL DEFAULT FALSE`);
     await pool.query(`ALTER TABLE assessment_submissions ADD COLUMN IF NOT EXISTS user_id UUID REFERENCES users(id)`);
     await pool.query(`ALTER TABLE website_inquiries ADD COLUMN IF NOT EXISTS user_id UUID REFERENCES users(id)`);
     await pool.query(`ALTER TABLE payments ADD COLUMN IF NOT EXISTS report_bureau TEXT`);
@@ -101,6 +102,9 @@ export const initializeDatabase = async () => {
     await pool.query(`ALTER TABLE admin_report_audit ADD COLUMN IF NOT EXISTS provider_response JSONB`);
     await pool.query(`ALTER TABLE admin_report_audit ADD COLUMN IF NOT EXISTS normalized_report JSONB`);
     await pool.query(`ALTER TABLE admin_report_audit ADD COLUMN IF NOT EXISTS pan_hash TEXT`);
+    await pool.query(`ALTER TABLE admin_report_audit ADD COLUMN IF NOT EXISTS shared_user_id UUID REFERENCES users(id) ON DELETE SET NULL`);
+    await pool.query(`ALTER TABLE admin_report_audit ADD COLUMN IF NOT EXISTS shared_at TIMESTAMPTZ`);
+    await pool.query(`ALTER TABLE admin_report_audit ADD COLUMN IF NOT EXISTS shared_by TEXT`);
     await pool.query(`CREATE INDEX IF NOT EXISTS admin_report_audit_pan_hash_idx ON admin_report_audit (pan_hash)`);
     await pool.query(`CREATE INDEX IF NOT EXISTS admin_report_audit_created_at_idx ON admin_report_audit (created_at DESC)`);
     await pool.query(`ALTER TABLE admin_sessions ADD COLUMN IF NOT EXISTS role TEXT NOT NULL DEFAULT 'owner'`);
@@ -129,6 +133,19 @@ export const initializeDatabase = async () => {
     await pool.query(`ALTER TABLE admin_accounts ADD COLUMN IF NOT EXISTS is_primary BOOLEAN NOT NULL DEFAULT FALSE`);
     await pool.query(`ALTER TABLE admin_accounts DROP CONSTRAINT IF EXISTS admin_accounts_role_check`);
     await pool.query(`ALTER TABLE admin_accounts ADD CONSTRAINT admin_accounts_role_check CHECK (role IN ('owner', 'manager', 'support', 'analyst', 'partner', 'agent'))`);
+    await pool.query(`
+    CREATE TABLE IF NOT EXISTS agent_types (
+      key TEXT PRIMARY KEY,
+      label TEXT NOT NULL,
+      can_check_bureau BOOLEAN NOT NULL DEFAULT FALSE,
+      built_in BOOLEAN NOT NULL DEFAULT FALSE,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+    for (const [key, label, canCheck] of DEFAULT_AGENT_TYPES) {
+        await pool.query(`INSERT INTO agent_types (key, label, can_check_bureau, built_in) VALUES ($1, $2, $3, TRUE) ON CONFLICT (key) DO NOTHING`, [key, label, canCheck]);
+    }
+    await pool.query(`ALTER TABLE admin_accounts ADD COLUMN IF NOT EXISTS agent_type TEXT REFERENCES agent_types(key) ON DELETE SET NULL`);
     // NULL permissions means the role's default access; a list narrows (or, for partners, grants) specific abilities.
     await pool.query(`ALTER TABLE admin_accounts ADD COLUMN IF NOT EXISTS permissions TEXT[]`);
     await pool.query(`ALTER TABLE admin_accounts ADD COLUMN IF NOT EXISTS customer_scope TEXT NOT NULL DEFAULT 'all'`);
@@ -301,6 +318,8 @@ export const initializeDatabase = async () => {
     await pool.query(`ALTER TABLE crm_customer_profiles ADD COLUMN IF NOT EXISTS application_submitted_at TIMESTAMPTZ`);
     await pool.query(`ALTER TABLE crm_customer_profiles ADD COLUMN IF NOT EXISTS customer_consent_at TIMESTAMPTZ`);
     await pool.query(`ALTER TABLE crm_customer_profiles ADD COLUMN IF NOT EXISTS customer_consent_by TEXT`);
+    await pool.query(`ALTER TABLE crm_customer_profiles ADD COLUMN IF NOT EXISTS progress_shared_at TIMESTAMPTZ`);
+    await pool.query(`ALTER TABLE crm_customer_profiles ADD COLUMN IF NOT EXISTS progress_shared_by TEXT`);
     await pool.query(`
     CREATE TABLE IF NOT EXISTS crm_activities (
       id BIGSERIAL PRIMARY KEY,
@@ -542,7 +561,8 @@ export const createSession = async ({ userId, ipAddress, userAgent }) => {
 export const findSessionUser = async (token) => {
     if (!/^[0-9a-f]{64}$/.test(token))
         return null;
-    const { rows } = await pool.query(`SELECT u.id, u.mobile, u.email, COALESCE(NULLIF(TRIM(k.name_as_per_pan), ''), u.full_name) AS full_name
+    const { rows } = await pool.query(`SELECT u.id, u.mobile, u.email, COALESCE(NULLIF(TRIM(k.name_as_per_pan), ''), u.full_name) AS full_name,
+            u.must_reset_password AS "mustResetPassword"
      FROM user_sessions s JOIN users u ON u.id = s.user_id
      LEFT JOIN kyc_profiles k ON k.user_id = u.id
      WHERE s.token_hash = $1 AND s.revoked_at IS NULL AND s.expires_at > NOW()
@@ -567,9 +587,11 @@ export const createAdminSession = async ({ adminId, role = "owner", ipAddress, u
 export const findAdminSession = async (token) => {
     if (!/^[0-9a-f]{64}$/.test(token))
         return null;
-    const { rows } = await pool.query(`SELECT s.admin_id, COALESCE(a.role, s.role) AS role, s.expires_at, a.permissions, COALESCE(a.customer_scope, 'all') AS customer_scope
+    const { rows } = await pool.query(`SELECT s.admin_id, COALESCE(a.role, s.role) AS role, s.expires_at, a.permissions, COALESCE(a.customer_scope, 'all') AS customer_scope,
+            a.agent_type, t.label AS agent_type_label, COALESCE(t.can_check_bureau, FALSE) AS can_check_bureau
      FROM admin_sessions s
      LEFT JOIN admin_accounts a ON a.email = s.admin_id AND a.status = 'active'
+     LEFT JOIN agent_types t ON t.key = a.agent_type
      WHERE s.token_hash = $1 AND s.revoked_at IS NULL AND s.expires_at > NOW()
        AND (a.id IS NOT NULL OR s.admin_id = $2)`, [hashToken(token), process.env.ADMIN_LOGIN_ID || ""]);
     return rows[0] ?? null;
@@ -627,7 +649,7 @@ export const acceptAdminInvitation = async ({ token, password, pin }) => {
     return rows[0] ?? null;
 };
 export const listAdminAccounts = async () => {
-    const { rows } = await pool.query(`SELECT email, full_name, role, status, created_at, parent_email, permissions, customer_scope FROM admin_accounts WHERE is_primary = FALSE ORDER BY created_at DESC LIMIT 200`);
+    const { rows } = await pool.query(`SELECT email, full_name, role, status, created_at, parent_email, permissions, customer_scope, agent_type FROM admin_accounts WHERE is_primary = FALSE ORDER BY created_at DESC LIMIT 200`);
     return rows;
 };
 // The primary owner lives in ADMIN_* environment variables until it is first edited from the admin team page.
@@ -1485,6 +1507,82 @@ export const listAdminUsers = async () => {
   `);
     return rows;
 };
+export class CustomerEditError extends Error {
+    status;
+    constructor(message, status = 400) {
+        super(message);
+        this.status = status;
+    }
+}
+export const getCustomerProfileForEdit = async (userId) => {
+    const { rows } = await pool.query(`SELECT u.full_name, u.mobile, u.email, k.pan_last4, (k.user_id IS NOT NULL) AS has_kyc, k.name_as_per_pan,
+            to_char(k.date_of_birth, 'YYYY-MM-DD') AS date_of_birth, k.gender, k.address_line1, k.address_line2, k.city, k.state, k.pincode
+     FROM users u LEFT JOIN kyc_profiles k ON k.user_id = u.id WHERE u.id = $1 AND u.role = 'customer'`, [userId]);
+    const row = rows[0];
+    if (!row)
+        return null;
+    return {
+        fullName: row.full_name, mobile: row.mobile, email: row.email, panLast4: row.pan_last4,
+        kyc: row.has_kyc ? {
+            nameAsPerPan: row.name_as_per_pan ?? "", dateOfBirth: row.date_of_birth ?? "", gender: row.gender,
+            addressLine1: row.address_line1, addressLine2: row.address_line2, city: row.city, state: row.state, pincode: row.pincode,
+        } : null,
+    };
+};
+// Returns the list of changed field names (values are not returned so PII stays out of the audit log).
+export const updateCustomerProfile = async (userId, input) => {
+    const client = await pool.connect();
+    try {
+        await client.query("BEGIN");
+        const current = await client.query(`SELECT u.full_name, u.mobile, u.email, (k.user_id IS NOT NULL) AS has_kyc, k.name_as_per_pan, to_char(k.date_of_birth, 'YYYY-MM-DD') AS date_of_birth,
+              k.gender, k.address_line1, k.address_line2, k.city, k.state, k.pincode
+       FROM users u LEFT JOIN kyc_profiles k ON k.user_id = u.id WHERE u.id = $1 AND u.role = 'customer' FOR UPDATE OF u`, [userId]);
+        const before = current.rows[0];
+        if (!before)
+            throw new CustomerEditError("Customer account not found.", 404);
+        const changed = [];
+        if (before.full_name !== input.fullName)
+            changed.push("name");
+        if (before.mobile !== input.mobile)
+            changed.push("mobile");
+        if ((before.email ?? null) !== input.email)
+            changed.push("email");
+        await client.query(`UPDATE users SET full_name = $2::text, mobile = $3::varchar, email = $4::text,
+              mobile_verified = CASE WHEN mobile = $3::varchar THEN mobile_verified ELSE FALSE END,
+              email_verified = CASE WHEN email IS NOT DISTINCT FROM $4::text THEN email_verified ELSE FALSE END,
+              updated_at = NOW()
+       WHERE id = $1`, [userId, input.fullName, input.mobile, input.email]);
+        if (input.kyc) {
+            if (!before.has_kyc)
+                throw new CustomerEditError("This customer hasn't completed their profile yet, so there are no KYC details to edit.");
+            const k = input.kyc;
+            const pairs = [
+                ["name as per PAN", before.name_as_per_pan, k.nameAsPerPan], ["date of birth", before.date_of_birth, k.dateOfBirth],
+                ["gender", before.gender, k.gender], ["address", `${before.address_line1 ?? ""}|${before.address_line2 ?? ""}`, `${k.addressLine1 ?? ""}|${k.addressLine2 ?? ""}`],
+                ["city", before.city, k.city], ["state", before.state, k.state], ["pincode", before.pincode, k.pincode],
+            ];
+            for (const [label, a, b] of pairs)
+                if ((a ?? null) !== (b ?? null))
+                    changed.push(label);
+            await client.query(`UPDATE kyc_profiles SET name_as_per_pan = $2, date_of_birth = $3, gender = $4, address_line1 = $5, address_line2 = $6,
+                city = $7, state = $8, pincode = $9, updated_at = NOW()
+         WHERE user_id = $1`, [userId, k.nameAsPerPan, k.dateOfBirth, k.gender, k.addressLine1, k.addressLine2, k.city, k.state, k.pincode]);
+        }
+        await client.query("COMMIT");
+        return changed;
+    }
+    catch (error) {
+        await client.query("ROLLBACK").catch(() => undefined);
+        const pg = error;
+        if (pg.code === "23505") {
+            throw new CustomerEditError(pg.constraint === "users_email_key" ? "Another account already uses this email." : "Another account already uses this mobile number.", 409);
+        }
+        throw error;
+    }
+    finally {
+        client.release();
+    }
+};
 export const setCustomerAccountStatus = async (userId, status) => {
     const { rowCount } = await pool.query(`UPDATE users SET status = $2, updated_at = NOW() WHERE id = $1 AND role = 'customer'`, [userId, status]);
     if (status === "blocked" && rowCount) {
@@ -1573,7 +1671,7 @@ export const setCustomerPassword = async (userId, email, password) => {
     return Boolean(rows[0]);
 };
 export const authenticateCustomerByEmail = async (email, password) => {
-    const { rows } = await pool.query(`SELECT id, mobile, email, full_name, password_salt, password_hash
+    const { rows } = await pool.query(`SELECT id, mobile, email, full_name, password_salt, password_hash, must_reset_password
      FROM users WHERE LOWER(email) = $1 AND status = 'active' AND role = 'customer'`, [email]);
     const user = rows[0];
     if (!user?.password_salt || !user.password_hash || !/^[0-9a-f]{32}$/.test(user.password_salt) ||
@@ -1583,7 +1681,7 @@ export const authenticateCustomerByEmail = async (email, password) => {
     const expected = Buffer.from(user.password_hash, "hex");
     if (!timingSafeEqual(candidate, expected))
         return null;
-    return { id: user.id, mobile: user.mobile, email: user.email, full_name: user.full_name };
+    return { id: user.id, mobile: user.mobile, email: user.email, full_name: user.full_name, mustResetPassword: user.must_reset_password };
 };
 export const markEmailVerified = async (userId) => {
     const { rows } = await pool.query(`UPDATE users SET email_verified = TRUE, updated_at = NOW() WHERE id = $1
@@ -2540,12 +2638,45 @@ export const createCrmVerificationTask = async ({ userId, managerEmail, agentEma
 };
 export const listMyCrmVerificationTasks = async (agentEmail) => {
     const { rows } = await pool.query(`SELECT t.id, t.user_id, ${CUSTOMER_DISPLAY_NAME} AS customer_name, t.title, t.due_at,
-            t.review_status, t.review_remark, t.result, t.created_at
+            t.review_status, t.review_remark, t.result, t.created_at, p.application_status
      FROM crm_tasks t JOIN users u ON u.id = t.user_id
      LEFT JOIN kyc_profiles k ON k.user_id = u.id
+     LEFT JOIN crm_customer_profiles p ON p.user_id = u.id
      WHERE t.task_kind = 'verification' AND t.assignee_email = $1 AND t.review_status <> 'approved'
      ORDER BY t.due_at ASC NULLS LAST, t.created_at ASC LIMIT 200`, [agentEmail.toLowerCase()]);
     return rows;
+};
+export const getMyCrmVerificationTask = async (taskId, agentEmail) => {
+    const task = await pool.query(`SELECT t.id, t.user_id, t.title, t.due_at, t.review_status, t.review_remark, t.result, t.created_at,
+            u.email, u.mobile, ${CUSTOMER_DISPLAY_NAME} AS full_name,
+            to_char(k.date_of_birth, 'YYYY-MM-DD') AS date_of_birth, k.gender, k.pan_last4,
+            k.address_line1, k.city, k.state, k.pincode,
+            p.application_status, p.customer_remark, ca.owner_email AS partner_email
+     FROM crm_tasks t
+     JOIN users u ON u.id = t.user_id
+     LEFT JOIN kyc_profiles k ON k.user_id = u.id
+     LEFT JOIN crm_customer_profiles p ON p.user_id = u.id
+     LEFT JOIN customer_assignments ca ON ca.user_id = u.id
+     WHERE t.id = $1 AND t.task_kind = 'verification' AND t.assignee_email = $2`, [taskId, agentEmail.toLowerCase()]);
+    if (!task.rows[0])
+        return null;
+    const comments = await pool.query(`SELECT id, remark, actor_email, actor_role, created_at
+     FROM crm_application_events
+     WHERE user_id = $1 AND event_type = 'verification_comment' AND visibility = 'internal'
+     ORDER BY created_at ASC`, [task.rows[0].user_id]);
+    return { task: task.rows[0], comments: comments.rows };
+};
+export const addMyCrmVerificationComment = async ({ taskId, agentEmail, comment, }) => {
+    const task = await pool.query(`SELECT user_id, review_status FROM crm_tasks
+     WHERE id = $1 AND task_kind = 'verification' AND assignee_email = $2`, [taskId, agentEmail.toLowerCase()]);
+    const current = task.rows[0];
+    if (!current)
+        return null;
+    if (current.review_status === "approved")
+        throw new CrmApplicationConflict("Approved verification work is read-only.");
+    await pool.query(`INSERT INTO crm_application_events (user_id, event_type, visibility, remark, actor_email, actor_role, details)
+     VALUES ($1, 'verification_comment', 'internal', $2, $3, 'agent', $4)`, [current.user_id, comment, agentEmail.toLowerCase(), JSON.stringify({ taskId })]);
+    return { userId: current.user_id };
 };
 export const updateMyCrmVerificationTask = async ({ taskId, agentEmail, action, result, }) => {
     const client = await pool.connect();
@@ -2862,4 +2993,162 @@ export const closeNehaConversation = async (conversationId) => {
      WHERE id = $1
      RETURNING id, customer_id, assigned_to_id, assigned_to_role, status, created_at, closed_at`, [conversationId]);
     return rows[0] ?? null;
+};
+export const DEFAULT_CUSTOMER_PASSWORD = "Customer@123";
+const hashPassword = (password) => {
+    const salt = randomBytes(16).toString("hex");
+    return { salt, hash: scryptSync(password, salt, 64).toString("hex") };
+};
+export class CustomerShareError extends Error {
+}
+// Links a completed admin bureau check to the customer, creating a customer login
+// (default password, forced reset on first sign-in) when the customer has no password yet.
+export const shareAdminReportWithCustomer = async (auditId, sharedBy) => {
+    const client = await pool.connect();
+    try {
+        await client.query("BEGIN");
+        const audit = await client.query(`SELECT applicant_details, shared_user_id FROM admin_report_audit
+       WHERE id = $1 AND status = 'completed' AND normalized_report IS NOT NULL FOR UPDATE`, [auditId]);
+        if (!audit.rows[0])
+            throw new CustomerShareError("Completed bureau report not found.");
+        const applicant = audit.rows[0].applicant_details ?? {};
+        const mobile = String(applicant.mobile || "").replace(/\D/g, "");
+        const email = String(applicant.email || "").trim().toLowerCase() || null;
+        const fullName = String(applicant.fullName || "").trim() || "Scorenow customer";
+        if (mobile.length !== 10)
+            throw new CustomerShareError("This report has no valid customer mobile number.");
+        const matches = await client.query(`SELECT id, email, role, status, password_hash FROM users
+       WHERE mobile = $1 OR ($2::text IS NOT NULL AND LOWER(email) = $2) FOR UPDATE`, [mobile, email]);
+        if (matches.rows.length > 1)
+            throw new CustomerShareError("The mobile number and email belong to different customer accounts.");
+        const existing = matches.rows[0];
+        if (existing && (existing.role !== "customer" || existing.status !== "active")) {
+            throw new CustomerShareError("This mobile number belongs to an account that cannot receive shared reports.");
+        }
+        let userId;
+        let loginCreated = false;
+        let loginEmail = existing?.email ?? email;
+        if (!existing) {
+            if (!email)
+                throw new CustomerShareError("Add the customer's email in the bureau check to create their login.");
+            const { salt, hash } = hashPassword(DEFAULT_CUSTOMER_PASSWORD);
+            const created = await client.query(`INSERT INTO users (mobile, email, full_name, mobile_verified, password_salt, password_hash, must_reset_password)
+         VALUES ($1, $2, $3, FALSE, $4, $5, TRUE) RETURNING id`, [mobile, email, fullName, salt, hash]);
+            userId = created.rows[0].id;
+            loginCreated = true;
+        }
+        else {
+            userId = existing.id;
+            if (!existing.password_hash && loginEmail) {
+                const { salt, hash } = hashPassword(DEFAULT_CUSTOMER_PASSWORD);
+                await client.query(`UPDATE users SET email = COALESCE(email, $2), password_salt = $3, password_hash = $4,
+             must_reset_password = TRUE, updated_at = NOW() WHERE id = $1`, [userId, loginEmail, salt, hash]);
+                loginCreated = true;
+            }
+        }
+        loginEmail = loginEmail ?? null;
+        await client.query(`UPDATE admin_report_audit SET shared_user_id = $2, shared_at = NOW(), shared_by = $3 WHERE id = $1`, [auditId, userId, sharedBy]);
+        await client.query("COMMIT");
+        return { userId, loginCreated, loginEmail, alreadyShared: audit.rows[0].shared_user_id === userId };
+    }
+    catch (error) {
+        await client.query("ROLLBACK").catch(() => undefined);
+        throw error;
+    }
+    finally {
+        client.release();
+    }
+};
+// Shares a customer's application progress, plus any completed admin bureau checks run
+// for the same mobile number. Partners may only share customers assigned to them.
+export const shareCustomerProgress = async (userId, sharedBy, partnerEmail) => {
+    if (partnerEmail) {
+        const { rows } = await pool.query(`SELECT 1 FROM customer_assignments WHERE user_id = $1 AND owner_email = $2`, [userId, partnerEmail.toLowerCase()]);
+        if (!rows[0])
+            throw new CustomerShareError("This customer is not assigned to you.");
+    }
+    const profile = await pool.query(`UPDATE crm_customer_profiles p SET progress_shared_at = NOW(), progress_shared_by = $2
+     FROM users u WHERE p.user_id = $1 AND u.id = p.user_id AND p.application_status IS NOT NULL
+     RETURNING u.mobile`, [userId, sharedBy]);
+    if (!profile.rows[0])
+        throw new CustomerShareError("No application exists for this customer yet.");
+    const reports = await pool.query(`UPDATE admin_report_audit SET shared_user_id = $1, shared_at = NOW(), shared_by = $3
+     WHERE status = 'completed' AND normalized_report IS NOT NULL AND shared_user_id IS NULL
+       AND applicant_details->>'mobile' = $2`, [userId, profile.rows[0].mobile, sharedBy]);
+    return { reportsShared: reports.rowCount ?? 0 };
+};
+export const getCustomerSharedItems = async (userId) => {
+    const [progress, timeline, reports] = await Promise.all([
+        pool.query(`SELECT application_status AS status, customer_remark AS remark, progress_shared_at AS shared_at, updated_at
+       FROM crm_customer_profiles WHERE user_id = $1 AND progress_shared_at IS NOT NULL AND application_status IS NOT NULL`, [userId]),
+        pool.query(`SELECT application_status AS status, remark, created_at FROM crm_application_events
+       WHERE user_id = $1 AND visibility = 'customer' AND application_status IS NOT NULL ORDER BY created_at`, [userId]),
+        pool.query(`SELECT id::text, bureau, credit_score, to_char(COALESCE(completed_at, created_at), 'YYYY-MM-DD') AS report_date, shared_at
+       FROM admin_report_audit WHERE shared_user_id = $1 AND status = 'completed' ORDER BY shared_at DESC`, [userId]),
+    ]);
+    return {
+        progress: progress.rows[0] ? { ...progress.rows[0], timeline: timeline.rows } : null,
+        reports: reports.rows,
+    };
+};
+export const getSharedReportForCustomer = async (userId, auditId) => {
+    const { rows } = await pool.query(`SELECT 1 FROM admin_report_audit WHERE id = $1 AND shared_user_id = $2`, [auditId, userId]);
+    return rows[0] ? getAdminReportDocument(auditId) : null;
+};
+export const changeCustomerPassword = async (userId, newPassword, currentPassword) => {
+    const { rows } = await pool.query(`SELECT password_salt, password_hash, must_reset_password FROM users WHERE id = $1 AND role = 'customer' AND status = 'active'`, [userId]);
+    const user = rows[0];
+    if (!user)
+        return "not_found";
+    if (!user.must_reset_password && user.password_salt && user.password_hash) {
+        const candidate = scryptSync(currentPassword ?? "", user.password_salt, 64);
+        if (!timingSafeEqual(candidate, Buffer.from(user.password_hash, "hex")))
+            return "wrong_password";
+    }
+    const { salt, hash } = hashPassword(newPassword);
+    await pool.query(`UPDATE users SET password_salt = $2, password_hash = $3, must_reset_password = FALSE, updated_at = NOW() WHERE id = $1`, [userId, salt, hash]);
+    return "ok";
+};
+// Built-in agent departments. [key, label, can run bureau checks by default]
+export const DEFAULT_AGENT_TYPES = [
+    ["credit_bureau", "Credit bureau agent", true],
+    ["verification", "Field / verification agent", true],
+    ["customer_handling", "Customer handling", true],
+    ["call_center", "Call center", false],
+    ["collections", "Collections", false],
+    ["documentation", "Documentation / KYC", false],
+    ["sales", "Sales / telecalling", false],
+    ["legal_hearing", "Legal hearing", false],
+    ["hr", "HR", false],
+];
+export const listAgentTypes = async () => {
+    const { rows } = await pool.query(`SELECT t.key, t.label, t.can_check_bureau, t.built_in,
+            (SELECT COUNT(*)::int FROM admin_accounts a WHERE a.agent_type = t.key) AS agent_count
+     FROM agent_types t ORDER BY t.built_in DESC, t.label`);
+    return rows;
+};
+export const createAgentType = async (label, canCheckBureau) => {
+    const base = label.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "").slice(0, 40) || "agent_type";
+    const { rows } = await pool.query(`INSERT INTO agent_types (key, label, can_check_bureau)
+     VALUES ($1 || CASE WHEN EXISTS (SELECT 1 FROM agent_types WHERE key = $1) THEN '_' || substr(md5(random()::text), 1, 4) ELSE '' END, $2, $3)
+     RETURNING key`, [base, label, canCheckBureau]);
+    return rows[0].key;
+};
+export const updateAgentType = async (key, changes) => {
+    const { rowCount } = await pool.query(`UPDATE agent_types SET label = COALESCE($2, label), can_check_bureau = COALESCE($3, can_check_bureau) WHERE key = $1`, [key, changes.label ?? null, changes.canCheckBureau ?? null]);
+    return Boolean(rowCount);
+};
+export const deleteAgentType = async (key) => {
+    const { rowCount } = await pool.query(`DELETE FROM agent_types WHERE key = $1 AND built_in = FALSE`, [key]);
+    return Boolean(rowCount);
+};
+export const listAgentsWithTypes = async () => {
+    const { rows } = await pool.query(`SELECT email, full_name, status, parent_email, agent_type FROM admin_accounts
+     WHERE role = 'agent' AND status IN ('active', 'invited', 'disabled') ORDER BY full_name`);
+    return rows;
+};
+export const setAgentType = async (email, agentType) => {
+    const { rowCount } = await pool.query(`UPDATE admin_accounts SET agent_type = $2, updated_at = NOW()
+     WHERE email = $1 AND role = 'agent' AND ($2::text IS NULL OR EXISTS (SELECT 1 FROM agent_types WHERE key = $2))`, [email.toLowerCase(), agentType]);
+    return Boolean(rowCount);
 };

@@ -1,5 +1,6 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import { ArrowRight, Bell, Download, RefreshCw, ShieldAlert, WalletCards } from 'lucide-react'
+import './AdminCrm.css'
 
 const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:3000'
 
@@ -218,84 +219,107 @@ export function AdminOpsPanel({ token, role }: { token: string; role: string }) 
     }
   }
 
+  const rupees = (value: number) => `₹${value.toLocaleString('en-IN', { maximumFractionDigits: 2 })}`
+  const pendingRefunds = refunds.filter((refund) => refund.status === 'pending').length
+  const daily: any[] = revenue?.daily ?? []
+  const maxDaily = Math.max(1, ...daily.map((row) => Number(row.revenue)))
+  const refundTone: Record<string, string> = { pending: 's-contacted', approved: 's-new', processed: 's-paid', rejected: 's-closed' }
+
   return (
-    <div className="admin-ops-panel">
-      {error && <p className="form-error" role="alert">{error}</p>}
-      {message && <p className="form-success" role="status">{message}</p>}
-      <button className="button button-outline" type="button" onClick={load}><RefreshCw /> Refresh</button>
+    <div className="crm ops">
+      <header className="crm-top">
+        <div><span className="crm-kicker">OPERATIONS</span><h1>Operations</h1><p>Refunds, revenue, data exports, support replies and team access in one place.</p></div>
+        <button className="crm-btn ghost" type="button" onClick={load}><RefreshCw /> Refresh</button>
+      </header>
+      {error && <p className="dashboard-notice error" role="alert">{error}</p>}
+      {message && <p className="dashboard-notice" role="status">{message}</p>}
+
+      {(canManage || (canAnalyse && revenue)) && <section className="crm-kpis" aria-label="Summary">
+        {canManage && <div className="crm-kpi"><b>{pendingRefunds}</b><small>Refunds awaiting review</small></div>}
+        {canAnalyse && revenue && <>
+          <div className="crm-kpi"><b>{rupees(Number(revenue.totalRevenue))}</b><small>Revenue · {revenue.paidPayments} paid payments</small></div>
+          <div className="crm-kpi gold"><b>{rupees(revenue.commissions.pending.amountPaise / 100)}</b><small>Commissions pending ({revenue.commissions.pending.count})</small></div>
+        </>}
+      </section>}
 
       {canManage && (
-        <section>
-          <h3>Refund requests</h3>
-          {refunds.length === 0 ? <p>No refund requests.</p> : (
-            <table className="admin-table">
+        <section className="crm-card">
+          <h2>Refund requests</h2>
+          {refunds.length === 0 ? <p className="crm-empty">No refund requests. You're all caught up.</p> : (
+            <div className="crm-wrap"><table className="crm-table">
               <thead><tr><th>Customer</th><th>Payment</th><th>Reason</th><th>Status</th><th>Action</th></tr></thead>
               <tbody>
                 {refunds.map((refund) => (
                   <tr key={refund.id}>
-                    <td>{refund.customer_name ?? '—'}</td>
-                    <td>{refund.payment_id}</td>
+                    <td><b>{refund.customer_name ?? '—'}</b></td>
+                    <td><code className="ops-code">{refund.payment_id}</code></td>
                     <td>{refund.reason}</td>
-                    <td>{refund.status}</td>
-                    <td>
+                    <td><span className={`crm-tag ${refundTone[refund.status] ?? ''}`}>{refund.status}</span></td>
+                    <td><span className="crm-fu-actions">
                       {refund.status === 'pending' && <>
-                        <button type="button" className="button button-outline" onClick={() => decideRefund(refund.id, 'approved')}>Approve</button>
-                        <button type="button" className="button button-outline" onClick={() => decideRefund(refund.id, 'rejected')}>Reject</button>
+                        <button type="button" className="crm-btn sm" onClick={() => decideRefund(refund.id, 'approved')}>Approve</button>
+                        <button type="button" className="crm-btn ghost sm" onClick={() => decideRefund(refund.id, 'rejected')}>Reject</button>
                       </>}
-                      {refund.status === 'approved' && <button type="button" className="button button-outline" onClick={() => decideRefund(refund.id, 'processed')}>Mark processed</button>}
-                    </td>
+                      {refund.status === 'approved' && <button type="button" className="crm-btn ghost sm" onClick={() => decideRefund(refund.id, 'processed')}>Mark processed</button>}
+                    </span></td>
                   </tr>
                 ))}
               </tbody>
-            </table>
+            </table></div>
           )}
-          <p className="muted">Refunds are reviewed here only. Money is returned manually from the payment provider dashboard.</p>
+          <p className="crm-muted ops-hint">Refunds are reviewed here only. Money is returned manually from the payment provider dashboard.</p>
         </section>
       )}
 
-      {canAnalyse && revenue && (
-        <section>
-          <h3>Revenue and commissions ({revenue.from} to {revenue.to})</h3>
-          <p>Paid payments: <strong>{revenue.paidPayments}</strong> · Revenue: <strong>₹{Number(revenue.totalRevenue).toLocaleString('en-IN')}</strong></p>
-          <p>Commissions pending: ₹{(revenue.commissions.pending.amountPaise / 100).toLocaleString('en-IN')} ({revenue.commissions.pending.count}) · Paid: ₹{(revenue.commissions.paid.amountPaise / 100).toLocaleString('en-IN')} ({revenue.commissions.paid.count})</p>
-          <table className="admin-table">
-            <thead><tr><th>Day</th><th>Paid</th><th>Revenue</th></tr></thead>
-            <tbody>{revenue.daily.map((row: any) => <tr key={row.day}><td>{row.day}</td><td>{row.paidCount}</td><td>₹{Number(row.revenue).toLocaleString('en-IN')}</td></tr>)}</tbody>
-          </table>
-        </section>
-      )}
-
-      {canManage && (
-        <section>
-          <h3>Exports</h3>
-          {(['customers', 'payments', 'refunds'] as const).map((kind) => (
-            <button key={kind} type="button" className="button button-outline" onClick={() => downloadCsv(token, kind).catch((e) => setError(e.message))}>
-              <Download /> {kind} CSV
-            </button>
-          ))}
-        </section>
-      )}
+      {(canAnalyse && revenue) || canManage ? <section className="crm-row">
+        {canAnalyse && revenue && <div className="crm-card">
+          <h2>Daily revenue</h2>
+          <p className="crm-muted ops-hint">{revenue.from} to {revenue.to} · Commissions paid {rupees(revenue.commissions.paid.amountPaise / 100)} ({revenue.commissions.paid.count})</p>
+          {daily.length ? daily.map((row) => <div key={row.day} className="crm-src ops-day">
+            <span>{row.day}</span>
+            <span className="crm-bar"><i style={{ width: `${Number(row.revenue) / maxDaily * 100}%` }} /></span>
+            <span>{rupees(Number(row.revenue))}<small> · {row.paidCount}</small></span>
+          </div>) : <p className="crm-empty">No paid payments in this period.</p>}
+        </div>}
+        {canManage && <div className="crm-card">
+          <h2>Exports</h2>
+          <p className="crm-muted ops-hint">Download a CSV for reporting or reconciliation.</p>
+          <div className="ops-exports">
+            {(['customers', 'payments', 'refunds'] as const).map((kind) => (
+              <button key={kind} type="button" className="crm-act" onClick={() => downloadCsv(token, kind).catch((e) => setError(e.message))}>
+                <span>Export <b>{kind}</b></span><i><Download /></i>
+              </button>
+            ))}
+          </div>
+        </div>}
+      </section> : null}
 
       {canSupport && (
-        <section>
-          <h3>Canned replies</h3>
-          <ul>{replies.map((reply) => <li key={reply.id}><strong>{reply.title}</strong>: {reply.body} <button type="button" className="button button-outline" onClick={() => deleteReply(reply.id)}>Delete</button></li>)}</ul>
-          <form className="inline-form" onSubmit={saveReply}>
-            <input placeholder="Title" value={replyTitle} onChange={(e) => setReplyTitle(e.target.value)} aria-label="Reply title" />
-            <textarea placeholder="Reply text" value={replyBody} onChange={(e) => setReplyBody(e.target.value)} aria-label="Reply text" />
-            <button className="button button-primary" type="submit">Save reply</button>
+        <section className="crm-card">
+          <h2>Canned replies</h2>
+          <ul className="crm-fu">
+            {replies.length ? replies.map((reply) => <li key={reply.id}>
+              <span><b>{reply.title}</b><small>{reply.body}</small></span>
+              <button type="button" className="crm-btn ghost sm" onClick={() => deleteReply(reply.id)}>Delete</button>
+            </li>) : <li className="crm-muted">No saved replies yet. Add one below.</li>}
+          </ul>
+          <form className="crm-form ops-form" onSubmit={saveReply}>
+            <input placeholder="Title, e.g. Report delayed" value={replyTitle} onChange={(e) => setReplyTitle(e.target.value)} aria-label="Reply title" />
+            <textarea rows={3} placeholder="Reply text" value={replyBody} onChange={(e) => setReplyBody(e.target.value)} aria-label="Reply text" />
+            <div className="crm-acts"><button className="crm-btn" type="submit" disabled={!replyTitle.trim() || !replyBody.trim()}>Save reply</button></div>
           </form>
         </section>
       )}
 
       {isOwner && (
-        <section>
-          <h3>Issue admin password reset link</h3>
-          <form className="inline-form" onSubmit={issueReset}>
-            <input type="email" placeholder="admin@email.com" value={resetEmail} onChange={(e) => setResetEmail(e.target.value)} aria-label="Admin email" />
-            <button className="button button-outline" type="submit">Create link</button>
+        <section className="crm-card">
+          <h2>Admin password reset link</h2>
+          <p className="crm-muted ops-hint">Create a one-time link for a team member who can't sign in.</p>
+          <form className="crm-tools" onSubmit={issueReset}>
+            <input type="email" placeholder="admin@email.com" value={resetEmail} onChange={(e) => setResetEmail(e.target.value)} aria-label="Admin email" required />
+            <button className="crm-btn" type="submit">Create link</button>
           </form>
-          {resetLink && <p>Share this link privately. It expires in 2 hours: <code>{resetLink}</code></p>}
+          {resetLink && <p className="crm-note">Share this link privately. It expires in 2 hours:<br /><code className="ops-code">{resetLink}</code></p>}
         </section>
       )}
     </div>

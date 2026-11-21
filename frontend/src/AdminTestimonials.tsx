@@ -1,4 +1,5 @@
 import { useEffect, useState, type ChangeEvent, type FormEvent } from 'react'
+import { BrandLoader } from './BrandLoader'
 import { apiUrl, testimonialPhotoSrc } from './siteContent'
 
 type AdminTestimonial = {
@@ -253,7 +254,7 @@ export function AdminTestimonials({ token, refreshKey }: { token: string; refres
 
       <article className="dashboard-card">
         <div className="dashboard-card-heading"><strong>All testimonials</strong><small>{items.length} total · {publishedCount} published{awaitingConsent ? ` · ${awaitingConsent} awaiting consent` : ''}</small></div>
-        {loading ? <p>Loading testimonials…</p> : items.length === 0 ? <p>No testimonials yet. Add the first one above.</p> : (
+        {loading ? <BrandLoader label="Loading testimonials…" /> : items.length === 0 ? <p>No testimonials yet. Add the first one above.</p> : (
           <div className="admin-testimonial-list">{items.map((item) => (
             <div className={`admin-testimonial-row${editing?.id === item.id ? ' is-editing' : ''}`} key={item.id}>
               <AdminPhoto item={item} token={token} />

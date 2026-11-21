@@ -1,5 +1,9 @@
 import { useEffect, useState, type FormEvent } from 'react'
+import { BrandLoader } from './BrandLoader'
 import { subscribeAdminStream } from './adminLive'
+import { ApplicationProgress } from './ApplicationProgress'
+import { ShareProgressButton } from './AgentTypes'
+import { applicationProgressLabel } from './applicationProgressUtils'
 
 const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:3000'
 
@@ -161,9 +165,7 @@ export function PartnerPortal({
   const data = live.data ?? manualData
   const error = live.data ? '' : (manualError || live.error)
   const label = role === 'partner' ? 'Partner' : 'Agent'
-  const statusLabel = (status: string | null) => status
-    ? status.replaceAll('_', ' ').replace(/\b\w/g, (letter) => letter.toUpperCase())
-    : 'Not submitted'
+  const statusLabel = applicationProgressLabel
 
   const createApplication = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
@@ -224,7 +226,7 @@ export function PartnerPortal({
         ? { eyebrow: 'PARTNER EARNINGS', title: 'Earnings', description: 'Review your commissions and manage payout details.' }
         : { eyebrow: `${label.toUpperCase()} PORTAL`, title: 'My applications', description: "Follow each customer's application status and customer-facing updates." }
   const heading = <div className="admin-heading"><span>{headingCopy.eyebrow}</span><h1>{headingCopy.title}</h1><p>{headingCopy.description}</p></div>
-  if (!data) return <>{heading}{error ? <p className="dashboard-notice error" role="alert">{error}</p> : <p className="admin-activity-empty">Loading…</p>}</>
+  if (!data) return <>{heading}{error ? <p className="dashboard-notice error" role="alert">{error}</p> : <BrandLoader label="Loading…" />}</>
 
   const completedApplications = data.customers.filter((customer) => customer.application_status === 'approved').length
   const showReferrals = role === 'partner' && (page === 'refer' || page === 'all')
@@ -269,7 +271,7 @@ export function PartnerPortal({
             {data.customers.map((customer) => <tr key={customer.id}>
               <td><strong>{customer.full_name}</strong></td>
               <td>{formatDate(customer.assigned_at)}</td>
-              <td><span className={`admin-status ${customer.application_status === 'approved' ? 'completed' : customer.application_status === 'rejected' ? 'failed' : 'pending'}`}>{statusLabel(customer.application_status)}</span></td>
+              <td><ApplicationProgress status={customer.application_status} compact />{role === 'partner' && <ShareProgressButton token={token} customerId={customer.id} compact />}</td>
               <td>
                 {customer.customer_remark || '—'}
                 {customer.application_timeline?.length ? <details><summary>Progress timeline</summary><ul className="admin-activity-list">

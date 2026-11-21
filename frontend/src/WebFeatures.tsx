@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { BrandLoader } from './BrandLoader'
 import { testimonialPhotoSrc } from './siteContent'
 import { X, Star, Check, Phone, Mail, ArrowRight } from 'lucide-react'
 
@@ -556,7 +557,7 @@ export function AdminHealthAssessmentManagement({ token, adminId }: AdminHealthA
     }
   }
 
-  if (loading) return <div className="admin-loading">Loading health assessment requests...</div>
+  if (loading) return <BrandLoader label="Loading health assessment requests…" />
   if (error) return <div className="admin-error">{error}</div>
 
   return (

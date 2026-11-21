@@ -8,6 +8,12 @@
     { "source": "/dashboard/", "destination": "/" },
     { "source": "/admin", "destination": "/" },
     { "source": "/admin/", "destination": "/" },
+    { "source": "/superadmin", "destination": "/" },
+    { "source": "/superadmin/", "destination": "/" },
+    { "source": "/partner", "destination": "/" },
+    { "source": "/partner/", "destination": "/" },
+    { "source": "/employee", "destination": "/" },
+    { "source": "/employee/", "destination": "/" },
     { "source": "/terms", "destination": "/" },
     { "source": "/terms/", "destination": "/" },
     { "source": "/privacy", "destination": "/" },
@@ -26,6 +32,18 @@
     },
     {
       "source": "/creditscore/",
+      "headers": [{ "key": "X-Robots-Tag", "value": "noindex, nofollow, noarchive" }]
+    },
+    {
+      "source": "/superadmin",
+      "headers": [{ "key": "X-Robots-Tag", "value": "noindex, nofollow, noarchive" }]
+    },
+    {
+      "source": "/partner",
+      "headers": [{ "key": "X-Robots-Tag", "value": "noindex, nofollow, noarchive" }]
+    },
+    {
+      "source": "/employee",
       "headers": [{ "key": "X-Robots-Tag", "value": "noindex, nofollow, noarchive" }]
     },
     {

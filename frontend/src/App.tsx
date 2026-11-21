@@ -1,18 +1,26 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent, type JSX, type MouseEvent as ReactMouseEvent } from 'react'
+import { BrandLoader } from './BrandLoader'
 import {
   AlertTriangle, ArrowLeft, ArrowRight, BadgeIndianRupee, BarChart3,
-  Building2, CalendarDays, Check, ChevronDown, CircleHelp, Clock3, CreditCard, Download, ExternalLink,
+  Briefcase, Building2, CalendarDays, Check, ChevronDown, CircleHelp, Clock3, CreditCard, Download, ExternalLink,
   Copy, Eye, EyeOff, FileCheck2, FileSearch, Gift, Handshake, Headphones,
   Gauge, House, Landmark, Layers, Lightbulb, LockKeyhole, Mail, MapPin, Menu, MessageCircle, Pause,
-  PiggyBank, Percent, Phone, Play, RotateCcw, Search, Settings, ShieldCheck, Smartphone, Sparkles, Star,
+  PiggyBank, Pencil, Percent, Phone, Play, RotateCcw, Search, Settings, ShieldCheck, Smartphone, Sparkles, Star,
   ArrowUpDown, ArrowUpRight, ArrowDownLeft, Bell, Info, Target, TrendingUp, Users, Volume2, VolumeX, UserRound, WalletCards, X, Zap,
 } from 'lucide-react'
 import { PartnerManagement, PartnerMonitor, PartnerPortal } from './AdminPartners'
-import { AgentWorkQueue, CrmManagement } from './AdminCrm'
+import { AgentWorkQueue, CrmManagement, PartnerApplications } from './AdminCrm'
+import { PortalLogin } from './PortalLogin'
+import { ForcePasswordReset, SharedUpdatesCard } from './CustomerShared'
+import { AgentTypeSelect, AgentTypesManager, ShareReportButton } from './AgentTypes'
+import { portalForPath, portalForRole, type PortalConfig } from './portalConfig'
 import { AdminSiteContent } from './AdminSiteContent'
 import { AdminTestimonials } from './AdminTestimonials'
 import { AccessEditor, FollowUpsPanel, PartnerAgentsPanel, StaffAssignmentPanel, type TeamMember } from './AdminAccess'
 import { accessSummary, roleLabel } from './adminAccessShared'
+import { CrmHub } from './AdminLeads'
+import { PeopleHub } from './AdminHr'
+import { CustomerEditDialog } from './CustomerEditDialog'
 import { AdminOpsPanel, AdminSessionExpiryBanner, CannedReplyPicker, CustomerPaymentsPanel, CustomerPrivacyPanel } from './AccountOps'
 import { AdminHealthAssessmentManagement, HealthAssessmentForm, TestimonialsSection } from './WebFeatures'
 import { company, LEGAL_LAST_UPDATED, legalDocumentForPath, legalDocuments, type LegalDocument } from './legalContent'
@@ -557,7 +565,7 @@ function SocialLinks() {
   )
 }
 
-type AuthUser = { id: string; mobile: string; email: string | null; full_name: string; token: string }
+type AuthUser = { id: string; mobile: string; email: string | null; full_name: string; token: string; mustResetPassword?: boolean }
 
 const authHeaders = (user: AuthUser) => ({ Authorization: `Bearer ${user.token}` })
 
@@ -602,8 +610,9 @@ function useAuthUser() {
         const { user: fresh } = await response.json() as { user?: Omit<AuthUser, 'token'> }
         if (cancelled || !fresh) return
         setUser((current) => {
-          if (!current || current.token !== token || current.full_name === fresh.full_name) return current
-          const next = { ...current, full_name: fresh.full_name }
+          const mustResetPassword = Boolean(fresh.mustResetPassword)
+          if (!current || current.token !== token || (current.full_name === fresh.full_name && Boolean(current.mustResetPassword) === mustResetPassword)) return current
+          const next = { ...current, full_name: fresh.full_name, mustResetPassword }
           localStorage.setItem('scorenow-user', JSON.stringify(next))
           return next
         })
@@ -697,6 +706,7 @@ function useLoginGate({ redirectAfterLogin, promptOnScroll = true }: { redirectA
 
   const authModal = <>
     <AuthModal open={authOpen} notice={authNotice} onClose={closeAuth} onSuccess={handleLogin} />
+    {user?.mustResetPassword && <ForcePasswordReset token={user.token} onDone={() => login({ ...user, mustResetPassword: false })} onLogout={logout} />}
   </>
 
   return { user, logout, requireLogin, openAuth, authModal }
@@ -1943,7 +1953,7 @@ function LoanPaymentPage({ user, report, onGetReport }: { user: AuthUser; report
 
       {!report && <article className="dashboard-card empty-report-card"><div className="empty-dashboard-state"><FileSearch /><strong>Get a credit report to see your loans</strong><span>Your running and defaulted loans appear here once you have a credit report.</span><a className="dashboard-score-cta" href="#credit-reports" onClick={onGetReport}>Get a credit report <ArrowRight /></a></div></article>}
       {error && <p className="dashboard-notice error">{error}</p>}
-      {report && !accounts && !error && <div className="dashboard-card report-loading"><Spinner size={18} /> Loading your loans…</div>}
+      {report && !accounts && !error && <BrandLoader label="Loading your loans…" />}
       {accounts && <>
         <div className="loan-stats">{stats.map(({ tone, icon: Icon, label, value, note }) => (
           <article className={`loan-stat ${tone}`} key={label}><span className="loan-stat-icon"><Icon /></span><div><small>{label}</small><strong>{value}</strong><span>{note}</span></div></article>
@@ -2378,7 +2388,7 @@ function ReportDetailView({ user, requestId, onOpenPredictor }: { user: AuthUser
   }, [requestId, user])
 
   if (error) return <p className="dashboard-notice error">{error}</p>
-  if (!detail) return <div className="dashboard-card report-loading"><Spinner size={18} /> Loading full report…</div>
+  if (!detail) return <BrandLoader label="Loading full report…" />
 
   const { summary, personal } = detail
   const bureauLabel = bureauCatalog.find((item) => item.id === detail.bureau)?.name ?? detail.bureau
@@ -2628,7 +2638,7 @@ function SimulatedCheckout({ checkout, onApprove, onDismiss }: { checkout: Simul
           <button type="button" className="button button-primary sim-pay" onClick={pay}>Pay ₹{(checkout.amount / 100).toFixed(2)}</button>
           <p className="sim-note"><ShieldCheck /> Payments are auto-approved while our payment gateway is being activated. You will not be charged.</p>
         </>}
-        {stage === 'processing' && <div className="sim-status"><Spinner size={32} /><strong>Processing payment…</strong></div>}
+        {stage === 'processing' && <BrandLoader label="Processing payment…" />}
         {stage === 'approved' && <div className="sim-status approved"><span><Check /></span><strong>Payment approved</strong><small>{checkout.label ? 'Activating your plan…' : 'Fetching your report…'}</small></div>}
       </div>
     </div>
@@ -3206,7 +3216,7 @@ function DashboardPage({ user, onLogout }: { user: AuthUser; onLogout: () => voi
     }
   }
 
-  if (loading) return <div className="dashboard-loading"><span><Spinner size={44} /></span><strong>Loading your credit workspace…</strong></div>
+  if (loading) return <BrandLoader label="Loading your credit workspace…" />
   if (!status?.profile) return <ProfileOnboarding user={user} onComplete={() => void loadStatus()} onLogout={onLogout} />
 
   const reportFor = (bureau: BureauId) => status.reports.find((report) => report.bureau === bureau)
@@ -3454,6 +3464,8 @@ function DashboardPage({ user, onLogout }: { user: AuthUser; onLogout: () => voi
           </div>}
 
           {notice && <p className={`dashboard-notice ${notice.tone}`} role="status">{notice.text}</p>}
+
+          {!activeReport && <SharedUpdatesCard token={user.token} />}
 
           <section className="dashboard-grid dashboard-overview-grid" id="dashboard-overview">
             {activeReport
@@ -3761,7 +3773,7 @@ function DashboardPage({ user, onLogout }: { user: AuthUser; onLogout: () => voi
             </form>
             <div className="customer-ticket-section">
               <div className="customer-ticket-heading"><h3>Your support tickets</h3><button type="button" className="button button-outline" onClick={() => { setSupportLoading(true); setSupportRefresh((refresh) => refresh + 1) }} disabled={supportLoading}><Spinner size={16} active={supportLoading} /> Refresh</button></div>
-              {supportLoading && <div className="customer-ticket-loading" role="status"><Spinner size={16} /> Loading your tickets…</div>}
+              {supportLoading && <BrandLoader label="Loading your tickets…" />}
               {!supportLoading && supportTickets.length === 0 && <p className="customer-ticket-empty">Your submitted support requests will appear here.</p>}
               <div className="customer-ticket-list">
                 {supportTickets.map((ticket) => <article className="customer-ticket" key={ticket.id}>
@@ -4273,7 +4285,7 @@ type AdminAnalytics = {
   bureaus: { bureau: string; paid_orders: number; revenue: number; completed: number; failed: number }[]
 }
 
-type AdminSectionId = 'overview' | 'customers' | 'reports' | 'analytics' | 'tickets' | 'journey' | 'team' | 'failed' | 'health' | 'audit' | 'partners' | 'portal' | 'applications' | 'earnings' | 'monitor' | 'crm' | 'work' | 'content' | 'testimonials' | 'assessments' | 'ops' | 'neha' | 'agents' | 'followups'
+type AdminSectionId = 'leads' | 'agentTypes' | 'overview' | 'customers' | 'reports' | 'analytics' | 'tickets' | 'journey' | 'team' | 'failed' | 'health' | 'audit' | 'partners' | 'portal' | 'applications' | 'earnings' | 'monitor' | 'crm' | 'partnerApplications' | 'work' | 'content' | 'testimonials' | 'assessments' | 'ops' | 'neha' | 'agents' | 'followups' | 'hr'
 const defaultAdminSection = (role?: AdminRole): AdminSectionId => role === 'support' ? 'customers' : role === 'analyst' ? 'analytics' : role === 'agent' ? 'work' : role === 'partner' ? 'portal' : 'overview'
 // Falls back to the first page a narrowed staff account can still open.
 const firstAllowedSection = (role: AdminRole | undefined, modules: string[] | null): AdminSectionId => {
@@ -4330,7 +4342,7 @@ type AdminAuditLog = {
 
 const adminAuditLabels: Record<string, string> = {
   login: 'Signed in', login_failed: 'Failed sign-in', logout: 'Signed out',
-  customer_blocked: 'Blocked customer', customer_enabled: 'Enabled customer', customer_invited: 'Invited customer',
+  customer_blocked: 'Blocked customer', customer_profile_updated: 'Edited customer details', customer_enabled: 'Enabled customer', customer_invited: 'Invited customer',
   customer_invitation_cancelled: 'Cancelled customer invite', customer_follow_up: 'Created follow-up',
   report_retried: 'Retried report fetch', manual_bureau_check: 'Manual bureau check', activity_exported: 'Exported activity CSV',
   ticket_updated: 'Updated ticket', ticket_replied: 'Replied to ticket',
@@ -4383,10 +4395,13 @@ const formatAdminTimestamp = (value: string | null) => value
   ? new Date(value).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' })
   : '—'
 
-function AdminPage() {
+function AdminPage({ portal }: { portal: PortalConfig }) {
   const [token, setToken] = useState(() => sessionStorage.getItem('scorenow-admin-token') || '')
   const [adminId, setAdminId] = useState('')
   const [adminRole, setAdminRole] = useState<AdminRole>('owner')
+  const [agentAccess, setAgentAccess] = useState<{ label: string | null; canCheckBureau: boolean }>({ label: null, canCheckBureau: false })
+  // 'admin' for Superadmin/Admin, 'self' for company employees; partners and partner agents have no HR access.
+  const [hrAccess, setHrAccess] = useState<'admin' | 'self' | null>(null)
   const [partnerOptions, setPartnerOptions] = useState<PartnerAccountOption[]>([])
   const [partnerPages, setPartnerPages] = useState<string[]>([])
   const [inviteRole, setInviteRole] = useState<AdminRole>('support')
@@ -4448,6 +4463,7 @@ function AdminPage() {
   const [nehaSendingMessage, setNehaSendingMessage] = useState(false)
   const [nehaLoading, setNehaLoading] = useState(false)
   const [customerDetailRefresh, setCustomerDetailRefresh] = useState(0)
+  const [editingCustomerId, setEditingCustomerId] = useState('')
   const [statusDialog, setStatusDialog] = useState<{ id: string; name: string; status: string } | null>(null)
   const [followUpTarget, setFollowUpTarget] = useState<{ id: string; name: string; stage: string } | null>(null)
   const [dialogBusy, setDialogBusy] = useState(false)
@@ -4475,12 +4491,15 @@ function AdminPage() {
     let cancelled = false
     fetch(`${apiUrl}/api/admin/session`, { headers: { Authorization: `Bearer ${token}` } })
       .then(async (response) => {
-        const result = await response.json() as { adminId?: string; role?: AdminRole; modules?: string[] | null }
+        const result = await response.json() as { adminId?: string; role?: AdminRole; modules?: string[] | null; agentTypeLabel?: string | null; canCheckBureau?: boolean; hrAccess?: 'admin' | 'self' | null }
         if (!response.ok) throw new Error('Admin session expired. Sign in again.')
+        if (!portal.roles.includes(result.role || 'owner')) throw new Error('Session belongs to another portal.')
         if (!cancelled) {
           setAdminId(result.adminId || 'Admin')
           setAdminRole(result.role || 'owner')
           setAdminModules(result.modules ?? null)
+          setAgentAccess({ label: result.agentTypeLabel ?? null, canCheckBureau: Boolean(result.canCheckBureau) })
+          setHrAccess(result.hrAccess ?? null)
           setActiveSection(firstAllowedSection(result.role, result.modules ?? null))
           setAuthState('signed-in')
         }
@@ -4686,6 +4705,10 @@ function AdminPage() {
       })
       const result = await response.json() as { token?: string; adminId?: string; role?: AdminRole; message?: string }
       if (!response.ok || !result.token) throw new Error(result.message || 'Unable to sign in.')
+      if (!portal.roles.includes(result.role || 'owner')) {
+        void fetch(`${apiUrl}/api/admin/logout`, { method: 'POST', headers: { Authorization: `Bearer ${result.token}` } }).catch(() => undefined)
+        throw new Error(`This account signs in at ${window.location.origin}${portalForRole(result.role).path}`)
+      }
       sessionStorage.setItem('scorenow-admin-token', result.token)
       setAdminId(result.adminId || 'Admin')
       setAdminRole(result.role || 'owner')
@@ -4797,12 +4820,18 @@ function AdminPage() {
       const result = await response.json() as { token?: string; adminId?: string; role?: AdminRole; message?: string }
       if (!response.ok || !result.token) throw new Error(result.message || 'Unable to accept this invitation.')
       sessionStorage.setItem('scorenow-admin-token', result.token)
+      // Older invite links point at /admin; send the new account to the sign-in portal for its role.
+      const rolePortal = portalForRole(result.role || 'support')
+      if (rolePortal.path !== portal.path) {
+        window.location.replace(rolePortal.path)
+        return
+      }
       setAdminId(result.adminId || 'Admin')
       setAdminRole(result.role || 'support')
       setActiveSection(defaultAdminSection(result.role))
       setToken(result.token)
       setTeamInviteToken('')
-      window.history.replaceState(null, '', '/admin')
+      window.history.replaceState(null, '', portal.path)
       setAuthState('signed-in')
     } catch (error) {
       setTeamNotice(error instanceof Error ? error.message : 'Unable to accept this invitation.')
@@ -5126,7 +5155,7 @@ function AdminPage() {
   }[] = [
     { id: 'overview', label: 'Overview', icon: House, roles: ['owner', 'manager'] },
     { id: 'customers', label: 'Customers', icon: Users, roles: ['owner', 'manager', 'support'] },
-    { id: 'reports', label: 'Credit score checker', icon: FileSearch, roles: ['owner', 'manager'] },
+    { id: 'reports', label: 'Credit score checker', icon: FileSearch, roles: agentAccess.canCheckBureau ? ['owner', 'manager', 'agent'] : ['owner', 'manager'] },
     { id: 'analytics', label: 'Analytics', icon: BarChart3, roles: ['owner', 'manager', 'analyst'] },
     { id: 'tickets', label: 'Helpline tickets', icon: MessageCircle, roles: ['owner', 'manager', 'support'], badge: attention?.open_tickets },
     { id: 'neha', label: 'Neha Assistant', icon: MessageCircle, roles: ['owner', 'manager', 'support', 'agent'] },
@@ -5135,7 +5164,10 @@ function AdminPage() {
     { id: 'health', label: 'System health', icon: Gauge, roles: ['owner', 'manager'] },
     { id: 'audit', label: 'Audit log', icon: ShieldCheck, roles: ['owner', 'manager'] },
     { id: 'team', label: 'Manage admins', icon: LockKeyhole, roles: ['owner'] },
-    { id: 'crm', label: 'CRM', icon: Users, roles: ['owner', 'manager', 'support'] },
+    { id: 'agentTypes', label: 'Agent types', icon: Users, roles: ['owner', 'manager'] },
+    { id: 'crm', label: 'CRM', icon: Users, roles: ['owner', 'manager', 'support', 'agent', 'partner'] },
+    { id: 'hr', label: hrAccess === 'admin' ? 'People & HR' : 'My HR', icon: Briefcase, roles: hrAccess ? ['owner', 'manager', 'support', 'analyst', 'agent'] : [] },
+    { id: 'partnerApplications', label: 'Partner Application Review', icon: FileCheck2, roles: ['owner', 'manager'] },
     { id: 'work', label: 'My verification tasks', icon: FileCheck2, roles: ['agent'] },
     { id: 'content', label: 'Site content', icon: Settings, roles: ['owner', 'manager'] },
     { id: 'testimonials', label: 'Testimonials', icon: Star, roles: ['owner'] },
@@ -5152,8 +5184,8 @@ function AdminPage() {
   // Sections that need a module the Super Admin has not granted this account are hidden; the API enforces the same rule.
   const sectionModules: Partial<Record<AdminSectionId, string[]>> = {
     overview: ['overview'], customers: ['customers'], reports: ['reports'], analytics: ['analytics'], tickets: ['tickets'],
-    journey: ['customers', 'analytics'], failed: ['failed'], health: ['health'], audit: ['audit'], crm: ['crm'],
-    content: ['content'], monitor: ['monitor'], assessments: ['assessments'], ops: ['ops'],
+    journey: ['customers', 'analytics'], failed: ['failed'], health: ['health'], audit: ['audit'], crm: ['crm'], leads: ['crm'],
+    content: ['content'], monitor: ['monitor'], partnerApplications: ['crm'], assessments: ['assessments'], ops: ['ops'],
   }
   const sectionAllowedByModules = (id: AdminSectionId) => !adminModules || (sectionModules[id] ?? []).every((module) => adminModules.includes(module))
   const visibleAdminSections = adminSections.filter((section) => (section.roles.includes(adminRole) && sectionAllowedByModules(section.id)) || (isPartnerRole && partnerPages.includes(section.id)))
@@ -5175,7 +5207,7 @@ function AdminPage() {
   const sectionHasData: Record<AdminSectionId, boolean> = {
     overview: Boolean(activity), reports: Boolean(report), customers: customers.length > 0, analytics: Boolean(analytics),
     journey: Boolean(analytics) && journeyCustomers.length > 0, tickets: tickets.length > 0, team: team.length > 0 || Boolean(primaryAdmin), neha: nehaConversations.length > 0,
-    failed: Boolean(failedOps), health: Boolean(health), audit: Boolean(auditLog), partners: true, portal: true, applications: true, earnings: true, monitor: true, crm: true, work: true, content: true, agents: true, followups: true, testimonials: true, assessments: true, ops: true,
+    failed: Boolean(failedOps), health: Boolean(health), audit: Boolean(auditLog), partners: true, portal: true, applications: true, earnings: true, monitor: true, crm: true, leads: true, partnerApplications: true, agentTypes: true, work: true, content: true, agents: true, followups: true, testimonials: true, assessments: true, ops: true, hr: true,
   }
   const sectionIsLoading = activeSection === 'overview' ? activityLoading : activeSection === 'reports' ? loading : sectionLoading
   const canManageCustomers = adminRole === 'owner' || adminRole === 'manager'
@@ -5226,7 +5258,7 @@ function AdminPage() {
     }
   }
 
-  if (authState === 'checking') return <div className="admin-loading"><Spinner size={20} /> Verifying admin session…</div>
+  if (authState === 'checking') return <BrandLoader label="Opening your secure workspace…" />
 
   return (
     <main className="admin-shell">
@@ -5240,25 +5272,16 @@ function AdminPage() {
             {teamNotice && <p className="dashboard-notice error" role="alert">{teamNotice}</p>}
             <button className="button button-primary" type="submit" disabled={loading}>{loading ? 'Activating account…' : <>Accept invitation <ArrowRight /></>}</button>
           </form>
-        </> : <>
-          <div className="admin-heading"><span>PRIVATE WORKSPACE</span><h1>Administrator sign in</h1><p>Use your admin email or ID, password, and PIN.</p></div>
-          <form className="dashboard-card admin-login-form" onSubmit={signIn}>
-            <label>Administrator email or ID<input name="id" autoComplete="username" required /></label>
-            <label>Password<input name="password" type="password" autoComplete="current-password" required /></label>
-            <label>Security PIN<input name="pin" type="password" inputMode="numeric" pattern="[0-9]{6}" maxLength={6} autoComplete="one-time-code" required /></label>
-            {loginError && <p className="dashboard-notice error" role="alert">{loginError}</p>}
-            <button className="button button-primary" type="submit" disabled={loading}>{loading ? 'Signing in…' : <>Sign in <ArrowRight /></>}</button>
-          </form>
-        </>}
+        </> : <PortalLogin portal={portal} loading={loading} error={loginError} onSubmit={signIn} />}
       </section> : <div className="admin-layout">
         <aside className="admin-sidebar">
-          <div className="admin-sidebar-identity"><span>ADMINISTRATOR</span><strong>{adminId}</strong><small>{adminRole}</small></div>
+          <div className="admin-sidebar-identity"><span>ADMINISTRATOR</span><strong>{adminId}</strong><small>{adminRole}{adminRole === 'agent' && agentAccess.label ? ` · ${agentAccess.label}` : ''}</small></div>
           <AdminSessionExpiryBanner token={token} onExpired={signOut} />
           <nav aria-label="Admin sections">{visibleAdminSections.map((section) => { const Icon = section.icon; return <button key={section.id} type="button" className={activeSection === section.id ? 'active' : ''} onClick={() => changeAdminSection(section.id)}><Icon /><span>{section.label}</span>{Boolean(section.badge) && <em className="admin-nav-badge" aria-label={`${section.badge} need attention`}>{section.badge}</em>}</button> })}</nav>
           <p>Private operations workspace</p>
         </aside>
         <div className="admin-content">
-        {sectionIsLoading && !sectionHasData[activeSection] && <div className="admin-data-loading" role="status"><Spinner size={18} /> Loading {({ overview: 'activity', reports: 'the credit report', tickets: 'support tickets', customers: 'customer records', team: 'admin team', analytics: 'analytics', journey: 'the signup journey', failed: 'failed operations', health: 'system health', audit: 'the audit log', neha: 'conversations' } as Record<AdminSectionId, string>)[activeSection]}…</div>}
+        {sectionIsLoading && !sectionHasData[activeSection] && <BrandLoader label={`Loading ${({ overview: 'activity', reports: 'the credit report', tickets: 'support tickets', customers: 'customer records', team: 'admin team', analytics: 'analytics', journey: 'the signup journey', failed: 'failed operations', health: 'system health', audit: 'the audit log', neha: 'conversations' } as Record<AdminSectionId, string>)[activeSection] ?? 'your workspace'}…`} />}
         {actionNotice && <p className={`dashboard-notice ${actionNotice.tone} admin-action-notice`} role="status">{actionNotice.text}<button type="button" aria-label="Dismiss" onClick={() => setActionNotice(null)}><X /></button></p>}
         {sectionError && activeSection !== 'overview' && <p className="dashboard-notice error" role="alert">{sectionError}</p>}
         {activeSection !== 'overview' && <div className="admin-section-actions"><button className="button button-outline" type="button" onClick={() => { setSectionLoading(true); setSectionRefresh((refresh) => refresh + 1) }} disabled={sectionLoading}><Spinner size={16} active={sectionLoading} /> {sectionLoading ? 'Refreshing…' : 'Refresh section'}</button></div>}
@@ -5359,7 +5382,7 @@ function AdminPage() {
           <button className="button button-primary" type="submit" disabled={loading}>{loading ? 'Requesting report…' : <>Fetch {bureauCatalog.find((item) => item.id === bureau)?.name} report <ArrowRight /></>}</button>
         </form>
         {report && <section className="admin-report-result" aria-live="polite">
-          <div className="report-toolbar-actions"><button className="button button-primary" type="button" onClick={() => void downloadAdminReportPdf(reportAuditId, report.bureau)} disabled={reportPdfLoadingId === reportAuditId || !reportAuditId}><Download /> {reportPdfLoadingId === reportAuditId ? 'Preparing report…' : 'Download report'}</button></div>
+          <div className="report-toolbar-actions"><button className="button button-primary" type="button" onClick={() => void downloadAdminReportPdf(reportAuditId, report.bureau)} disabled={reportPdfLoadingId === reportAuditId || !reportAuditId}><Download /> {reportPdfLoadingId === reportAuditId ? 'Preparing report…' : 'Download report'}</button>{reportAuditId && <ShareReportButton key={reportAuditId} token={token} auditId={reportAuditId} />}</div>
           <p className="dashboard-notice info">The download is the original bureau report (for CIBIL, the bureau's own report saved at the time of the check).</p>
           {reportPdfError && <p className="dashboard-notice error" role="alert">{reportPdfError}</p>}
           <div className="admin-result-heading"><div><span>{bureauCatalog.find((item) => item.id === report.bureau)?.name} REPORT</span><h2>{report.personal.name || 'Client report'}</h2></div><strong>{report.score ?? '—'}<small>{report.score ? 'Credit score' : 'Score unavailable'}</small></strong></div>
@@ -5548,7 +5571,7 @@ function AdminPage() {
           <div className="admin-heading"><span>CUSTOMER SUPPORT</span><h1>Neha Assistant Conversations</h1><p>Manage customer conversations and respond in real-time.</p></div>
           <article className="dashboard-card">
             <div className="dashboard-card-heading"><strong>Active Conversations</strong><small>{nehaConversations.length} total</small></div>
-            {nehaLoading ? <p className="admin-activity-empty"><Spinner size={16} /> Loading…</p> : nehaConversations.length === 0 ? <p className="admin-activity-empty">No conversations yet.</p> : (
+            {nehaLoading ? <BrandLoader label="Loading conversations…" /> : nehaConversations.length === 0 ? <p className="admin-activity-empty">No conversations yet.</p> : (
               <div className="neha-conversations-list">
                 {nehaConversations.map((conv) => (
                   <div
@@ -5601,7 +5624,9 @@ function AdminPage() {
           )}
         </>
         : activeSection === 'work' ? <AgentWorkQueue token={token} />
-        : activeSection === 'crm' ? <CrmManagement token={token} role={adminRole} refreshKey={sectionRefresh} />        : activeSection === 'content' ? <AdminSiteContent token={token} refreshKey={sectionRefresh} />        : activeSection === 'testimonials' ? <AdminTestimonials token={token} refreshKey={sectionRefresh} />        : activeSection === 'partners' ? <PartnerManagement token={token} refreshKey={sectionRefresh} />
+        : activeSection === 'hr' ? <PeopleHub token={token} role={adminRole} who={agentAccess.label ? `${adminId} · ${agentAccess.label}` : adminId} refreshKey={sectionRefresh} />
+        : activeSection === 'crm' || activeSection === 'leads' ? <CrmHub token={token} refreshKey={sectionRefresh} role={adminRole} who={agentAccess.label ? `${adminId} · ${agentAccess.label}` : adminId}
+            customers={['owner', 'manager', 'support'].includes(adminRole) ? <CrmManagement token={token} role={adminRole} refreshKey={sectionRefresh} /> : undefined} />        : activeSection === 'partnerApplications' ? <><div className="admin-heading"><span>PARTNER OPERATIONS</span><h1>Partner Application Review</h1><p>Review customer data submitted by partners, verify documents, and approve or return applications.</p></div><PartnerApplications token={token} role={adminRole === 'owner' ? 'owner' : 'manager'} /></>        : activeSection === 'agentTypes' ? <AgentTypesManager token={token} canEditTypes={adminRole === 'owner'} />        : activeSection === 'content' ? <AdminSiteContent token={token} refreshKey={sectionRefresh} />        : activeSection === 'testimonials' ? <AdminTestimonials token={token} refreshKey={sectionRefresh} />        : activeSection === 'partners' ? <PartnerManagement token={token} refreshKey={sectionRefresh} />
         : activeSection === 'monitor' ? <PartnerMonitor token={token} enabled={adminRole === 'owner' || adminRole === 'manager' || partnerPages.includes('monitor')} />
         : activeSection === 'agents' ? <PartnerAgentsPanel token={token} refreshKey={sectionRefresh} />
         : activeSection === 'followups' ? <FollowUpsPanel token={token} refreshKey={sectionRefresh} role={adminRole === 'agent' ? 'agent' : 'partner'} />
@@ -5615,6 +5640,7 @@ function AdminPage() {
               <label>Full name<input name="fullName" minLength={2} maxLength={120} required /></label>
               <label>Email (login ID)<input name="email" type="email" required /></label>
               <label>Role<select name="role" value={inviteRole} onChange={(event) => setInviteRole(event.target.value as AdminRole)}><option value="manager">Manager — customers, analytics, tickets, reports</option><option value="support">Support — customer help and tickets</option><option value="analyst">Analyst — analytics and funnel</option><option value="partner">Partner — own referred customers and earnings</option><option value="agent">Agent — referred customers under a partner</option></select></label>
+              {inviteRole === 'agent' && <AgentTypeSelect token={token} />}
               {inviteRole === 'agent' && <label>Partner (optional)<select name="partnerEmail" defaultValue=""><option value="">No partner</option>{partnerOptions.map((partner) => <option value={partner.email} key={partner.email}>{partner.full_name} ({partner.email})</option>)}</select></label>}
               <label>Password (min 12 characters, optional)<input name="password" type="password" minLength={12} autoComplete="new-password" /></label>
               <label>6-digit PIN (optional)<input name="pin" inputMode="numeric" pattern="\d{6}" maxLength={6} autoComplete="off" /></label>
@@ -5646,7 +5672,7 @@ function AdminPage() {
         {customerDetailId && <div className="admin-drawer-backdrop" onClick={() => setCustomerDetailId('')}>
           <aside className="admin-drawer" role="dialog" aria-modal="true" aria-label="Customer details" onClick={(event) => event.stopPropagation()}>
             <header><div><span>CUSTOMER</span><h2>{customerDetail?.customer.full_name ?? 'Loading…'}</h2>{customerDetail && <small>Joined {formatAdminTimestamp(customerDetail.customer.created_at)}</small>}</div><button type="button" className="admin-icon-button" aria-label="Close customer details" onClick={() => setCustomerDetailId('')}><X /></button></header>
-            {customerDetailError ? <p className="dashboard-notice error" role="alert">{customerDetailError}</p> : !customerDetail ? <p className="admin-activity-empty"><Spinner size={16} /> Loading customer…</p> : <>
+            {customerDetailError ? <p className="dashboard-notice error" role="alert">{customerDetailError}</p> : !customerDetail ? <BrandLoader label="Loading customer…" /> : <>
               {adminRole === 'owner' && <StaffAssignmentPanel key={customerDetail.customer.id} token={token} customerId={customerDetail.customer.id} />}
               <dl className="admin-detail-grid">
                 <div><dt>Mobile</dt><dd>{customerDetail.customer.mobile}{customerDetail.customer.mobile_verified && <span className="admin-verified">verified</span>}</dd></div>
@@ -5657,6 +5683,7 @@ function AdminPage() {
                 <div><dt>Location</dt><dd>{[customerDetail.customer.city, customerDetail.customer.state].filter(Boolean).join(', ') || '—'}</dd></div>
               </dl>
               <div className="admin-drawer-actions">
+                {canManageCustomers && <button className="button button-primary" type="button" onClick={() => setEditingCustomerId(customerDetail.customer.id)}><Pencil /> Edit details</button>}
                 {canManageCustomers && <button className={`button button-outline${customerDetail.customer.status === 'blocked' ? '' : ' danger'}`} type="button" onClick={() => setStatusDialog({ id: customerDetail.customer.id, name: customerDetail.customer.full_name, status: customerDetail.customer.status })}>{customerDetail.customer.status === 'blocked' ? 'Enable account' : 'Block account'}</button>}
                 <button className="button button-outline" type="button" onClick={() => setFollowUpTarget({ id: customerDetail.customer.id, name: customerDetail.customer.full_name, stage: '' })}><MessageCircle /> Create follow-up</button>
                 {!customerDetail.customer.mobile.includes('•') && <a className="button button-outline" href={`tel:+91${customerDetail.customer.mobile}`}><Phone /> Call</a>}
@@ -5673,6 +5700,12 @@ function AdminPage() {
             </>}
           </aside>
         </div>}
+        {editingCustomerId && <CustomerEditDialog token={token} customerId={editingCustomerId} onClose={() => setEditingCustomerId('')} onSaved={(changed) => {
+          setEditingCustomerId('')
+          setActionNotice({ tone: 'info', text: changed.length ? `Customer details updated: ${changed.join(', ')}.` : 'No changes to save.' })
+          setSectionRefresh((refresh) => refresh + 1)
+          setCustomerDetailRefresh((refresh) => refresh + 1)
+        }} />}
         {(statusDialog || followUpTarget) && <div className="admin-dialog-backdrop" onClick={closeDialogs}>
           {statusDialog ? <form className="admin-dialog" role="dialog" aria-modal="true" aria-labelledby="admin-status-dialog-title" onClick={(event) => event.stopPropagation()} onSubmit={(event) => void submitCustomerStatus(event)}>
             <h2 id="admin-status-dialog-title">{statusDialog.status === 'blocked' ? 'Enable' : 'Block'} {statusDialog.name}?</h2>
@@ -5701,7 +5734,7 @@ function App() {
   useEffect(() => {
     const isBusinessPage = pathname === '/business'
     const isCreditScorePage = pathname === '/creditscore'
-    const isAdminPage = pathname === '/admin'
+    const isAdminPage = portalForPath(pathname) !== null
     const title = legalDocument
       ? `${legalDocument.title} | Scorenow`
       : currentGuide
@@ -5745,7 +5778,8 @@ function App() {
 
   if (pathname === '/creditscore') return <CreditScorePage />
   if (pathname === '/dashboard') return <DashboardRoute />
-  if (pathname === '/admin') return <AdminPage />
+  const adminPortal = portalForPath(pathname)
+  if (adminPortal) return <AdminPage portal={adminPortal} />
   if (legalDocument) return <LegalPage document={legalDocument} />
   if (pathname.startsWith('/guides/')) return <CreditGuidePage slug={guideSlug} />
   return pathname === '/business' ? <BusinessPage /> : <HomePage />

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
+import { BrandLoader } from './BrandLoader'
 import {
   DEFAULT_REPORT_PRICE, apiUrl, effectiveBusinessPrices, effectiveFdPlans, effectiveServicePlans, effectiveSubscriptionPlans,
   invalidateSiteContent, type SiteContent, type SiteContentKey,
@@ -112,7 +113,7 @@ export function AdminSiteContent({ token, refreshKey }: { token: string; refresh
       <div className="admin-heading"><span>SITE CONTENT</span><h1>Plans & prices</h1><p>Changes here update the Scorenow website and the mobile app. New orders use the new prices; paid orders keep the amount they were paid at.</p></div>
       {notice && <p className={`site-content-notice ${notice.tone}`} role="status">{notice.text}</p>}
       {loadError && <p className="site-content-notice error" role="alert">{loadError}</p>}
-      {!content && !loadError && <p role="status">Loading site content…</p>}
+      {!content && !loadError && <BrandLoader label="Loading site content…" />}
       {content && SECTIONS.map(({ key, title, hint }) => (
         <article className="dashboard-card site-content-card" key={key}>
           <div className="dashboard-card-heading"><strong>{title}</strong><small>{hint}</small></div>

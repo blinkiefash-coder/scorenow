@@ -6,7 +6,7 @@ import multer from "multer";
 import nodemailer from "nodemailer";
 import path from "node:path";
 import { BUREAUS, bureauNames, fetchBureauReport, isBureau, isBureauAvailable, missingApplicantFields, scoreBand, stateCodes, downloadReportPdf, reportPdfUrl, } from "./bureaus.js";
-import { completeReportRequest, authenticateCustomerByEmail, authenticateDatabaseAdmin, createDemoReportRequest, createAdminReportAudit, addSupportTicketComment, createAdminSession, completeAdminReportAudit, createOtp, createCustomerInvitation, createAdminInvitation, acceptAdminInvitation, createReportPayment, createSession, failReportRequest, findReportPayment, findReportRequest, findSessionUser, withVerifiedName, findAdminSession, customerScopeOwners, isCustomerInScope, updateAdminAccess, getAdminAccount, assignCustomerToStaff, unassignCustomerFromStaff, listStaffAssignments, listPartnerAgents, setPartnerAgentStatus, assignPartnerCustomer, addCustomerInteraction, listCustomerInteractions, INTERACTION_CHANNELS, INTERACTION_OUTCOMES, extendAdminSession, ADMIN_SESSION_TTL_MS, findUserByEmail, getApplicant, getAdminActivity, getAdminAnalytics, getRevenueReport, getAdminCustomers, getAdminReportDocument, getDashboardStatus, getPrimaryAdminEmail, getPrimaryAdminRow, createPrimaryAdmin, updateAdminCredentials, getReportDetail, getReportPdf, initializeDatabase, listAdminAccounts, listAdminUsers, listCustomerInvitations, listSupportTickets, markEmailVerified, markPaymentFailed, markPaymentPaidAndCreateRequest, recordPaymentFailure, markReportProcessing, revokeSession, revokeAdminSession, setAdminAccountStatus, setCustomerPassword, setCustomerAccountStatus, updateSupportTicket, createSupportTicket, cancelCustomerInvitation, saveAssessment, saveReportPdf, createSubscriptionPayment, findSubscriptionPayment, activateSubscription, getUserSubscriptions, saveReportDocument, saveAdminReportDocument, saveWebsiteInquiry, saveKycProfile, setUserEmailIfMissing, upsertUserByMobile, verifyOtp, exportAdminActivity, recordAdminAudit, listAdminAudit, getAdminCustomerDetail, findCustomerForFollowUp, findAdminRetryableReport, getAdminAttention, getFailedOperations, getHealthStats, listPartnerAccounts, getPortalCustomers, getPortalEarnings, getPayoutProfile, savePayoutProfile, listCommissions, createCommission, markCommissionPaid, assignCustomerToOwner, unassignCustomer, CRM_ACTIVITY_KINDS, CRM_STAGES, CrmApplicationConflict, addCrmActivity, closeCrmCustomerCase, createCrmApplication, createCrmTask, createCrmVerificationTask, getCrmApplicationDetail, getCrmApplicationDocument, getCrmExportRows, getCrmPipeline, getCrmTimeline, listCrmApplicationAssignees, listCrmApplications, listCrmCustomers, listMyCrmVerificationTasks, listOpenCrmTasks, resubmitCrmApplication, reviewCrmVerificationTask, setCrmTaskStatus, transitionCrmApplication, updateMyCrmVerificationTask, updateCrmProfile, submitHealthAssessmentRequest, listHealthAssessmentRequests, updateHealthAssessmentStatus, submitTestimonial, listTestimonials, updateTestimonial, getTestimonialPhoto, setTestimonialPublished, createTestimonial, deleteTestimonial, listSiteContent, saveSiteContent, deleteSiteContent, listPartnerActivity, listCustomerNames, recordPartnerActivity, deleteCustomerAccount, recordConsent, getCurrentConsents, listConsentHistory, getPaymentForUser, listCustomerPayments, createRefundRequest, listRefundRequests, decideRefundRequest, listCustomerNotifications, markCustomerNotificationsRead, savePushToken, listCannedReplies, saveCannedReply, deleteCannedReply, createAdminPasswordReset, acceptAdminPasswordReset, exportRows, getSupportTicketAssignee, createNehaConversation, getNehaConversation, listNehaConversations, saveNehaMessage, getNehaMessages, updateAgentStatus, getAvailableAgents, } from "./database.js";
+import { completeReportRequest, authenticateCustomerByEmail, authenticateDatabaseAdmin, createDemoReportRequest, createAdminReportAudit, addSupportTicketComment, createAdminSession, completeAdminReportAudit, createOtp, createCustomerInvitation, createAdminInvitation, acceptAdminInvitation, createReportPayment, createSession, failReportRequest, findReportPayment, findReportRequest, findSessionUser, withVerifiedName, findAdminSession, customerScopeOwners, isCustomerInScope, updateAdminAccess, getAdminAccount, assignCustomerToStaff, unassignCustomerFromStaff, listStaffAssignments, listPartnerAgents, setPartnerAgentStatus, assignPartnerCustomer, addCustomerInteraction, listCustomerInteractions, INTERACTION_CHANNELS, INTERACTION_OUTCOMES, extendAdminSession, ADMIN_SESSION_TTL_MS, findUserByEmail, getApplicant, getAdminActivity, getAdminAnalytics, getRevenueReport, getAdminCustomers, getAdminReportDocument, getDashboardStatus, getPrimaryAdminEmail, getPrimaryAdminRow, createPrimaryAdmin, updateAdminCredentials, getReportDetail, getReportPdf, initializeDatabase, listAdminAccounts, listAdminUsers, listCustomerInvitations, listSupportTickets, markEmailVerified, markPaymentFailed, markPaymentPaidAndCreateRequest, recordPaymentFailure, markReportProcessing, revokeSession, revokeAdminSession, setAdminAccountStatus, setCustomerPassword, setCustomerAccountStatus, updateSupportTicket, createSupportTicket, cancelCustomerInvitation, saveAssessment, saveReportPdf, createSubscriptionPayment, findSubscriptionPayment, activateSubscription, getUserSubscriptions, saveReportDocument, saveAdminReportDocument, saveWebsiteInquiry, saveKycProfile, setUserEmailIfMissing, upsertUserByMobile, verifyOtp, exportAdminActivity, recordAdminAudit, listAdminAudit, getAdminCustomerDetail, getCustomerProfileForEdit, updateCustomerProfile, CustomerEditError, findCustomerForFollowUp, findAdminRetryableReport, getAdminAttention, getFailedOperations, getHealthStats, listPartnerAccounts, getPortalCustomers, getPortalEarnings, getPayoutProfile, savePayoutProfile, listCommissions, createCommission, markCommissionPaid, assignCustomerToOwner, unassignCustomer, CRM_ACTIVITY_KINDS, CRM_STAGES, CrmApplicationConflict, addCrmActivity, closeCrmCustomerCase, createCrmApplication, createCrmTask, createCrmVerificationTask, getCrmApplicationDetail, getCrmApplicationDocument, getCrmExportRows, getCrmPipeline, getCrmTimeline, listCrmApplicationAssignees, listCrmApplications, listCrmCustomers, listMyCrmVerificationTasks, listOpenCrmTasks, resubmitCrmApplication, reviewCrmVerificationTask, getMyCrmVerificationTask, addMyCrmVerificationComment, setCrmTaskStatus, transitionCrmApplication, updateMyCrmVerificationTask, updateCrmProfile, submitHealthAssessmentRequest, listHealthAssessmentRequests, updateHealthAssessmentStatus, submitTestimonial, listTestimonials, updateTestimonial, getTestimonialPhoto, setTestimonialPublished, createTestimonial, deleteTestimonial, listSiteContent, saveSiteContent, deleteSiteContent, listPartnerActivity, listCustomerNames, recordPartnerActivity, deleteCustomerAccount, recordConsent, getCurrentConsents, listConsentHistory, getPaymentForUser, listCustomerPayments, createRefundRequest, listRefundRequests, decideRefundRequest, listCustomerNotifications, markCustomerNotificationsRead, savePushToken, listCannedReplies, saveCannedReply, deleteCannedReply, createAdminPasswordReset, acceptAdminPasswordReset, exportRows, getSupportTicketAssignee, createNehaConversation, getNehaConversation, listNehaConversations, saveNehaMessage, getNehaMessages, updateAgentStatus, getAvailableAgents, shareAdminReportWithCustomer, shareCustomerProgress, getCustomerSharedItems, getSharedReportForCustomer, changeCustomerPassword, CustomerShareError, DEFAULT_CUSTOMER_PASSWORD, listAgentTypes, createAgentType, updateAgentType, deleteAgentType, listAgentsWithTypes, setAgentType, } from "./database.js";
 import { notifyCustomer } from "./notifications.js";
 import { ticketSla } from "./sla.js";
 import { PARTNER_ACTIVITY_CHANNEL, NEHA_MESSAGE_CHANNEL, AGENT_STATUS_CHANNEL, partnerEvents } from "./realtime.js";
@@ -19,6 +19,8 @@ import { demoReportResponses, isReportsDemoMode } from "./demoReports.js";
 import { createRazorpayOrder, isRazorpayConfigured, isSimulatedPayments, isValidPaymentSignature, simulatedId } from "./razorpay.js";
 import { PayoutError, payPendingCommissions } from "./payouts.js";
 import { normalizeReport } from "./reportParser.js";
+import { addHoliday, adjustPayroll, applyLeave, attendanceRegister, cancelLeave, cancelRequest, createRequest, decideLeave, decideRequest, generatePayroll, getHrDashboard, getPayroll, HrError, initializeHr, isHrEmployee, markOwnAttendance, payPayroll, postAnnouncement, removeAnnouncement, removeHoliday, setAttendance, setHrMailer, updateEmployee, updatePolicy, } from "./hr.js";
+import { createLead, deleteLead, getLead, initializeLeads, LeadError, listLeads, runLeadAction, setPartnerArea, runLeadEscalation, setLeadMailer } from "./leads.js";
 const app = express();
 const port = Number(process.env.PORT) || 3000;
 app.set("trust proxy", 1);
@@ -53,6 +55,9 @@ const requireAdmin = async (request, response, next) => {
     response.locals.adminPermissions = admin.permissions ?? null;
     response.locals.adminCustomerScope = admin.customer_scope ?? "all";
     response.locals.adminExpiresAt = new Date(admin.expires_at).toISOString();
+    response.locals.adminAgentType = admin.agent_type ?? null;
+    response.locals.adminAgentTypeLabel = admin.agent_type_label ?? null;
+    response.locals.adminCanCheckBureau = admin.role === "owner" || admin.role === "manager" || (admin.role === "agent" && admin.can_check_bureau);
     // Staff accounts may be narrowed to specific modules by the Super Admin; enforced here for every admin route.
     const module = adminModuleForPath(request.baseUrl + request.path);
     if (module && isStaffRole(admin.role) && !staffModules(admin.role, admin.permissions ?? null).includes(module)) {
@@ -92,7 +97,7 @@ const ADMIN_MODULE_PREFIXES = [
     ["/api/admin/refunds", "ops"], ["/api/admin/exports", "ops"],
 ];
 // Agent and partner workflow routes live under /crm but are guarded by their own role checks.
-const UNGATED_ADMIN_PATHS = /^\/api\/admin\/crm\/(my-tasks(\/stream)?|tasks\/[^/]+\/(start|submit))$/;
+const UNGATED_ADMIN_PATHS = /^\/api\/admin\/crm\/(my-tasks(\/stream)?|my-tasks\/[^/]+|tasks\/[^/]+\/(start|submit|comments))$/;
 const adminModuleForPath = (path) => {
     if (UNGATED_ADMIN_PATHS.test(path))
         return null;
@@ -128,6 +133,15 @@ const requireAdminRoles = (...roles) => (request, response, next) => {
     }
     next();
 };
+// Bureau checks: Superadmin, Admin, and agents whose agent type allows bureau checks.
+const requireBureauAccess = (request, response, next) => {
+    if (!response.locals.adminCanCheckBureau) {
+        response.status(403).json({ message: "Your agent type does not allow credit bureau checks." });
+        return;
+    }
+    next();
+};
+const portalPathForRole = (role) => role === "partner" ? "/partner" : ["agent", "support", "analyst"].includes(role) ? "/employee" : role === "owner" ? "/superadmin" : "/admin";
 // Pages the superadmin can open to partner and agent logins. Ids match the admin sidebar section ids.
 // Only customer pages can be opened to partners and agents, and those are scoped to their own customers.
 const PARTNER_PAGE_IDS = ["customers"];
@@ -322,13 +336,18 @@ app.post("/api/admin/login", async (request, response) => {
     }
     response.json({ token, adminId: sessionAdmin.adminId, role: sessionAdmin.role, expiresAt: new Date(Date.now() + ADMIN_SESSION_TTL_MS).toISOString() });
 });
-app.get("/api/admin/session", requireAdmin, (request, response) => {
+app.get("/api/admin/session", requireAdmin, async (request, response) => {
     const role = sessionAdminRole(response);
+    const hrAccess = role === "owner" || role === "manager" ? "admin" : role !== "partner" && await isHrEmployee(sessionAdminId(response)).catch(() => false) ? "self" : null;
     response.json({
         adminId: sessionAdminId(response), role, expiresAt: response.locals.adminExpiresAt,
         modules: isStaffRole(role) ? staffModules(role, sessionPermissions(response)) : null,
         abilities: role === "partner" ? partnerAbilities(sessionPermissions(response)) : [],
         customerScope: response.locals.adminCustomerScope ?? "all",
+        agentType: response.locals.adminAgentType ?? null,
+        agentTypeLabel: response.locals.adminAgentTypeLabel ?? null,
+        canCheckBureau: Boolean(response.locals.adminCanCheckBureau),
+        hrAccess,
     });
 });
 app.post("/api/admin/session/extend", requireAdmin, async (request, response) => {
@@ -557,6 +576,74 @@ app.post("/api/admin/customer-invitations/:id/cancel", requireAdmin, requireAdmi
     }
     auditAdmin(request, response, "customer_invitation_cancelled", { type: "customer_invitation", id: String(request.params.id) });
     response.json({ ok: true });
+});
+app.get("/api/admin/customers/:id/profile", requireAdmin, requireAdminRoles("owner", "manager"), requireCustomerInScope(), async (request, response) => {
+    try {
+        const profile = await getCustomerProfileForEdit(String(request.params.id));
+        if (!profile) {
+            response.status(404).json({ message: "Customer account not found." });
+            return;
+        }
+        response.json(profile);
+    }
+    catch (error) {
+        console.error("Customer profile load failed", error);
+        response.status(500).json({ message: "Unable to load customer details." });
+    }
+});
+app.patch("/api/admin/customers/:id/profile", requireAdmin, requireAdminRoles("owner", "manager"), requireCustomerInScope(), async (request, response) => {
+    const body = request.body ?? {};
+    const text = (value, max) => String(value ?? "").trim().replace(/\s+/g, " ").slice(0, max);
+    const optional = (value, max) => text(value, max) || null;
+    const fullName = text(body.fullName, 120);
+    const mobile = String(body.mobile ?? "").replace(/\D/g, "").replace(/^91(?=\d{10}$)/, "");
+    const email = optional(body.email, 200)?.toLowerCase() ?? null;
+    const reason = text(body.reason, 500);
+    if (fullName.length < 2)
+        return void response.status(400).json({ message: "Enter the customer's full name." });
+    if (!/^[6-9]\d{9}$/.test(mobile))
+        return void response.status(400).json({ message: "Enter a valid 10-digit Indian mobile number." });
+    if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))
+        return void response.status(400).json({ message: "Enter a valid email address." });
+    if (reason.length < 3)
+        return void response.status(400).json({ message: "Give a reason for this change. It is saved in the audit log." });
+    let kyc = null;
+    if (body.kyc) {
+        const nameAsPerPan = text(body.kyc.nameAsPerPan, 120).toUpperCase();
+        const dateOfBirth = String(body.kyc.dateOfBirth ?? "");
+        const gender = optional(body.kyc.gender, 10);
+        const pincode = optional(body.kyc.pincode, 6);
+        const dob = new Date(`${dateOfBirth}T00:00:00Z`);
+        const age = (Date.now() - dob.getTime()) / (365.25 * 86400000);
+        if (nameAsPerPan.length < 2)
+            return void response.status(400).json({ message: "Enter the name as printed on the PAN card." });
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(dateOfBirth) || Number.isNaN(dob.getTime()) || age < 18 || age > 100)
+            return void response.status(400).json({ message: "Enter a valid date of birth (customer must be 18 or older)." });
+        if (gender && !["male", "female", "other"].includes(gender))
+            return void response.status(400).json({ message: "Choose a valid gender." });
+        if (pincode && !/^[1-9]\d{5}$/.test(pincode))
+            return void response.status(400).json({ message: "Enter a valid 6-digit pincode." });
+        kyc = {
+            nameAsPerPan, dateOfBirth, gender, pincode,
+            addressLine1: optional(body.kyc.addressLine1, 200), addressLine2: optional(body.kyc.addressLine2, 200),
+            city: optional(body.kyc.city, 80), state: optional(body.kyc.state, 80),
+        };
+    }
+    const userId = String(request.params.id);
+    try {
+        const changed = await updateCustomerProfile(userId, { fullName, mobile, email, kyc });
+        if (changed.length)
+            auditAdmin(request, response, "customer_profile_updated", { type: "customer", id: userId, details: { fields: changed.join(", "), reason } });
+        response.json({ ok: true, changed });
+    }
+    catch (error) {
+        if (error instanceof CustomerEditError) {
+            response.status(error.status).json({ message: error.message });
+            return;
+        }
+        console.error("Customer profile update failed", error);
+        response.status(500).json({ message: "Unable to save customer details." });
+    }
 });
 app.patch("/api/admin/customers/:id/status", requireAdmin, requireAdminRoles("owner", "manager"), requireCustomerInScope(), async (request, response) => {
     const userId = String(request.params.id);
@@ -944,6 +1031,9 @@ app.post("/api/admin/team/invitations", requireAdmin, requireAdminRoles("owner")
             return;
         }
         const invite = await createAdminInvitation({ fullName, email, role, invitedBy: sessionAdminId(response), parentEmail });
+        const agentType = role === "agent" && request.body.agentType ? String(request.body.agentType) : null;
+        if (agentType)
+            await setAgentType(invite.email, agentType);
         if (setCredentialsNow) {
             await updateAdminCredentials({ email: invite.email, password, pin });
         }
@@ -959,7 +1049,7 @@ app.post("/api/admin/team/invitations", requireAdmin, requireAdminRoles("owner")
         const baseUrl = process.env.ADMIN_APP_URL || requestAppUrl || `${request.protocol}://${request.get("host")}`;
         response.status(201).json({
             email: invite.email, role, active: setCredentialsNow,
-            ...(setCredentialsNow ? {} : { invitationUrl: `${baseUrl}/admin?invite=${invite.token}` }),
+            ...(setCredentialsNow ? {} : { invitationUrl: `${baseUrl}${portalPathForRole(role)}?invite=${invite.token}` }),
         });
     }
     catch (error) {
@@ -1075,6 +1165,118 @@ const parseCrmTags = (value) => {
         return null;
     return tags;
 };
+// Lead desk: leads from every source, the work steps, dispute ladder, bureau scores and partner leads.
+const LEAD_ROLES = ["owner", "manager", "support", "agent", "partner"];
+const leadViewer = (response) => ({ email: sessionAdminId(response), role: sessionAdminRole(response) });
+const sendLeadError = (response, error, fallback) => {
+    if (error instanceof LeadError) {
+        response.status(error.status).json({ message: error.message });
+        return;
+    }
+    console.error(fallback, error);
+    response.status(500).json({ message: fallback });
+};
+app.get("/api/admin/crm/leads", requireAdmin, requireAdminRoles(...LEAD_ROLES), async (request, response) => {
+    try {
+        const text = (key) => typeof request.query[key] === "string" ? String(request.query[key]).slice(0, 120) : undefined;
+        response.json(await listLeads(leadViewer(response), { q: text("q"), source: text("source"), partner: text("partner"), status: text("status"), dispute: text("dispute") }));
+    }
+    catch (error) {
+        sendLeadError(response, error, "Unable to load leads.");
+    }
+});
+app.post("/api/admin/crm/leads", requireAdmin, requireAdminRoles(...LEAD_ROLES), async (request, response) => {
+    try {
+        const id = await createLead(leadViewer(response), request.body ?? {});
+        auditAdmin(request, response, "crm_lead_created", { type: "lead", id });
+        response.status(201).json({ id, message: "Lead added." });
+    }
+    catch (error) {
+        sendLeadError(response, error, "Unable to add the lead.");
+    }
+});
+app.put("/api/admin/crm/leads/partners/:email/area", requireAdmin, requireAdminRoles("owner", "manager"), async (request, response) => {
+    try {
+        const email = String(request.params.email);
+        const area = await setPartnerArea(leadViewer(response), email, String(request.body?.area ?? ""));
+        auditAdmin(request, response, "crm_partner_area_updated", { type: "partner", id: email, details: { area } });
+        response.json({ area, message: area ? `Area set to ${area}.` : "Area cleared." });
+    }
+    catch (error) {
+        sendLeadError(response, error, "Unable to update the partner area.");
+    }
+});
+app.get("/api/admin/crm/leads/:id", requireAdmin, requireAdminRoles(...LEAD_ROLES), async (request, response) => {
+    try {
+        response.json(await getLead(leadViewer(response), String(request.params.id)));
+    }
+    catch (error) {
+        sendLeadError(response, error, "Unable to load the lead.");
+    }
+});
+app.post("/api/admin/crm/leads/:id/actions", requireAdmin, requireAdminRoles(...LEAD_ROLES), async (request, response) => {
+    const id = String(request.params.id);
+    const action = String(request.body?.action ?? "");
+    try {
+        const message = await runLeadAction(leadViewer(response), id, action, request.body ?? {});
+        auditAdmin(request, response, "crm_lead_updated", { type: "lead", id, details: { action } });
+        response.json({ message, ...(await getLead(leadViewer(response), id)) });
+    }
+    catch (error) {
+        sendLeadError(response, error, "Unable to update the lead.");
+    }
+});
+app.delete("/api/admin/crm/leads/:id", requireAdmin, requireAdminRoles(...LEAD_ROLES), async (request, response) => {
+    try {
+        await deleteLead(leadViewer(response), String(request.params.id));
+        auditAdmin(request, response, "crm_lead_deleted", { type: "lead", id: String(request.params.id) });
+        response.json({ message: "Lead deleted." });
+    }
+    catch (error) {
+        sendLeadError(response, error, "Unable to delete the lead.");
+    }
+});
+// People & HR: employees, attendance, leave, requests, payroll, holidays and announcements. Access rules live in hr.ts.
+const HR_ROLES = ["owner", "manager", "support", "analyst", "agent"];
+const hrRoute = (audit, run, status = 200) => async (request, response) => {
+    try {
+        const result = await run(request, response);
+        if (audit)
+            auditAdmin(request, response, audit, { type: "hr", id: String(request.params.id ?? request.params.email ?? request.params.month ?? request.params.day ?? "") || null });
+        response.status(status).json(typeof result === "string" ? { message: result } : result);
+    }
+    catch (error) {
+        if (error instanceof HrError) {
+            response.status(error.status).json({ message: error.message });
+            return;
+        }
+        console.error("HR request failed", error);
+        response.status(500).json({ message: "Unable to complete this HR action." });
+    }
+};
+const hrViewer = (response) => ({ email: sessionAdminId(response), role: sessionAdminRole(response) });
+const hrMonth = (request) => typeof request.query.month === "string" ? request.query.month : new Date().toISOString().slice(0, 7);
+const hr = [requireAdmin, requireAdminRoles(...HR_ROLES)];
+app.get("/api/admin/hr", ...hr, hrRoute(null, (_q, r) => getHrDashboard(hrViewer(r))));
+app.put("/api/admin/hr/employees/:email", ...hr, hrRoute("hr_employee_updated", (q, r) => updateEmployee(hrViewer(r), String(q.params.email), q.body ?? {})));
+app.post("/api/admin/hr/attendance/me", ...hr, hrRoute(null, (q, r) => markOwnAttendance(hrViewer(r), q.body ?? {})));
+app.put("/api/admin/hr/attendance", ...hr, hrRoute("hr_attendance_marked", (q, r) => setAttendance(hrViewer(r), q.body ?? {})));
+app.get("/api/admin/hr/attendance", ...hr, hrRoute(null, (q, r) => attendanceRegister(hrViewer(r), hrMonth(q))));
+app.post("/api/admin/hr/leaves", ...hr, hrRoute("hr_leave_created", (q, r) => applyLeave(hrViewer(r), q.body ?? {}), 201));
+app.post("/api/admin/hr/leaves/:id/decision", ...hr, hrRoute("hr_leave_decided", async (q, r) => (await decideLeave(hrViewer(r), String(q.params.id), q.body ?? {})).message));
+app.post("/api/admin/hr/leaves/:id/cancel", ...hr, hrRoute("hr_leave_cancelled", (q, r) => cancelLeave(hrViewer(r), String(q.params.id))));
+app.post("/api/admin/hr/requests", ...hr, hrRoute("hr_request_created", (q, r) => createRequest(hrViewer(r), q.body ?? {}), 201));
+app.post("/api/admin/hr/requests/:id/decision", ...hr, hrRoute("hr_request_decided", async (q, r) => (await decideRequest(hrViewer(r), String(q.params.id), q.body ?? {})).message));
+app.post("/api/admin/hr/requests/:id/cancel", ...hr, hrRoute("hr_request_cancelled", (q, r) => cancelRequest(hrViewer(r), String(q.params.id))));
+app.get("/api/admin/hr/payroll", ...hr, hrRoute(null, (q, r) => getPayroll(hrViewer(r), hrMonth(q))));
+app.post("/api/admin/hr/payroll/:month/generate", ...hr, hrRoute("hr_payroll_generated", (q, r) => generatePayroll(hrViewer(r), String(q.params.month))));
+app.put("/api/admin/hr/payroll/:month/:email", ...hr, hrRoute("hr_payroll_adjusted", (q, r) => adjustPayroll(hrViewer(r), String(q.params.month), String(q.params.email), q.body ?? {})));
+app.post("/api/admin/hr/payroll/:month/pay", ...hr, hrRoute("hr_payroll_paid", (q, r) => payPayroll(hrViewer(r), String(q.params.month))));
+app.post("/api/admin/hr/holidays", ...hr, hrRoute("hr_holiday_added", (q, r) => addHoliday(hrViewer(r), q.body ?? {}), 201));
+app.delete("/api/admin/hr/holidays/:day", ...hr, hrRoute("hr_holiday_removed", (q, r) => removeHoliday(hrViewer(r), String(q.params.day))));
+app.put("/api/admin/hr/policy/:id", ...hr, hrRoute("hr_policy_updated", (q, r) => updatePolicy(hrViewer(r), String(q.params.id), q.body ?? {})));
+app.post("/api/admin/hr/announcements", ...hr, hrRoute("hr_announcement_posted", (q, r) => postAnnouncement(hrViewer(r), q.body ?? {}), 201));
+app.delete("/api/admin/hr/announcements/:id", ...hr, hrRoute("hr_announcement_removed", (q, r) => removeAnnouncement(hrViewer(r), String(q.params.id))));
 app.get("/api/admin/crm/pipeline", requireAdmin, requireAdminRoles(...CRM_CUSTOMER_ROLES), async (_request, response) => {
     try {
         response.json({ stages: CRM_STAGES, counts: await getCrmPipeline() });
@@ -1577,6 +1779,52 @@ app.get("/api/admin/crm/my-tasks/stream", requireAdmin, requireAdminRoles("agent
     const email = sessionAdminId(response).toLowerCase();
     streamAdminSnapshots(request, response, () => listMyCrmVerificationTasks(email), (event) => event.target_email === email &&
         ["verification_assigned", "verification_reviewed"].includes(event.event));
+});
+app.get("/api/admin/crm/my-tasks/:taskId", requireAdmin, requireAdminRoles("agent"), async (request, response) => {
+    const taskId = Number(request.params.taskId);
+    if (!Number.isSafeInteger(taskId) || taskId < 1) {
+        response.status(400).json({ message: "Choose a valid verification task." });
+        return;
+    }
+    try {
+        const detail = await getMyCrmVerificationTask(taskId, sessionAdminId(response));
+        if (!detail) {
+            response.status(404).json({ message: "Assigned verification task not found." });
+            return;
+        }
+        response.json(detail);
+    }
+    catch (error) {
+        console.error("Agent verification detail failed", error);
+        response.status(500).json({ message: "Unable to load the customer details." });
+    }
+});
+app.post("/api/admin/crm/tasks/:taskId/comments", requireAdmin, requireAdminRoles("agent"), async (request, response) => {
+    const taskId = Number(request.params.taskId);
+    const comment = String(request.body.comment || "").trim();
+    if (!Number.isSafeInteger(taskId) || taskId < 1 || comment.length < 2 || comment.length > 1000) {
+        response.status(400).json({ message: "Enter a comment between 2 and 1,000 characters." });
+        return;
+    }
+    try {
+        const result = await addMyCrmVerificationComment({
+            taskId, agentEmail: sessionAdminId(response), comment,
+        });
+        if (!result) {
+            response.status(404).json({ message: "Assigned verification task not found." });
+            return;
+        }
+        auditAdmin(request, response, "crm.verification.comment", { type: "task", id: String(taskId) });
+        response.status(201).json({ ok: true });
+    }
+    catch (error) {
+        if (crmApplicationConflict(error)) {
+            response.status(409).json({ message: error instanceof Error ? error.message : "This task cannot be commented on." });
+            return;
+        }
+        console.error("Agent verification comment failed", error);
+        response.status(500).json({ message: "Unable to save the comment." });
+    }
 });
 app.post("/api/admin/crm/tasks/:taskId/start", requireAdmin, requireAdminRoles("agent"), async (request, response) => {
     const taskId = Number(request.params.taskId);
@@ -2278,7 +2526,7 @@ app.post("/api/admin/logout", requireAdmin, async (request, response) => {
     }
     response.json({ ok: true });
 });
-app.post("/api/admin/reports", requireAdmin, requireAdminRoles("owner", "manager"), async (request, response) => {
+app.post("/api/admin/reports", requireAdmin, requireAdminRoles("owner", "manager", "agent"), requireBureauAccess, async (request, response) => {
     const bureau = request.body.bureau;
     if (!isBureau(bureau)) {
         response.status(400).json({ message: "Choose a valid credit bureau." });
@@ -2383,7 +2631,7 @@ const sendReportFile = async (response, record, savePdf) => {
         "Cache-Control": "private, no-store",
     }).send(pdf);
 };
-app.get("/api/admin/reports/:auditId/pdf", requireAdmin, requireAdminRoles("owner", "manager"), async (request, response) => {
+app.get("/api/admin/reports/:auditId/pdf", requireAdmin, requireAdminRoles("owner", "manager", "agent"), requireBureauAccess, async (request, response) => {
     const auditId = Number(request.params.auditId);
     if (!Number.isSafeInteger(auditId) || auditId < 1) {
         response.status(400).json({ message: "Choose a valid admin report." });
@@ -2401,6 +2649,115 @@ app.get("/api/admin/reports/:auditId/pdf", requireAdmin, requireAdminRoles("owne
         console.error("Admin report PDF generation failed", error);
         response.status(500).json({ message: "Unable to generate this report PDF." });
     }
+});
+app.post("/api/admin/reports/:auditId/share", requireAdmin, requireAdminRoles("owner", "manager", "agent"), requireBureauAccess, async (request, response) => {
+    const auditId = Number(request.params.auditId);
+    if (!Number.isSafeInteger(auditId) || auditId < 1) {
+        response.status(400).json({ message: "Choose a valid admin report." });
+        return;
+    }
+    try {
+        const result = await shareAdminReportWithCustomer(auditId, sessionAdminId(response));
+        auditAdmin(request, response, "bureau_report_shared", { type: "customer", id: result.userId, details: { auditId, loginCreated: result.loginCreated } });
+        response.json({
+            ...result,
+            defaultPassword: result.loginCreated ? DEFAULT_CUSTOMER_PASSWORD : undefined,
+            message: result.loginCreated
+                ? `Shared. Customer login created for ${result.loginEmail} with password ${DEFAULT_CUSTOMER_PASSWORD}. They must set a new password on first sign-in.`
+                : "Shared. The report now appears in the customer's dashboard.",
+        });
+    }
+    catch (error) {
+        if (error instanceof CustomerShareError) {
+            response.status(409).json({ message: error.message });
+            return;
+        }
+        console.error("Bureau report share failed", error);
+        response.status(500).json({ message: "Unable to share this report." });
+    }
+});
+app.post("/api/admin/crm/applications/:userId/share", requireAdmin, requireAdminRoles("owner", "manager", "partner"), async (request, response) => {
+    const userId = String(request.params.userId);
+    if (!/^[0-9a-f-]{36}$/i.test(userId)) {
+        response.status(400).json({ message: "Choose a valid customer." });
+        return;
+    }
+    try {
+        const role = sessionAdminRole(response);
+        const result = await shareCustomerProgress(userId, sessionAdminId(response), role === "partner" ? sessionAdminId(response) : null);
+        auditAdmin(request, response, "customer_progress_shared", { type: "customer", id: userId, details: result });
+        response.json({
+            ...result,
+            message: result.reportsShared
+                ? `Progress shared along with ${result.reportsShared} bureau report${result.reportsShared === 1 ? "" : "s"}.`
+                : "Progress shared. The customer can now follow it in their dashboard.",
+        });
+    }
+    catch (error) {
+        if (error instanceof CustomerShareError) {
+            response.status(409).json({ message: error.message });
+            return;
+        }
+        console.error("Customer progress share failed", error);
+        response.status(500).json({ message: "Unable to share this customer's progress." });
+    }
+});
+app.get("/api/admin/agent-types", requireAdmin, requireAdminRoles("owner", "manager"), async (_request, response) => {
+    try {
+        const [types, agents] = await Promise.all([listAgentTypes(), listAgentsWithTypes()]);
+        response.json({ types, agents });
+    }
+    catch (error) {
+        console.error("Agent types load failed", error);
+        response.status(500).json({ message: "Unable to load agent types." });
+    }
+});
+app.post("/api/admin/agent-types", requireAdmin, requireAdminRoles("owner"), async (request, response) => {
+    const label = String(request.body.label || "").trim();
+    if (label.length < 2 || label.length > 60) {
+        response.status(400).json({ message: "Enter an agent type name of 2–60 characters." });
+        return;
+    }
+    try {
+        const key = await createAgentType(label, request.body.canCheckBureau === true);
+        auditAdmin(request, response, "agent_type_created", { type: "agent_type", id: key, details: { label } });
+        response.status(201).json({ key });
+    }
+    catch (error) {
+        console.error("Agent type create failed", error);
+        response.status(500).json({ message: "Unable to add this agent type." });
+    }
+});
+app.patch("/api/admin/agent-types/:key", requireAdmin, requireAdminRoles("owner"), async (request, response) => {
+    const label = request.body.label === undefined ? undefined : String(request.body.label).trim();
+    if (label !== undefined && (label.length < 2 || label.length > 60)) {
+        response.status(400).json({ message: "Enter an agent type name of 2–60 characters." });
+        return;
+    }
+    const canCheckBureau = typeof request.body.canCheckBureau === "boolean" ? request.body.canCheckBureau : undefined;
+    if (!(await updateAgentType(String(request.params.key), { label, canCheckBureau }))) {
+        response.status(404).json({ message: "Agent type not found." });
+        return;
+    }
+    auditAdmin(request, response, "agent_type_updated", { type: "agent_type", id: String(request.params.key), details: { label, canCheckBureau } });
+    response.json({ ok: true });
+});
+app.delete("/api/admin/agent-types/:key", requireAdmin, requireAdminRoles("owner"), async (request, response) => {
+    if (!(await deleteAgentType(String(request.params.key)))) {
+        response.status(404).json({ message: "Only custom agent types can be removed." });
+        return;
+    }
+    auditAdmin(request, response, "agent_type_deleted", { type: "agent_type", id: String(request.params.key) });
+    response.json({ ok: true });
+});
+app.patch("/api/admin/agents/:email/type", requireAdmin, requireAdminRoles("owner", "manager"), async (request, response) => {
+    const agentType = request.body.agentType ? String(request.body.agentType) : null;
+    if (!(await setAgentType(String(request.params.email), agentType))) {
+        response.status(404).json({ message: "Agent or agent type not found." });
+        return;
+    }
+    auditAdmin(request, response, "agent_type_assigned", { type: "admin", id: String(request.params.email), details: { agentType } });
+    response.json({ ok: true });
 });
 app.get("/api/admin/customer-reports/:requestId/pdf", requireAdmin, requireAdminRoles("owner", "manager"), async (request, response) => {
     const requestId = String(request.params.requestId);
@@ -2664,6 +3021,62 @@ app.post("/api/auth/logout", async (request, response) => {
 // Lets the browser confirm a stored session is still valid (401 once it has expired or been revoked).
 app.get("/api/auth/session", requireUser, (_request, response) => {
     response.json({ user: sessionUser(response) });
+});
+app.post("/api/auth/password/change", requireUser, async (request, response) => {
+    const newPassword = String(request.body.newPassword || "");
+    const currentPassword = request.body.currentPassword ? String(request.body.currentPassword) : null;
+    if (newPassword.length < 8 || newPassword.length > 128 || !/[A-Za-z]/.test(newPassword) || !/\d/.test(newPassword)) {
+        response.status(400).json({ message: "Use at least 8 characters with letters and numbers." });
+        return;
+    }
+    if (newPassword === DEFAULT_CUSTOMER_PASSWORD) {
+        response.status(400).json({ message: "Choose a password different from the temporary one." });
+        return;
+    }
+    try {
+        const result = await changeCustomerPassword(sessionUser(response).id, newPassword, currentPassword);
+        if (result === "wrong_password") {
+            response.status(401).json({ message: "Your current password is incorrect." });
+            return;
+        }
+        if (result !== "ok") {
+            response.status(404).json({ message: "Account not found." });
+            return;
+        }
+        response.json({ message: "Password updated." });
+    }
+    catch (error) {
+        console.error("Customer password change failed", error);
+        response.status(500).json({ message: "Unable to update your password." });
+    }
+});
+app.get("/api/shared", requireUser, async (_request, response) => {
+    try {
+        response.json(await getCustomerSharedItems(sessionUser(response).id));
+    }
+    catch (error) {
+        console.error("Shared items load failed", error);
+        response.status(500).json({ message: "Unable to load shared updates." });
+    }
+});
+app.get("/api/shared/reports/:auditId/pdf", requireUser, async (request, response) => {
+    const auditId = Number(request.params.auditId);
+    if (!Number.isSafeInteger(auditId) || auditId < 1) {
+        response.status(400).json({ message: "Choose a valid report." });
+        return;
+    }
+    try {
+        const record = await getSharedReportForCustomer(sessionUser(response).id, auditId);
+        if (!record) {
+            response.status(404).json({ message: "Shared report not found." });
+            return;
+        }
+        await sendReportFile(response, record, (pdf, pdfSource) => saveAdminReportDocument(auditId, { pdf, html: null, pdfSource }));
+    }
+    catch (error) {
+        console.error("Shared report download failed", error);
+        response.status(500).json({ message: "Unable to download this report." });
+    }
 });
 app.get("/api/dashboard", requireUser, async (_request, response) => {
     try {
@@ -3742,6 +4155,28 @@ app.delete("/api/admin/site-content/:key", requireAdmin, requireAdminRoles("owne
 const startServer = async () => {
     try {
         await initializeDatabase();
+        await initializeLeads();
+        await initializeHr();
+        setHrMailer(async (to, subject, text) => {
+            const transport = createMailTransport();
+            if (!transport)
+                return false;
+            await transport.sendMail({ from: process.env.SMTP_FROM || process.env.SMTP_USER || "Scorenow <no-reply@scorenow.in>", to, subject, text });
+            return true;
+        });
+        setLeadMailer(async (to, subject, text) => {
+            const transport = createMailTransport();
+            if (!transport)
+                return false;
+            await transport.sendMail({ from: process.env.SMTP_FROM || process.env.SMTP_USER || "Scorenow <no-reply@scorenow.in>", to, subject, text });
+            return true;
+        });
+        const escalate = () => runLeadEscalation()
+            .then((moved) => { if (moved)
+            console.log(`Lead desk: ${moved} dispute case(s) moved up automatically.`); })
+            .catch((error) => console.error("Lead dispute escalation failed", error));
+        void escalate();
+        setInterval(escalate, 60 * 60 * 1000).unref();
         app.listen(port, (error) => {
             if (error) {
                 console.error(`Unable to start Scorenow API on port ${port}`, error);

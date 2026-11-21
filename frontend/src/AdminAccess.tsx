@@ -1,4 +1,5 @@
 import { useEffect, useState, type FormEvent } from 'react'
+import { BrandLoader } from './BrandLoader'
 import { apiUrl } from './siteContent'
 import { roleLabel } from './adminAccessShared'
 
@@ -238,7 +239,7 @@ export function PartnerAgentsPanel({ token, refreshKey }: { token: string; refre
   }
 
   const heading = <div className="admin-heading"><span>PARTNER TEAM</span><h1>My agents</h1><p>Manage your agents, see how they are performing, and decide which agent handles each of your customers.</p></div>
-  if (!data) return <>{heading}{error ? <p className="dashboard-notice error" role="alert">{error}</p> : <p className="admin-activity-empty">Loading…</p>}</>
+  if (!data) return <>{heading}{error ? <p className="dashboard-notice error" role="alert">{error}</p> : <BrandLoader label="Loading…" />}</>
 
   return <>
     {heading}
@@ -383,7 +384,7 @@ export function FollowUpsPanel({ token, refreshKey, role }: { token: string; ref
 
     <article className="dashboard-card admin-activity-card">
       <div className="dashboard-card-heading"><strong>Interaction history</strong><small>{interactions?.length ?? 0} records</small></div>
-      {interactions === null ? <p className="admin-activity-empty">Loading…</p> : interactions.length ? <div className="admin-table-wrap"><table className="admin-activity-table">
+      {interactions === null ? <BrandLoader label="Loading…" /> : interactions.length ? <div className="admin-table-wrap"><table className="admin-activity-table">
         <thead><tr><th>When</th><th>Customer</th><th>Channel</th><th>Outcome</th><th>Notes</th>{role === 'partner' && <th>By</th>}</tr></thead>
         <tbody>{interactions.map((item) => <tr key={item.id}>
           <td>{formatDate(item.created_at)}</td>

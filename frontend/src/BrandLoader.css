@@ -1,0 +1,88 @@
+.brand-loader {
+  position: fixed;
+  inset: 0;
+  z-index: 150;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  background: rgba(243, 246, 252, .55);
+  backdrop-filter: blur(3px);
+  animation: brand-loader-fade .2s ease-out;
+}
+.brand-loader-box {
+  display: grid;
+  justify-items: center;
+  gap: 10px;
+  color: #10213f;
+  text-align: center;
+}
+.brand-loader-ring {
+  position: relative;
+  width: 76px;
+  height: 76px;
+  border-radius: 50%;
+  background: radial-gradient(circle, #e4eaf5 58%, #d8e1ef 59%, #e9eef7 72%);
+  box-shadow: 0 10px 26px rgba(37, 99, 235, .14);
+}
+.brand-loader-arc,
+.brand-loader-orbit {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+}
+/* Blue gradient arc drawn with a conic gradient masked to a ring. */
+.brand-loader-arc {
+  background: conic-gradient(from 0deg, rgba(37, 99, 235, 0) 0deg, rgba(96, 165, 250, .35) 120deg, #1d6ff2 290deg, #1458d6 300deg, rgba(37, 99, 235, 0) 301deg);
+  -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 5px), #000 calc(100% - 4px));
+  mask: radial-gradient(farthest-side, transparent calc(100% - 5px), #000 calc(100% - 4px));
+  animation: brand-loader-spin 1.4s linear infinite;
+}
+.brand-loader-orbit { animation: brand-loader-spin 2.6s linear infinite reverse; }
+.brand-loader-orbit i {
+  position: absolute;
+  top: 26%;
+  left: 3%;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #f2b51d;
+  box-shadow: 0 0 8px rgba(242, 181, 29, .6);
+}
+.brand-loader-core {
+  position: absolute;
+  inset: 15%;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 4px 12px rgba(15, 23, 42, .08);
+}
+.brand-loader-core img {
+  width: 58%;
+  height: 58%;
+  object-fit: contain;
+  animation: brand-loader-pulse 1.8s ease-in-out infinite;
+}
+.brand-loader strong { font-size: 15px; font-weight: 700; }
+.brand-loader-dots { display: flex; gap: 6px; }
+.brand-loader-dots i {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #94a8d4;
+  animation: brand-loader-bounce 1.2s ease-in-out infinite;
+}
+.brand-loader-dots i:nth-child(2) { animation-delay: .15s; }
+.brand-loader-dots i:nth-child(3) { animation-delay: .3s; background: #f3cd6b; }
+
+@keyframes brand-loader-fade { from { opacity: 0; } }
+@keyframes brand-loader-spin { to { transform: rotate(360deg); } }
+@keyframes brand-loader-pulse { 50% { transform: scale(1.06); } }
+@keyframes brand-loader-bounce {
+  0%, 60%, 100% { transform: translateY(0); opacity: .75; }
+  30% { transform: translateY(-5px); opacity: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .brand-loader-arc, .brand-loader-orbit, .brand-loader-core img, .brand-loader-dots i { animation-duration: 6s; }
+}
